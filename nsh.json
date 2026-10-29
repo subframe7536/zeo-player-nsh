@@ -1,0 +1,11 @@
+{
+  "name": "Zeo",
+  "id": "dev.subf.zeo",
+  "version": "0.2.0",
+  "build": 2,
+  "rust": ".",
+  "root": "App",
+  "theme": "theme.json",
+  "appearance": "system",
+  "icon": "icon.png"
+}

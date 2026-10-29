@@ -1,0 +1,86 @@
+# Zeo · NSH 桌面音乐播放器
+
+本地优先的桌面音乐播放器，纯 Rust 的 [Native Shell（NSH）](https://nsh.dev) 应用：界面、状态与引擎都编译为原生代码，不带 JavaScript 运行时。设计与算法依据见 [plan.md](./plan.md)。
+
+支持格式：MP3、FLAC、WAV（Opus / OGG 暂缓）。
+
+## 功能
+
+- **曲库**
+  - 多个根文件夹（持久化到 `~/Library/Application Support/Zeo/library.json`）。
+  - 用系统文件夹选择器或拖入添加文件夹；扫描时显示实时进度（已读 / 总数、当前文件），可「扫描更新」或「重建曲库」（清空标签与封面缓存后重读）。
+  - 文件夹监视（可开关）：增删改名音频文件后，变化停止 1.5 秒自动重扫；文件按 修改时间 + 大小 + inode + ctime 识别，内容一变就重读。
+  - 流派标签分隔符可自定义（多个分隔符，修改后立即重新拆分，不必重扫），带预览。
+- **四个视图**（列表虚拟化，大库不卡）
+  - 文件夹：顶层列出所有根文件夹，逐级进入；列包括封面、标题 / 歌手、专辑、文件大小、时长，文件夹行显示总大小与总时长；窗口变窄时依次收起专辑、大小、序号列。
+  - 歌手、专辑（封面网格）、标签（流派）。
+  - 封面在后台生成 400 px JPEG 缩略图并缓存到 `~/Library/Caches/Zeo/covers`。
+- **播放**：symphonia 解码 → 声道转换 → rubato 重采样 → cpal 输出；精确 seek；队列上一首 / 下一首；playwire 接入系统 Now Playing、媒体键与锁屏控制。
+- **全屏播放**
+  - 模糊封面作背景；左列封面、曲名与「⋯」菜单（在访达中显示、拷贝路径）、歌手 / 专辑、质量与流派标签。
+  - 56 根波形进度：按 ap-spec `createWaveformGenerator` 计算（第一声道约 2000 块 RMS，以 95 分位为参考峰值，映射到 0.1–0.9）；播放头所在的那根只亮到播放头；可点击或拖动 seek。
+  - 行级歌词（外置同名 `.lrc` 优先，其次内嵌）：自动滚动、手动滚动后 3 秒恢复跟随、点击行 seek、按距离变暗变模糊、翻译行；悬停时文字有高亮，行最右侧浮出时间戳。
+  - 键盘：Space 播放 / 暂停，← → 快退 / 快进 5 秒，↑ ↓ 音量，Esc 收起。
+- **LRC 解析**：多时间戳、卡拉 OK 碎片清理、元数据头合并、翻译行、短空行跳过、连续空行合并、无时间戳回退。
+
+## 结构
+
+```
+nsh.json           应用配置："rust": "."、"root": "App"、"theme": "theme.json"
+theme.json         主题（shadcn cssVars 格式，浅色 / 深色）
+src/lib.rs         crate 入口，导出根组件 App
+src/ui/            界面：mod（外壳、侧栏）、store（信号与命令）、views（四视图与设置）、
+                   bar（底部播放条）、full（全屏播放与歌词）、parts、icons、theme
+src/engine.rs      引擎门面：Player / Library / Meta
+src/audio.rs       解码线程与 cpal 输出        src/codec.rs     symphonia 封装
+src/library.rs     曲库、扫描进度、流派拆分    src/watcher.rs   文件夹监视（notify / FSEvents）
+src/metadata.rs    lofty 标签与缓存            src/covers.rs    封面缩略图
+src/lyrics.rs      LRC 解析                    src/waveform.rs  波形
+src/media.rs       playwire 系统媒体会话        src/e2e.rs       端到端测试
+App.test.tsx       nsh test 的界面测试（无头打开 Rust 根组件）
+```
+
+## 工具链
+
+按 [nsh.dev 的安装说明](https://nsh.dev/docs/installation)：
+
+```sh
+curl -fsSL https://nsh.dev/install.sh | sh     # 安装到 ~/.nsh，链接 ~/.local/bin/nsh
+nsh --version                                   # nsh 0.3.0
+```
+
+另需 Rust（[rustup](https://rustup.rs)）和 Xcode 命令行工具。`Cargo.toml` 中 `nsh-core` / `nsh-base` 的版本须与 CLI 一致（当前 `0.3.0`），升级 CLI 时一起改。
+
+## 开发
+
+```sh
+nsh run .                          # macOS AppKit 窗口；改 Rust 代码会重建并重启
+nsh check .                        # cargo 检查与类型检查
+nsh test .                         # Rust 单元测试 + App.test.tsx 界面测试
+nsh package . --target macos       # 生成 .nsh/out/Zeo.app
+```
+
+需要真实曲库或文件系统的测试默认跳过，请分别运行（它们共享全局曲库状态，不要一起跑）：
+
+```sh
+cargo test --release -- --ignored scan_reports_progress   # ~/Music 扫描进度与重建
+cargo test --release -- --ignored watcher_rescans         # 文件夹监视：增、改、删、关闭
+cargo test --release -- --ignored real_track_waveform --nocapture
+```
+
+`src/e2e.rs` 的播放端到端测试需要 `/tmp/zeo-test-music` 测试语料，没有时跳过。
+
+## 打包分发
+
+`nsh package . --target macos` 生成 `.nsh/out/Zeo.app`（arm64，id `dev.subf.zeo`，版本见 `nsh.json`），为 ad-hoc 签名，本机可直接打开。分发给其它 Mac 需用自己的证书重签并公证：
+
+```sh
+codesign --force --deep --sign "Developer ID Application: YOUR NAME (TEAMID)" .nsh/out/Zeo.app
+xcrun notarytool submit Zeo.zip --apple-id … --team-id … --password … && xcrun stapler staple Zeo.app
+```
+
+## 暂缓
+
+- Opus / OGG Vorbis（symphonia 0.6 无 Opus 解码）。
+- 逐字歌词、空行省略号脉冲动画。
+- 扫描时全部内嵌封面原图常驻内存（约每首 170 KB），大曲库内存偏高。
