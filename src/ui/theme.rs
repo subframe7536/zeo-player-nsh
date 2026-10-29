@@ -68,3 +68,15 @@ pub fn white_a(alpha: f32) -> AdaptiveColor {
 pub fn black_a(alpha: f32) -> AdaptiveColor {
     AdaptiveColor::rgb(0x000000, 0x000000).opacity(alpha)
 }
+
+/// 页面顶部留给标题栏的高度：macOS 交通灯居中在 [`TITLE_BAR`] 里；Windows
+/// 的标题栏按钮在右上角，高度由系统报告。读取即订阅（进出全屏时变化）。
+pub fn top_inset() -> f32 {
+    let bar = nsh_core::element::desktop::title_bar();
+    bar.top.0.max(TITLE_BAR)
+}
+
+/// 右上角被系统窗口按钮占去的宽度（Windows 约 138 pt；macOS 为 0）。
+pub fn controls_right() -> f32 {
+    nsh_core::element::desktop::title_bar().right.0
+}

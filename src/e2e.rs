@@ -77,10 +77,13 @@ fn end_to_end_playback() {
     // 4. 波形：56 根、归一化
     let bars = waveform(&root.join("sine.wav")).expect("waveform");
     assert_eq!(bars.len(), crate::waveform::BARS);
-    // 正弦波音量恒定：RMS 处处等于 95 分位参考值 → 全部顶到上限 0.9。
+    // 音量恒定的正弦波：波形平、且偏高。2 秒只有约 2000 块、每块约 44 个
+    // 样本，不到 440 Hz 的一个周期，块 RMS 随相位起伏；95 分位取到偏高的块，
+    // 每根再平均约 40 块，于是稳定在 0.8 多一点而不是 0.9（参考实现同样如此）。
     assert!(bars.iter().all(|b| (0.1..=0.9 + 1e-9).contains(b)), "{bars:?}");
-    let max = bars.iter().cloned().fold(0.0, f64::max);
-    assert!((max - 0.9).abs() < 1e-6, "最高为 0.9，实际 {max}");
+    let body = &bars[..bars.len() - 1]; // 最后一根可能落在不满的块上
+    let (lo, hi) = body.iter().fold((1.0_f64, 0.0_f64), |(lo, hi), b| (lo.min(*b), hi.max(*b)));
+    assert!(lo > 0.75 && hi - lo < 0.02, "平且高：{lo:.3}..{hi:.3}");
 
     // 5. 播放通路：mp3 打开 → 进度推进 → 暂停 → seek → 队列切曲 → flac seek
     let mp3 = root.join("quiet.mp3");

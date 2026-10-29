@@ -25,7 +25,7 @@ const ANCHOR: f32 = 0.34;
 /// 全屏播放页。`fade` 为 0→1 的开合进度；`on_close` 收起。
 pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
     let s = store();
-    let artwork = move || s.track.with(|t| t.artwork.clone());
+    let backdrop = move || s.track.with(|t| t.backdrop.clone());
 
     let close = on_close.clone();
     on_key("escape", move |_| close());
@@ -42,20 +42,22 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
         .inset(px(0.0))
         .bg(AdaptiveColor::rgb(0x2a2a2c, 0x2a2a2c))
         .child(
-            view().absolute().inset(px(0.0)).bind_opacity(&swap.backdrop).child(when(move || artwork().is_some(), move || {
-                image(move || artwork().unwrap_or_default())
+            // 背景图是预先模糊好的 64 px 小图（covers::backdrop），拉伸铺满：
+            // 解码后只有十几 KB，不在窗口尺寸上实时模糊。
+            view().absolute().inset(px(0.0)).bind_opacity(&swap.backdrop).child(when(move || backdrop().is_some(), move || {
+                image(move || backdrop().unwrap_or_default())
                     .absolute()
-                    .inset(px(-120.0))
+                    .inset(px(-40.0))
                     .resize_mode(ResizeMode::Cover)
-                    .blur_radius(px(100.0))
                     .opacity(0.9)
             })),
         )
         .child(view().absolute().inset(px(0.0)).bg(black_a(0.5)));
 
+    // 收起按钮在右上角，让开 Windows 的窗口按钮（它们占标题栏右侧）。
     let close_button = view()
         .absolute()
-        .top(px(14.0))
+        .top(move || px(if controls_right() > 0.0 { top_inset() + 8.0 } else { 14.0 }))
         .right(px(18.0))
         .size(px(32.0))
         .rounded_full()
@@ -84,7 +86,7 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
                 .child(view().flex_1().items_center().justify_center().px(px(32.0)).child(left_column(&swap)))
                 .child(view().flex_1().items_center().pl(px(16.0)).pr(px(28.0)).child(lyrics_column(&swap))),
         )
-        .child(view().absolute().top(px(0.0)).left(px(0.0)).right(px(0.0)).h(px(TITLE_BAR)).window_drag(true))
+        .child(view().absolute().top(px(0.0)).left(px(0.0)).right(px(0.0)).h(move || px(top_inset())).window_drag(true))
         .child(close_button)
 }
 
@@ -401,8 +403,13 @@ fn more_menu() -> AnyElement {
 fn reveal(path: &str) {
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    // explorer 自己解析 `/select,"路径"`：带空格的路径须原样加引号，不能经
+    // Rust 的参数转义。
     #[cfg(target_os = "windows")]
-    let _ = std::process::Command::new("explorer").arg(format!("/select,{path}")).spawn();
+    let _ = {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer").raw_arg(format!("/select,\"{path}\"")).spawn()
+    };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = std::process::Command::new("xdg-open")
         .arg(std::path::Path::new(path).parent().unwrap_or(std::path::Path::new("/")))
@@ -802,14 +809,12 @@ mod tests {
 
     fn meta() -> MetaInfo {
         MetaInfo {
-            path: String::new(),
             title: String::new(),
             artist: String::new(),
             album: String::new(),
             album_artist: String::new(),
             duration: 0.0,
-            artwork: None,
-            artwork_mime: None,
+            has_art: false,
             lyrics: None,
             bit_rate: Some(160),
             bit_depth: None,

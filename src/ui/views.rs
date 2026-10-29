@@ -86,7 +86,7 @@ fn hero(
 ) -> View {
     view()
         .px(px(32.0))
-        .pt(px(TITLE_BAR - 8.0))
+        .pt(move || px(top_inset() - 8.0))
         .pb(px(20.0))
         .gap(px(16.0))
         .window_drag(true)
@@ -201,24 +201,40 @@ impl Folder {
     }
 }
 
+/// 路径分隔符：曲库路径来自文件系统，Windows 上是 `\\`。
+pub(crate) const SEP: char = std::path::MAIN_SEPARATOR;
+
+/// 路径最后一段（文件夹名）；`C:\\` 这样的盘符根本身即名字。
+pub(crate) fn last_segment(path: &str) -> &str {
+    path.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or(path)
+}
+
 fn build_tree(roots: &[String], tracks: &[TrackEntry]) -> Vec<Folder> {
+    build_tree_with(roots, tracks, SEP)
+}
+
+fn build_tree_with(roots: &[String], tracks: &[TrackEntry], sep: char) -> Vec<Folder> {
     let mut nodes: Vec<Folder> = roots
         .iter()
         .map(|root| Folder {
             path: root.clone(),
-            name: root.rsplit('/').find(|s| !s.is_empty()).unwrap_or(root).to_owned(),
+            name: last_segment(root).to_owned(),
             ..Folder::default()
         })
         .collect();
     for (index, track) in tracks.iter().enumerate() {
-        let Some(node) = nodes.iter_mut().find(|n| track.path.starts_with(&format!("{}/", n.path))) else {
+        // 根可能以分隔符结尾（`C:\\`）。
+        let Some(node) = nodes.iter_mut().find(|n| {
+            let root = n.path.trim_end_matches(sep);
+            track.path.starts_with(root) && track.path[root.len()..].starts_with(sep)
+        }) else {
             continue;
         };
-        let rest = &track.path[node.path.len() + 1..];
-        let parts: Vec<&str> = rest.split('/').collect();
+        let rest = &track.path[node.path.trim_end_matches(sep).len() + 1..];
+        let parts: Vec<&str> = rest.split(sep).collect();
         let mut current = node;
         for part in &parts[..parts.len().saturating_sub(1)] {
-            let path = format!("{}/{}", current.path, part);
+            let path = format!("{}{sep}{}", current.path.trim_end_matches(sep), part);
             current = current.children.entry(compare_key(part)).or_insert_with(|| Folder {
                 path,
                 name: (*part).to_owned(),
@@ -285,6 +301,10 @@ fn folder_row(node: &Folder, root: bool) -> FolderRow {
 }
 
 fn place(tree: &[Folder], at: Option<&str>) -> Place {
+    place_with(tree, at, SEP)
+}
+
+fn place_with(tree: &[Folder], at: Option<&str>, sep: char) -> Place {
     let node = at.and_then(|p| tree.iter().find_map(|root| root.find(p)));
     let Some(node) = node else {
         let mut all = Vec::new();
@@ -304,13 +324,17 @@ fn place(tree: &[Folder], at: Option<&str>) -> Place {
             parent: None,
         };
     };
-    let root = tree.iter().find(|r| node.path == r.path || node.path.starts_with(&format!("{}/", r.path)));
+    let under = |r: &Folder| {
+        let root = r.path.trim_end_matches(sep);
+        node.path == r.path || (node.path.starts_with(root) && node.path[root.len()..].starts_with(sep))
+    };
+    let root = tree.iter().find(|r| under(r));
     let is_root = root.is_some_and(|r| r.path == node.path);
-    let parent = if is_root { Some(None) } else { node.path.rsplit_once('/').map(|(p, _)| Some(p.to_owned())) };
+    let parent = if is_root { Some(None) } else { node.path.rsplit_once(sep).map(|(p, _)| Some(p.to_owned())) };
     let trail = root
         .map(|r| {
-            let rest = node.path[r.path.len()..].trim_start_matches('/');
-            if rest.is_empty() { r.path.clone() } else { format!("{} / {}", r.name, rest.replace('/', " / ")) }
+            let rest = node.path[r.path.trim_end_matches(sep).len()..].trim_start_matches(sep);
+            if rest.is_empty() { r.path.clone() } else { format!("{} / {}", r.name, rest.replace(sep, " / ")) }
         })
         .unwrap_or_default();
     let mut rows: Vec<FolderRow> = node.children.values().map(|c| folder_row(c, false)).collect();
@@ -761,6 +785,9 @@ pub fn Albums() -> impl IntoElement {
                 .content_padding_x(px(20.0))
                 .content_padding_bottom(px(BAR_SPACE))
                 .flex_1();
+                let grid_ref = element_ref();
+                super::BENCH_GRID.with(|g| g.set(Some(grid_ref)));
+                let grid = grid.element_ref(&grid_ref);
                 view()
                     .flex_1()
                     .child(page_header(|| "专辑".into(), move || format!("{} 张专辑", count.get()), None, None))
@@ -858,8 +885,18 @@ pub fn Genres() -> impl IntoElement {
 
 // --- 设置 ---------------------------------------------------------------------
 
-/// file:// URL → 路径（百分号解码）。
+/// file:// URL → 路径（百分号解码）。Windows 的 `file:///C:/Music` 去掉
+/// 盘符前的 `/`，并换成 `\\`。
 fn url_to_path(uri: &str) -> String {
+    let path = decode_url_path(uri);
+    let bytes = path.as_bytes();
+    if bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
+        return path[1..].replace('/', "\\");
+    }
+    path
+}
+
+fn decode_url_path(uri: &str) -> String {
     let rest = uri.strip_prefix("file://").unwrap_or(uri);
     let rest = rest.strip_prefix("localhost").unwrap_or(rest);
     let bytes = rest.as_bytes();
@@ -883,7 +920,7 @@ fn url_to_path(uri: &str) -> String {
 
 /// 添加为根目录：目录直接加；文件取所在目录。
 fn add_as_root(path: &str) -> String {
-    let trimmed = path.trim().trim_end_matches('/');
+    let trimmed = path.trim().trim_end_matches(['/', '\\']);
     let lib = library_store();
     match lib.add_root(trimmed) {
         Ok(_) => {
@@ -964,7 +1001,7 @@ fn folders_card() -> View {
         roots
             .iter()
             .map(|r| {
-                let prefix = format!("{r}/");
+                let prefix = format!("{}{SEP}", r.trim_end_matches(SEP));
                 tracks.iter().filter(|t| t.path.starts_with(&prefix)).count()
             })
             .collect::<Vec<_>>()
@@ -998,7 +1035,7 @@ fn folders_card() -> View {
             .enumerate()
             .map(|(i, root)| {
                 let remove = root.clone();
-                let name = root.rsplit('/').find(|p| !p.is_empty()).unwrap_or(&root).to_owned();
+                let name = last_segment(&root).to_owned();
                 view()
                     .flex_row()
                     .items_center()
@@ -1633,6 +1670,9 @@ mod tests {
     fn file_urls_decode() {
         assert_eq!(url_to_path("file:///Users/me/My%20Music/"), "/Users/me/My Music/");
         assert_eq!(url_to_path("file:///tmp/%E9%9F%B3%E4%B9%90"), "/tmp/音乐");
+        assert_eq!(url_to_path("file:///C:/Users/me/My%20Music"), "C:\\Users\\me\\My Music");
+        assert_eq!(last_segment("C:\\Users\\me\\Music\\"), "Music");
+        assert_eq!(last_segment("/Users/me/Music"), "Music");
     }
 
     fn entry(path: &str) -> TrackEntry {
@@ -1670,6 +1710,19 @@ mod tests {
         let mut order = Vec::new();
         a.subtree(&mut order);
         assert_eq!(order, vec![1, 0]);
+    }
+
+    #[test]
+    fn windows_paths_build_the_same_tree() {
+        let tracks = vec![entry("C:\\m\\a\\1.mp3"), entry("C:\\m\\2.mp3"), entry("D:\\3.mp3")];
+        let tree = build_tree_with(&["C:\\m".into(), "D:\\".into()], &tracks, '\\');
+        // 根按名字排序：「D:」在「m」前。
+        assert_eq!(tree.iter().map(|r| (r.name.as_str(), r.total)).collect::<Vec<_>>(), vec![("D:", 1), ("m", 2)]);
+        let m = place_with(&tree, Some("C:\\m"), '\\');
+        assert!(matches!(&m.rows[0], FolderRow::Folder { name, path, .. } if name == "a" && path == "C:\\m\\a"));
+        let a = place_with(&tree, Some("C:\\m\\a"), '\\');
+        assert_eq!(a.parent, Some(Some("C:\\m".into())));
+        assert_eq!(a.trail, "m / a");
     }
 
     #[test]

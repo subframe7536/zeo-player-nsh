@@ -12,15 +12,13 @@ use lofty::tag::Tag;
 /// 完整元数据（ap-spec AudioMetadata + 库索引需要的字段）。
 #[derive(Debug, Clone)]
 pub struct MetaInfo {
-    pub path: String,
     pub title: String,
     pub artist: String,
     pub album: String,
     pub album_artist: String,
     pub duration: f64,
-    /// 内嵌封面（原始字节 + MIME）。
-    pub artwork: Option<Arc<Vec<u8>>>,
-    pub artwork_mime: Option<String>,
+    /// 是否有内嵌封面（字节不常驻内存：用 [`read_artwork`] 按需读取）。
+    pub has_art: bool,
     /// 内嵌歌词原文。
     pub lyrics: Option<String>,
     pub bit_rate: Option<u32>,
@@ -108,14 +106,12 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
         .unwrap_or_else(|| "Unknown".to_owned());
 
     let mut info = MetaInfo {
-        path: path.to_string_lossy().into_owned(),
         title: file_stem,
         artist: "Unknown Artist".to_owned(),
         album: "Unknown Album".to_owned(),
         album_artist: String::new(),
         duration: props.duration().as_secs_f64(),
-        artwork: None,
-        artwork_mime: None,
+        has_art: false,
         lyrics: None,
         bit_rate: props.overall_bitrate().or(props.audio_bitrate()),
         bit_depth: props.bit_depth().map(u32::from),
@@ -167,32 +163,38 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
         info.disk_total = disk_total;
         info.album_artists = strings(tag, ItemKey::AlbumArtist);
         info.composers = strings(tag, ItemKey::Composer);
-        if let Some(picture) = tag.pictures().first() {
-            info.artwork_mime = picture.mime_type().map(|m| m.as_str().to_owned());
-            info.artwork = Some(Arc::new(picture.data().to_vec()));
-        }
+        info.has_art = !tag.pictures().is_empty();
     }
 
     Ok(info)
 }
 
-/// `bytes` → `data:` URI（封面给 `<Image>` 直接显示）。
-pub fn data_uri(bytes: &[u8], mime: Option<&str>) -> String {
-    use base64::Engine;
-    let mime = mime.unwrap_or("image/jpeg");
-    let mime = if mime.is_empty() { "image/jpeg" } else { mime };
-    format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
+/// 按需读取内嵌封面（原始字节 + MIME）。不进缓存：用完即释放。
+pub fn read_artwork(path: &Path) -> Option<(Vec<u8>, Option<String>)> {
+    let tagged = lofty::read_from_path(path).ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    let picture = tag.pictures().first().or_else(|| tagged.tags().iter().flat_map(|t| t.pictures()).next())?;
+    Some((picture.data().to_vec(), picture.mime_type().map(|m| m.as_str().to_owned())))
 }
 
-/// 文件指纹：修改时间（纳秒）、大小、inode 与状态变更时间。复制时保留
-/// 修改时间的工具（Finder、`cp -p`）改不了 ctime，所以内容换了总能发现。
+
+/// 文件指纹：修改时间（纳秒）、大小，再加 Unix 的 inode 与 ctime 或
+/// Windows 的创建时间。复制时保留修改时间的工具（Finder、`cp -p`、
+/// 资源管理器）改不了 ctime / 新文件的创建时间，所以内容换了总能发现。
 pub fn file_stamp(meta: &std::fs::Metadata) -> u64 {
     let nanos = |t: std::io::Result<std::time::SystemTime>| {
         t.ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos() as u64)
     };
+    #[allow(unused_mut)]
     let mut parts = vec![nanos(meta.modified()), meta.len()];
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        parts.push(meta.creation_time());
+        parts.push(meta.last_write_time());
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;

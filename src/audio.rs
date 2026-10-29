@@ -13,7 +13,7 @@ use rubato::Resampler;
 
 use crate::codec::Source;
 use crate::media::MediaSession;
-use crate::metadata::{data_uri, MetaCache, MetaInfo};
+use crate::metadata::MetaCache;
 
 /// 环形缓冲上限（输出帧数，约 250ms @48k）。
 const RING_MAX_FRAMES: usize = 12_000;
@@ -39,6 +39,8 @@ pub struct TrackPublic {
     pub artist: String,
     pub album: String,
     pub artwork: Option<String>,
+    /// 全屏背景（预先模糊的小图）。
+    pub backdrop: Option<String>,
     pub duration: f64,
     pub queue: Vec<String>,
     pub queue_index: i64,
@@ -83,6 +85,8 @@ pub struct Snapshot {
     pub artist: String,
     pub album: String,
     pub artwork: Option<String>,
+    /// 全屏背景（预先模糊的小图）。
+    pub backdrop: Option<String>,
     pub queue: Vec<String>,
     pub queue_index: i64,
     pub error: Option<String>,
@@ -103,6 +107,7 @@ impl Shared {
             artist: track.artist.clone(),
             album: track.album.clone(),
             artwork: track.artwork.clone(),
+            backdrop: track.backdrop.clone(),
             queue: track.queue.clone(),
             queue_index: track.queue_index,
             error: track.error.clone(),
@@ -409,16 +414,26 @@ fn load_track(
                 t.title = meta.title.clone();
                 t.artist = meta.artist.clone();
                 t.album = meta.album.clone();
-                t.artwork = meta.artwork.as_ref().map(|bytes| data_uri(bytes, meta.artwork_mime.as_deref()));
+                // 封面在就绪后再生成（缩小的文件，不放原图字节）。
+                t.artwork = None;
+                t.backdrop = None;
                 t.duration = meta.duration;
                 t.queue = queue;
                 t.queue_index = actual_index;
                 t.error = None;
             }
             shared.ready.store(true, Ordering::Relaxed);
-            // 媒体会话封面：写临时文件（file:// 由 macOS 后台线程拉取）。
-            let artwork_file = write_cover_file(&path, &meta);
-            media.set_artwork_file(artwork_file);
+            // 封面：缩到 720 px 的 JPEG 缓存文件，界面与系统媒体会话共用。
+            let cover = crate::covers::large(&path).map(|p| p.to_string_lossy().into_owned());
+            let backdrop = crate::covers::backdrop(&path).map(|p| p.to_string_lossy().into_owned());
+            {
+                let mut t = shared.track.lock().unwrap();
+                if t.path.as_deref() == Some(&*path.to_string_lossy()) {
+                    t.artwork = cover.clone();
+                    t.backdrop = backdrop;
+                }
+            }
+            media.set_artwork_file(cover.map(|c| file_url(&c)));
             publish_media(shared, media, true);
         }
         Err(err) => set_error(shared, &err),
@@ -426,33 +441,10 @@ fn load_track(
     shared.loading.store(false, Ordering::Relaxed);
 }
 
-fn write_cover_file(path: &std::path::Path, meta: &MetaInfo) -> Option<String> {
-    let bytes = meta.artwork.as_ref()?;
-    let ext = match meta.artwork_mime.as_deref() {
-        Some("image/png") => "png",
-        _ => "jpg",
-    };
-    let dir = dirs::cache_dir().unwrap_or_else(|| std::env::temp_dir()).join("Zeo/covers");
-    std::fs::create_dir_all(&dir).ok()?;
-    let name = format!(
-        "{}-{}.{ext}",
-        path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
-        meta.modified_key()
-    );
-    let file = dir.join(name);
-    std::fs::write(&file, bytes.as_ref()).ok()?;
-    Some(format!("file://{}", file.to_string_lossy()))
-}
-
-impl MetaInfo {
-    fn modified_key(&self) -> u64 {
-        std::fs::metadata(&self.path)
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
-    }
+/// 本地路径 → `file://` URL（Windows 盘符路径同样处理）。
+fn file_url(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    if path.starts_with('/') { format!("file://{path}") } else { format!("file:///{path}") }
 }
 
 /// 清空环形缓冲并把位置基线设为 `seconds`。

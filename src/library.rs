@@ -185,7 +185,8 @@ impl LibraryStore {
 
     /// 新增音乐根目录（必须存在且为目录）；返回新的根列表。
     pub fn add_root(&self, path: &str) -> Result<Vec<String>, String> {
-        let canonical = std::fs::canonicalize(path).map_err(|e| format!("无法访问 {path}: {e}"))?;
+        // dunce：Windows 上不返回 `\\?\C:\…` 这种逐字路径，和扫描出的曲目路径一致。
+        let canonical = dunce::canonicalize(path).map_err(|e| format!("无法访问 {path}: {e}"))?;
         if !canonical.is_dir() {
             return Err(format!("{path} 不是目录"));
         }
@@ -372,7 +373,7 @@ fn read_entry(path: &Path, separators: &[String]) -> Option<TrackEntry> {
         bit_rate: meta.bit_rate,
         sample_rate: meta.sample_rate,
         channels: meta.channels,
-        has_art: meta.artwork.is_some(),
+        has_art: meta.has_art,
         size_bytes: file_meta.len(),
         modified,
         stamp: crate::metadata::file_stamp(&file_meta),

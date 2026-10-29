@@ -1,0 +1,6 @@
+# Zeo's patched NSH platform crates (smaller decoded-image cache): see vendor/README.md.
+# Cargo reads this for every build under this directory, including the
+# runners nsh generates in .nsh/rust.
+[patch.crates-io]
+nsh-platform-macos = { path = "vendor/nsh-platform-macos" }
+nsh-platform-windows = { path = "vendor/nsh-platform-windows" }

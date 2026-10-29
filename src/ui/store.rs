@@ -55,6 +55,7 @@ pub struct NowPlaying {
     pub artist: String,
     pub album: String,
     pub artwork: Option<SharedString>,
+    pub backdrop: Option<SharedString>,
     pub error: Option<String>,
     /// 在播放队列中的位置（判断切歌方向）。
     pub index: i64,
@@ -335,6 +336,7 @@ fn now_playing(snap: &crate::audio::Snapshot) -> NowPlaying {
         artist: snap.artist.clone(),
         album: snap.album.clone(),
         artwork: snap.artwork.clone().map(SharedString::from),
+        backdrop: snap.backdrop.clone().map(SharedString::from),
         error: snap.error.clone(),
         index: snap.queue_index,
     }
@@ -455,6 +457,9 @@ pub async fn pick_folders() -> Option<String> {
 /// 生成；每个曲目一个信号，生成后只有读它的绑定再运行。信号属于根组件，
 /// 列表单元格复用或销毁都不会丢掉进行中的请求。
 pub fn cover_of(path: &str) -> Option<SharedString> {
+    if std::env::var_os("ZEO_BENCH_NO_COVERS").is_some() {
+        return None;
+    }
     let hit = COVERS.with(|c| c.borrow().get(path).copied());
     let cover = match hit {
         Some(cover) => cover,

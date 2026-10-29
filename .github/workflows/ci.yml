@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: macos
+          - os: windows-latest
+            target: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            .nsh/rust
+
+      # QuickJS' bindings (the headless test runner) need libclang on Windows.
+      - name: LLVM (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\Program Files\LLVM\bin\libclang.dll")) { choco install llvm -y --no-progress }
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+
+      - name: Install nsh (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          curl -fsSL https://nsh.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install nsh (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://nsh.dev/install.ps1 | iex
+          "$env:LOCALAPPDATA\nsh\bin" >> $env:GITHUB_PATH
+
+      - name: Test corpus
+        if: runner.os == 'macOS'
+        run: |
+          brew install ffmpeg
+          sh scripts/make-test-music.sh
+
+      - run: nsh --version
+      - run: nsh check .
+      - run: nsh test .
+      - run: nsh package . --target ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Zeo-${{ matrix.target }}
+          path: .nsh/out/

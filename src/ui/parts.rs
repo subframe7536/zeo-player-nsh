@@ -143,7 +143,7 @@ pub fn page_header(
         .items_end()
         .gap(px(16.0))
         .px(px(32.0))
-        .pt(px(TITLE_BAR - 8.0))
+        .pt(move || px(top_inset() - 8.0))
         .pb(px(16.0))
         .window_drag(true)
         .child(

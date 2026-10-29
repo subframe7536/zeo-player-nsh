@@ -131,7 +131,21 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows：交给 DirectWrite 的进程内字体集合（vendor 里的
+/// `nsh_platform_windows::register_font`，见 vendor/README.md）。删除要
+/// 重启后生效。
+#[cfg(target_os = "windows")]
+mod platform {
+    use std::path::Path;
+
+    pub fn register(path: &Path) -> Result<(), String> {
+        let data = std::fs::read(path).map_err(|e| format!("无法读取 {}：{e}", path.display()))?;
+        nsh_platform_windows::register_font(&data).map_err(|e| format!("无法注册 {}：{e}", path.display()))
+    }
+    pub fn unregister(_path: &Path) {}
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod platform {
     use std::path::Path;
 

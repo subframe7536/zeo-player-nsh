@@ -10,6 +10,10 @@ use crate::metadata::MetaCache;
 
 /// 缩略图边长（像素；列表最大 200 pt，2× 屏）。
 pub const THUMB: u32 = 400;
+/// 当前曲目的大封面边长（全屏页 326 pt，2× 屏）。
+pub const LARGE: u32 = 720;
+/// 背景图边长。
+pub const BACKDROP: u32 = 64;
 const WORKERS: usize = 3;
 
 struct Pool {
@@ -67,23 +71,56 @@ fn fnv(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ *b as u64).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
-/// `path` 的封面缩略图文件（已缓存则直接返回）；没有封面为 `None`。
+/// `path` 的封面缩略图文件（[`THUMB`] 像素）；没有封面为 `None`。
 pub fn thumbnail(path: &Path) -> Option<PathBuf> {
-    let meta = std::fs::metadata(path).ok()?;
-    let key = format!("{}|{}", path.display(), crate::metadata::file_stamp(&meta));
-    let dir = cache_dir();
-    let out = dir.join(format!("{:016x}-{THUMB}.jpg", fnv(key.as_bytes())));
+    cover_file(path, THUMB)
+}
+
+/// 全屏页与系统媒体会话用的大封面（[`LARGE`] 像素）。
+pub fn large(path: &Path) -> Option<PathBuf> {
+    cover_file(path, LARGE)
+}
+
+/// 全屏页的背景：封面缩到 [`BACKDROP`] 像素并在这里高斯模糊好。系统解码
+/// 不会放大图片，所以它在内存里也只有几十 KB，由图层拉伸铺满窗口；
+/// 不必在窗口尺寸上实时模糊（那要几十 MB）。
+pub fn backdrop(path: &Path) -> Option<PathBuf> {
+    let key = cache_key(path)?;
+    let out = cache_dir().join(format!("{key:016x}-bg{BACKDROP}.jpg"));
     if out.is_file() {
         return Some(out);
     }
-    let info = MetaCache::global().get(path).ok()?;
-    let bytes = info.artwork.as_ref()?;
+    let small = image::open(cover_file(path, THUMB)?).ok()?;
+    let img = small.resize_to_fill(BACKDROP, BACKDROP, image::imageops::FilterType::Triangle).blur(BACKDROP as f32 / 10.0);
+    let tmp = out.with_extension("tmp");
+    img.to_rgb8().save_with_format(&tmp, image::ImageFormat::Jpeg).ok()?;
+    std::fs::rename(&tmp, &out).ok()?;
+    Some(out)
+}
+
+fn cache_key(path: &Path) -> Option<u64> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some(fnv(format!("{}|{}", path.display(), crate::metadata::file_stamp(&meta)).as_bytes()))
+}
+
+/// `path` 的封面缩到 `side` 像素以内、存为 JPEG（已缓存则直接返回）。
+fn cover_file(path: &Path, side: u32) -> Option<PathBuf> {
+    let key = cache_key(path)?;
+    let dir = cache_dir();
+    let out = dir.join(format!("{key:016x}-{side}.jpg"));
+    if out.is_file() {
+        return Some(out);
+    }
+    if !MetaCache::global().get(path).ok()?.has_art {
+        return None;
+    }
+    let (bytes, _) = crate::metadata::read_artwork(path)?;
     std::fs::create_dir_all(&dir).ok()?;
     let tmp = out.with_extension("tmp");
-    match image::load_from_memory(bytes) {
+    match image::load_from_memory(&bytes) {
         Ok(img) => {
-            let img = if img.width() > THUMB || img.height() > THUMB {
-                img.resize(THUMB, THUMB, image::imageops::FilterType::Triangle)
+            let img = if img.width() > side || img.height() > side {
+                img.resize(side, side, image::imageops::FilterType::Triangle)
             } else {
                 img
             };
@@ -93,7 +130,7 @@ pub fn thumbnail(path: &Path) -> Option<PathBuf> {
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 85).encode_image(&rgb).ok()?;
         }
         // 解不开的格式：原样写出，交给系统解码。
-        Err(_) => std::fs::write(&tmp, bytes.as_slice()).ok()?,
+        Err(_) => std::fs::write(&tmp, &bytes).ok()?,
     }
     std::fs::rename(&tmp, &out).ok()?;
     Some(out)
