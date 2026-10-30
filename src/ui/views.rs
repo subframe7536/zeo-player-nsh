@@ -1649,6 +1649,36 @@ fn font_browser(version: Signal<u32>, message: Signal<String>, expanded: Signal<
         .child(view().h(px(264.0)).rounded(px(10.0)).bg(bg()).p(px(4.0)).overflow_hidden().child(list))
 }
 
+/// 播放：淡入淡出时长。
+fn playback_card() -> View {
+    let s = store();
+    const STEPS: &[(u32, &str)] = &[(0, "关闭"), (100, "0.1 秒"), (200, "0.2 秒"), (400, "0.4 秒"), (800, "0.8 秒"), (1500, "1.5 秒")];
+    let chip = move |ms: u32, label: &'static str| {
+        let on = move || s.library.with(|l| l.fade_ms == ms);
+        view()
+            .h(px(32.0))
+            .px(px(14.0))
+            .justify_center()
+            .rounded_full()
+            .border_1()
+            .border_color(move || if on() { primary() } else { border() })
+            .bg(move || if on() { primary().opacity(0.12) } else { AdaptiveColor::TRANSPARENT })
+            .role(AccessibilityRole::Button)
+            .label(label)
+            .accessibility_state(move || AccessibilityState { selected: on(), ..AccessibilityState::default() })
+            .hover(|st| st.bg(hover()))
+            .active(|st| st.opacity(0.7))
+            .on_press(move || super::store::set_fade_ms(ms))
+            .child(text(label).text_size(px(13.0)).font_weight(FontWeight::MEDIUM).text_color(fg()))
+    };
+    card_section(
+        "淡入淡出",
+        "播放、暂停、拖动进度和切歌时，音量在这段时间里渐变，不会突然响起或戛然而止。一首自然播完接下一首时不淡变。",
+        None,
+    )
+    .child(view().flex_row().flex_wrap().gap(px(8.0)).children(STEPS.iter().map(|&(ms, label)| chip(ms, label))))
+}
+
 /// 关闭窗口时：每次询问 / 最小化到托盘 / 退出。
 fn window_card() -> View {
     use crate::library::CloseAction;
@@ -1696,7 +1726,7 @@ fn window_card() -> View {
 
 #[component]
 pub fn Settings() -> impl IntoElement {
-    view().flex_1().child(page_header(|| "设置".into(), || "曲库、窗口、标签与字体".into(), None, None)).child(
+    view().flex_1().child(page_header(|| "设置".into(), || "曲库、播放、窗口、标签与字体".into(), None, None)).child(
         scroll().flex_1().child(
             view()
                 .px(px(32.0))
@@ -1705,6 +1735,7 @@ pub fn Settings() -> impl IntoElement {
                 .max_w(px(820.0))
                 .child(folders_card())
                 .child(library_card())
+                .child(playback_card())
                 .child(window_card())
                 .child(genres_card())
                 .child(font_card()),

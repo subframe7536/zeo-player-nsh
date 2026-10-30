@@ -71,6 +71,13 @@ pub struct LibraryConfig {
     /// 关闭窗口时的行为。
     #[serde(default)]
     pub close_action: CloseAction,
+    /// 播放 / 暂停 / 跳转 / 切歌的淡入淡出时长（毫秒；0 关闭）。
+    #[serde(default = "default_fade_ms")]
+    pub fade_ms: u32,
+}
+
+fn default_fade_ms() -> u32 {
+    crate::audio::DEFAULT_FADE_MS
 }
 
 impl Default for LibraryConfig {
@@ -82,6 +89,7 @@ impl Default for LibraryConfig {
             watch: false,
             font: None,
             close_action: CloseAction::Ask,
+            fade_ms: default_fade_ms(),
         }
     }
 }
@@ -238,6 +246,16 @@ impl LibraryStore {
     pub fn set_font(&self, font: Option<String>) {
         let mut config = self.config.lock().unwrap();
         config.font = font.filter(|f| !f.trim().is_empty());
+        self.save_config(&config);
+    }
+
+    pub fn fade_ms(&self) -> u32 {
+        self.config().fade_ms
+    }
+
+    pub fn set_fade_ms(&self, ms: u32) {
+        let mut config = self.config.lock().unwrap();
+        config.fade_ms = ms;
         self.save_config(&config);
     }
 

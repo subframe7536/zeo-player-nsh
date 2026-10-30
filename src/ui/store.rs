@@ -73,6 +73,7 @@ pub struct LibraryState {
     /// 界面字体（`None`：系统字体）。
     pub font: Option<String>,
     pub close_action: crate::library::CloseAction,
+    pub fade_ms: u32,
 }
 
 fn library_state() -> LibraryState {
@@ -87,6 +88,7 @@ fn library_state() -> LibraryState {
         watch: crate::watcher::status(),
         font: lib.font(),
         close_action: lib.close_action(),
+        fade_ms: lib.fade_ms(),
     }
 }
 
@@ -308,6 +310,7 @@ pub fn install() -> Store {
 
     crate::watcher::sync();
     crate::window::set_close_action(library_store().close_action());
+    player().set_fade_ms(library_store().fade_ms());
     crate::window::start();
     if !library_store().roots().is_empty() {
         scan();
@@ -359,6 +362,13 @@ pub async fn import_fonts() -> Option<(String, Option<String>)> {
     {
         Some(("此平台暂不支持导入字体".to_owned(), None))
     }
+}
+
+/// 淡入淡出时长（立即生效并保存）。
+pub fn set_fade_ms(ms: u32) {
+    store().library.update(|l| l.fade_ms = ms);
+    player().set_fade_ms(ms);
+    std::thread::spawn(move || library_store().set_fade_ms(ms));
 }
 
 /// 关闭窗口时的行为（保存）。

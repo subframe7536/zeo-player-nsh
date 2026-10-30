@@ -19,6 +19,7 @@ test("sidebar navigates between library views", async () => {
   expect(app.texts()).toContain("监视文件夹变化");
   expect(app.texts()).toContain("系统字体");
   expect(app.texts()).toContain("关闭窗口时");
+  expect(app.texts()).toContain("淡入淡出");
 });
 
 test("folders page lists the root folders with a size column", async () => {

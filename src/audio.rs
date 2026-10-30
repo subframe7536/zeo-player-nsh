@@ -18,6 +18,9 @@ use crate::metadata::MetaCache;
 /// 环形缓冲目标（输出帧数，约 0.5 s @48k）。Windows 的 sleep 粒度约 15.6 ms，
 /// 余量要足；每轮把缓冲一次填到目标，而不是只解一个包。
 const RING_MAX_FRAMES: usize = 24_000;
+/// 默认淡入淡出时长。
+pub const DEFAULT_FADE_MS: u32 = 200;
+
 /// 每轮最多解码的包数（防止一轮占太久，命令响应变慢）。
 const MAX_PACKETS_PER_TICK: usize = 64;
 
@@ -64,6 +67,12 @@ pub struct Shared {
     pub cb_seen_epoch: AtomicU64, // 回调侧已处理的代际
     pub ring: Mutex<VecDeque<f32>>,
     pub track: Mutex<TrackPublic>,
+    /// 淡入淡出时长（毫秒；0 关闭）。
+    pub fade_ms: AtomicU32,
+    /// 淡变目标（f32 位，0 或 1；回调朝它推进 `gain`）。
+    pub fade_target: AtomicU32,
+    /// 当前淡变增益（f32 位，0..1；播放中由回调写，停着时由引擎写）。
+    pub gain: AtomicU32,
 }
 
 impl Shared {
@@ -135,6 +144,9 @@ impl EngineHandle {
             loading: AtomicBool::new(false),
             ready: AtomicBool::new(false),
             volume: AtomicU32::new(0.8f32.to_bits()), // 默认音量 0.8（ap-spec）
+            fade_ms: AtomicU32::new(DEFAULT_FADE_MS),
+            fade_target: AtomicU32::new(1f32.to_bits()),
+            gain: AtomicU32::new(0f32.to_bits()),
             played: AtomicU64::new(0),
             dev_rate: AtomicU32::new(48_000),
             epoch: AtomicU64::new(0),
@@ -265,7 +277,29 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
     loop {
         // 1. 命令
         while let Ok(cmd) = rx.try_recv() {
+            // 会打断声音的操作：先淡出到静音，操作完再淡入（暂停 / 停止则停在静音）。
+            let playing = shared.playing.load(Ordering::Relaxed);
+            let interrupts = match &cmd {
+                EngineCmd::Load { .. }
+                | EngineCmd::Seek(_)
+                | EngineCmd::SeekBy(_)
+                | EngineCmd::Next
+                | EngineCmd::Previous
+                | EngineCmd::Jump(_)
+                | EngineCmd::Stop
+                | EngineCmd::Pause => true,
+                EngineCmd::Toggle => playing,
+                _ => false,
+            };
+            if interrupts {
+                fade_out(&shared, &mut loaded, dev_channels);
+            }
             handle_cmd(&shared, &media, &mut loaded, cmd, dev_rate, dev_channels);
+            if !shared.playing.load(Ordering::Relaxed) {
+                // 停着：下次开始从静音淡入。
+                shared.gain.store(0f32.to_bits(), Ordering::Relaxed);
+            }
+            shared.fade_target.store(1f32.to_bits(), Ordering::Relaxed);
         }
         // 2. 解码填充
         if let Some(l) = loaded.as_mut() {
@@ -571,6 +605,40 @@ fn convert_channels(input: &[f32], from: usize, to: usize, out: &mut Vec<f32>) {
 }
 
 /// cpal 回调：取环形缓冲、施加音量、推进播放位置。
+/// 淡出到静音再返回（没在播放或关闭淡变时立即返回）。等待期间继续填充
+/// 缓冲，长淡出也不会断音。
+fn fade_out(shared: &Arc<Shared>, loaded: &mut Option<Loaded>, dev_channels: usize) {
+    let ms = shared.fade_ms.load(Ordering::Relaxed);
+    if ms == 0 || !shared.playing.load(Ordering::Relaxed) {
+        return;
+    }
+    shared.fade_target.store(0f32.to_bits(), Ordering::Relaxed);
+    let deadline = std::time::Instant::now() + Duration::from_millis(ms as u64 + 150);
+    while std::time::Instant::now() < deadline {
+        if f32::from_bits(shared.gain.load(Ordering::Relaxed)) <= 0.0 {
+            return;
+        }
+        if let Some(l) = loaded.as_mut() {
+            while shared.ring.lock().unwrap().len() < RING_MAX_FRAMES * dev_channels {
+                if !matches!(fill_ring(l, shared, dev_channels), Ok(false)) {
+                    break;
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// 淡变曲线：线性增益的 smoothstep，听感比线性平滑。
+fn fade_curve(gain: f32) -> f32 {
+    gain * gain * (3.0 - 2.0 * gain)
+}
+
+/// 每帧增益步长（`ms` 毫秒内从 0 到 1）。
+fn fade_step(ms: u32, rate: u32) -> f32 {
+    if ms == 0 { 1.0 } else { 1000.0 / (ms as f32 * rate.max(1) as f32) }
+}
+
 fn output_callback(shared: &Shared, data: &mut [f32], channels: usize) {
     let epoch = shared.epoch.load(Ordering::Relaxed);
     if epoch != shared.cb_seen_epoch.load(Ordering::Relaxed) {
@@ -581,11 +649,25 @@ fn output_callback(shared: &Shared, data: &mut [f32], channels: usize) {
     let playing = shared.playing.load(Ordering::Relaxed);
     let mut taken_samples = 0usize;
     if playing && !data.is_empty() {
+        let target = f32::from_bits(shared.fade_target.load(Ordering::Relaxed));
+        let step = fade_step(shared.fade_ms.load(Ordering::Relaxed), shared.dev_rate.load(Ordering::Relaxed));
+        let mut gain = f32::from_bits(shared.gain.load(Ordering::Relaxed));
         let mut ring = shared.ring.lock().unwrap();
         let take = ring.len().min(data.len());
-        for slot in data.iter_mut().take(take) {
-            *slot = ring.pop_front().unwrap_or(0.0) * volume;
+        let ch = channels.max(1);
+        for (i, slot) in data.iter_mut().take(take).enumerate() {
+            // 每帧（而不是每个样本）推进一次增益，各声道一致。
+            if i % ch == 0 && gain != target {
+                gain = if gain < target { (gain + step).min(target) } else { (gain - step).max(target) };
+            }
+            *slot = ring.pop_front().unwrap_or(0.0) * volume * fade_curve(gain);
         }
+        drop(ring);
+        // 缓冲空了（还没解出来）也照样推进淡出，不让引擎干等。
+        if take == 0 && target < gain {
+            gain = (gain - step * (data.len() / ch) as f32).max(target);
+        }
+        shared.gain.store(gain.to_bits(), Ordering::Relaxed);
         taken_samples = take;
     }
     if taken_samples < data.len() {
@@ -608,6 +690,44 @@ fn publish_media(shared: &Arc<Shared>, media: &MediaSession, _force: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fade_ramps_over_the_configured_time() {
+        // 200 ms @ 48 kHz：9600 帧从 0 到 1。
+        let step = fade_step(200, 48_000);
+        assert!((1.0 / step - 9600.0).abs() < 0.5);
+        assert_eq!(fade_step(0, 48_000), 1.0, "关闭时一步到位");
+        assert_eq!(fade_curve(0.0), 0.0);
+        assert_eq!(fade_curve(1.0), 1.0);
+        assert!((fade_curve(0.5) - 0.5).abs() < 1e-6);
+        let shared = Shared {
+            playing: AtomicBool::new(true),
+            loading: AtomicBool::new(false),
+            ready: AtomicBool::new(true),
+            volume: AtomicU32::new(1f32.to_bits()),
+            played: AtomicU64::new(0),
+            dev_rate: AtomicU32::new(48_000),
+            epoch: AtomicU64::new(0),
+            cb_seen_epoch: AtomicU64::new(0),
+            ring: Mutex::new(std::iter::repeat_n(1.0_f32, 48_000 * 2).collect()),
+            track: Mutex::new(TrackPublic::default()),
+            fade_ms: AtomicU32::new(200),
+            fade_target: AtomicU32::new(1f32.to_bits()),
+            gain: AtomicU32::new(0f32.to_bits()),
+        };
+        // 100 ms 后到一半（smoothstep(0.5) = 0.5），200 ms 后满。
+        let mut buf = vec![0.0_f32; 4800 * 2];
+        output_callback(&shared, &mut buf, 2);
+        assert!((buf[buf.len() - 1] - 0.5).abs() < 0.01, "{}", buf[buf.len() - 1]);
+        assert!(buf.windows(2).all(|w| w[1] >= w[0] - 1e-6), "淡入单调");
+        output_callback(&shared, &mut buf, 2);
+        assert!((buf[buf.len() - 1] - 1.0).abs() < 1e-3);
+        // 淡出：目标 0，200 ms 后静音。
+        shared.fade_target.store(0f32.to_bits(), Ordering::Relaxed);
+        let mut long = vec![0.0_f32; 9600 * 2];
+        output_callback(&shared, &mut long, 2);
+        assert!(long[long.len() - 1].abs() < 1e-6 && f32::from_bits(shared.gain.load(Ordering::Relaxed)) == 0.0);
+    }
 
     /// 44.1 kHz → 48 kHz（Windows 共享模式的常见组合），按 MP3 / FLAC 那样
     /// 大小不一的包送入：输出连续、没有插入的静音或跳变，长度符合比例。

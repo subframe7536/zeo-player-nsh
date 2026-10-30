@@ -78,6 +78,11 @@ impl Player {
         self.engine.send(EngineCmd::Previous);
     }
 
+    /// 淡入淡出时长（毫秒；0 关闭），用于播放 / 暂停 / 跳转 / 切歌。
+    pub fn set_fade_ms(&self, ms: u32) {
+        self.engine.shared.fade_ms.store(ms.min(5000), std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// 当前状态快照。
     pub fn state(&self) -> Snapshot {
         self.engine.snapshot()
