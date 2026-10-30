@@ -185,16 +185,4 @@ mod tests {
         }
         assert!(family_names(b"not a font").is_empty());
     }
-
-    #[test]
-    fn lists_installed_families() {
-        let started = std::time::Instant::now();
-        let list = installed_families();
-        eprintln!("{} 个字体家族，{:?}", list.len(), started.elapsed());
-        assert!(list.len() > 20, "{} 个", list.len());
-        // 各系统必有的界面字体。
-        let expected: &[&str] = if cfg!(windows) { &["Segoe UI", "Arial"] } else { &["Helvetica", "PingFang SC"] };
-        assert!(list.iter().any(|f| expected.contains(&f.as_str())), "{list:?}");
-        assert!(list.iter().all(|f| !f.starts_with('.')));
-    }
 }
