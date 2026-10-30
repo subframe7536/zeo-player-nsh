@@ -23,6 +23,8 @@ const MAX_PACKETS_PER_TICK: usize = 64;
 
 pub enum EngineCmd {
     Load { path: PathBuf, queue: Vec<String> },
+    /// 跳到当前队列的第 `n` 首。
+    Jump(i64),
     Play,
     Pause,
     Toggle,
@@ -45,7 +47,7 @@ pub struct TrackPublic {
     /// 全屏背景（预先模糊的小图）。
     pub backdrop: Option<String>,
     pub duration: f64,
-    pub queue: Vec<String>,
+    pub queue: Arc<Vec<String>>,
     pub queue_index: i64,
     pub error: Option<String>,
 }
@@ -90,7 +92,7 @@ pub struct Snapshot {
     pub artwork: Option<String>,
     /// 全屏背景（预先模糊的小图）。
     pub backdrop: Option<String>,
-    pub queue: Vec<String>,
+    pub queue: Arc<Vec<String>>,
     pub queue_index: i64,
     pub error: Option<String>,
 }
@@ -328,7 +330,7 @@ fn handle_cmd(
 ) {
     match cmd {
         EngineCmd::Load { path, queue } => {
-            load_track(shared, media, loaded, path, queue, -1, dev_rate, dev_channels);
+            load_track(shared, media, loaded, path, Arc::new(queue), -1, dev_rate, dev_channels);
             // queue_index 由 load_track 解析实际下标；默认从头播放。
             shared.playing.store(true, Ordering::Relaxed);
             publish_media(shared, media, true);
@@ -385,6 +387,14 @@ fn handle_cmd(
             shared.volume.store(clamped.to_bits(), Ordering::Relaxed);
             publish_media(shared, media, false);
         }
+        EngineCmd::Jump(target) => {
+            let queue = shared.track.lock().unwrap().queue.clone();
+            if let Some(path) = usize::try_from(target).ok().and_then(|i| queue.get(i)).cloned() {
+                load_track(shared, media, loaded, PathBuf::from(path), queue, target, dev_rate, dev_channels);
+                shared.playing.store(true, Ordering::Relaxed);
+                publish_media(shared, media, true);
+            }
+        }
         EngineCmd::Next | EngineCmd::Previous => {
             let (queue, index) = {
                 let t = shared.track.lock().unwrap();
@@ -408,7 +418,7 @@ fn load_track(
     media: &MediaSession,
     loaded: &mut Option<Loaded>,
     path: PathBuf,
-    queue: Vec<String>,
+    queue: Arc<Vec<String>>,
     queue_index_hint: i64,
     dev_rate: u32,
     dev_channels: usize,

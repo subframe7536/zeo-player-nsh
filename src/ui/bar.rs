@@ -9,7 +9,7 @@ use super::parts::{cover, icon_button, progress_fraction, scrub, shown_time, thi
 use super::store::{format_time, player, seek_to, set_volume, store, toggle_mute};
 use super::theme::*;
 
-pub fn player_bar(on_expand: Rc<dyn Fn()>) -> View {
+pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
     let s = store();
     let has_track = move || s.track.with(|t| t.path.is_some());
     let artwork = move || s.track.with(|t| t.artwork.clone());
@@ -145,6 +145,12 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>) -> View {
             set_volume,
             set_volume,
         ))
+        .child(
+            icon_button(|| Icon::Queue, 16.0, "播放队列", move || if queue_open.get() { primary() } else { muted_fg() }, move || {
+                queue_open.update(|o| *o = !*o)
+            })
+            .style_when(move || queue_open.get(), |st| st.bg(hover())),
+        )
         .child(icon_button(|| Icon::Expand, 14.0, "全屏播放", muted_fg, move || on_expand()));
 
     view()

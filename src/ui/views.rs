@@ -1649,9 +1649,54 @@ fn font_browser(version: Signal<u32>, message: Signal<String>, expanded: Signal<
         .child(view().h(px(264.0)).rounded(px(10.0)).bg(bg()).p(px(4.0)).overflow_hidden().child(list))
 }
 
+/// 关闭窗口时：每次询问 / 最小化到托盘 / 退出。
+fn window_card() -> View {
+    use crate::library::CloseAction;
+    let s = store();
+    let option = move |action: CloseAction, label: &'static str, hint: &'static str| {
+        let on = move || s.library.with(|l| l.close_action == action);
+        view()
+            .flex_1()
+            .min_w(px(140.0))
+            .gap(px(2.0))
+            .p(px(12.0))
+            .rounded(px(10.0))
+            .border_1()
+            .border_color(move || if on() { primary() } else { border() })
+            .bg(move || if on() { primary().opacity(0.12) } else { AdaptiveColor::TRANSPARENT })
+            .role(AccessibilityRole::Button)
+            .label(label)
+            .accessibility_state(move || AccessibilityState { selected: on(), ..AccessibilityState::default() })
+            .hover(|st| st.bg(hover()))
+            .active(|st| st.opacity(0.7))
+            .on_press(move || super::store::set_close_action(action))
+            .child(text(label).text_size(px(14.0)).font_weight(FontWeight::MEDIUM).text_color(fg()))
+            .child(text(hint).text_size(px(12.0)).text_color(muted_fg()))
+    };
+    let supported = cfg!(any(target_os = "macos", target_os = "windows"));
+    card_section(
+        "关闭窗口时",
+        if supported {
+            "最小化到托盘后音乐继续播放，界面释放以节省内存；托盘图标可以打开窗口、播放 / 暂停、切歌和退出。"
+        } else {
+            "这个平台还没有托盘，关闭窗口即退出。"
+        },
+        None,
+    )
+    .child(supported.then(|| {
+        view()
+            .flex_row()
+            .flex_wrap()
+            .gap(px(8.0))
+            .child(option(CloseAction::Ask, "每次询问", "第一次关闭时选择"))
+            .child(option(CloseAction::Tray, "最小化到托盘", "继续播放"))
+            .child(option(CloseAction::Quit, "退出", "停止播放并退出"))
+    }))
+}
+
 #[component]
 pub fn Settings() -> impl IntoElement {
-    view().flex_1().child(page_header(|| "设置".into(), || "曲库、标签与字体".into(), None, None)).child(
+    view().flex_1().child(page_header(|| "设置".into(), || "曲库、窗口、标签与字体".into(), None, None)).child(
         scroll().flex_1().child(
             view()
                 .px(px(32.0))
@@ -1660,6 +1705,7 @@ pub fn Settings() -> impl IntoElement {
                 .max_w(px(820.0))
                 .child(folders_card())
                 .child(library_card())
+                .child(window_card())
                 .child(genres_card())
                 .child(font_card()),
         ),

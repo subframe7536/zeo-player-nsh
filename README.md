@@ -22,6 +22,8 @@
   - 行级歌词（外置同名 `.lrc` 优先，其次内嵌）：自动滚动、手动滚动后 3 秒恢复跟随、点击行 seek、按距离变暗变模糊、翻译行；悬停时文字有高亮，行最右侧浮出时间戳。
   - 键盘：Space 播放 / 暂停，← → 快退 / 快进 5 秒，↑ ↓ 音量，Esc 收起。
 - **字体**：界面字体可选系统字体或任一已安装字体（font-enumeration 向系统字体服务查询，懒加载，离开设置页即释放）；macOS 上可导入 .ttf / .otf / .ttc（只在 Zeo 内注册，Windows 见「待上游」）。
+- **托盘**（macOS 菜单栏 / Windows 通知区域）：第一次点窗口的关闭按钮时选择「最小化到托盘」或「退出」，之后记住（设置 →「关闭窗口时」可改）。最小化后界面整个拆掉，只留播放引擎与队列；托盘菜单显示当前曲目，可播放 / 暂停、上一首 / 下一首、打开窗口、退出（Windows 上左键单击图标打开窗口）。
+- **播放队列**：播放条右侧的队列按钮打开面板，列出当前队列，点一首跳过去。
 - **LRC 解析**：多时间戳、卡拉 OK 碎片清理、元数据头合并、翻译行、短空行跳过、连续空行合并、无时间戳回退。
 
 ## 结构
@@ -38,7 +40,7 @@ src/library.rs     曲库、扫描进度、流派拆分    src/watcher.rs   文�
 src/metadata.rs    lofty 标签与缓存            src/covers.rs    封面缩略图
 src/lyrics.rs      LRC 解析                    src/waveform.rs  波形
 src/media.rs       playwire 系统媒体会话        src/e2e.rs       端到端测试
-src/fonts.rs       字体列表与导入
+src/fonts.rs       字体列表与导入            src/window.rs    关闭拦截、托盘
 App.test.tsx       nsh test 的界面测试（无头打开 Rust 根组件）
 scripts/           make-test-music.sh：端到端测试语料
 .github/            CI：推送 / PR 在 macOS 与 Windows 上 check + test；手动运行打包并建草稿 Release
@@ -66,6 +68,7 @@ Release 包（`nsh package`）实测 footprint（macOS，949 首、全部带内�
 ## 待上游（NSH）
 
 - **解码图片缓存上限不可配置。** `nsh-platform-macos` / `nsh-platform-windows` 0.3.0 的 `src/image.rs` 里 `CACHE_BYTES` 固定为 128 MB，按最近使用淘汰。封面多时它会被填满，macOS 上 Core Animation 还持有同一批图片的副本，所以滚完整个专辑网格后 footprint 约 300 MB。本地实验把它改成 24 MB 后，同一场景峰值为 91 MB，滚动时没有可见的重新加载。希望 NSH 提供配置项（例如 `AppOptions` 或 `nsh.json` 里的图片缓存上限），或在内存压力时清理该缓存。
+- **没有托盘与关闭拦截的接口。** NSH 0.3.0 的 `AppOptions::keep_alive_on_close` 只在 macOS 有、生成的 runner 也不让应用设置，Windows 上没有对应项，也没有托盘 API。Zeo 用 `tray-icon` 做托盘，关闭拦截直接改系统层：macOS 替换 NSH 窗口代理的 `windowShouldClose:`，Windows 子类化 `NshWindow` 拦截 `WM_CLOSE`。希望 NSH 提供「关闭前询问应用」的事件与托盘 / 菜单栏图标接口。
 - **Windows 无运行时注册字体的公开接口。** Windows 后端内部有 `add_font`（DirectWrite 进程内字体集合），但没有导出；Rust 应用只能在编译期通过 `assets!()` 带字体。因此 Zeo 的「导入字体」目前只在 macOS（CoreText，进程内注册）提供，Windows 上可以选择系统已安装的字体。
 
 ## 工具链

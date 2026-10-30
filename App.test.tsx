@@ -18,6 +18,7 @@ test("sidebar navigates between library views", async () => {
   expect(app.texts()).toContain("分号");
   expect(app.texts()).toContain("监视文件夹变化");
   expect(app.texts()).toContain("系统字体");
+  expect(app.texts()).toContain("关闭窗口时");
 });
 
 test("folders page lists the root folders with a size column", async () => {
@@ -64,4 +65,13 @@ test("font list loads on demand and is gone after leaving settings", async () =>
   await app.press("设置");
   await app.waitFor("更改字体…"); // 回来时列表已销毁，重新收起
   expect(app.texts().some((t) => /^\d+ 个$/.test(t))).toBe(false);
+});
+
+test("queue panel opens from the player bar", async () => {
+  const app = await open(".", { width: 1200, height: 800 });
+  await app.waitFor("文件夹");
+  await app.press("label:播放队列");
+  await app.waitFor("播放队列");
+  expect(app.texts().some((t) => t === "没有曲目" || t.startsWith("第 "))).toBe(true);
+  await app.press("label:关闭播放队列");
 });

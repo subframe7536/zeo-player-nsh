@@ -36,6 +36,19 @@ pub struct TrackEntry {
     pub stamp: u64,
 }
 
+/// 点窗口的关闭按钮时做什么。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CloseAction {
+    /// 第一次关闭时询问（之后记住选择）。
+    #[default]
+    Ask,
+    /// 隐藏到托盘，继续播放。
+    Tray,
+    /// 退出。
+    Quit,
+}
+
 /// 出厂流派分隔符。
 pub const DEFAULT_SEPARATORS: &[&str] = &[";"];
 
@@ -55,6 +68,9 @@ pub struct LibraryConfig {
     /// 界面字体家族（`None`：系统字体）。
     #[serde(default)]
     pub font: Option<String>,
+    /// 关闭窗口时的行为。
+    #[serde(default)]
+    pub close_action: CloseAction,
 }
 
 impl Default for LibraryConfig {
@@ -65,6 +81,7 @@ impl Default for LibraryConfig {
             genre_separators: default_separators(),
             watch: false,
             font: None,
+            close_action: CloseAction::Ask,
         }
     }
 }
@@ -222,6 +239,18 @@ impl LibraryStore {
         let mut config = self.config.lock().unwrap();
         config.font = font.filter(|f| !f.trim().is_empty());
         self.save_config(&config);
+    }
+
+    pub fn close_action(&self) -> CloseAction {
+        self.config().close_action
+    }
+
+    pub fn set_close_action(&self, action: CloseAction) {
+        let mut config = self.config.lock().unwrap();
+        config.close_action = action;
+        self.save_config(&config);
+        drop(config);
+        crate::window::set_close_action(action);
     }
 
     pub fn watching(&self) -> bool {

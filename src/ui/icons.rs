@@ -37,6 +37,7 @@ pub enum Icon {
     More,
     Reveal,
     Copy,
+    Queue,
 }
 
 impl Icon {
@@ -68,6 +69,7 @@ impl Icon {
             Icon::NextLine => r#"<path d="M18 5.5v13M6 6.2v11.6a.7.7 0 0 0 1.1.57l7.5-5.8a.7.7 0 0 0 0-1.14L7.1 5.63A.7.7 0 0 0 6 6.2z"/>"#,
             Icon::More => r#"<circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none"/>"#,
             Icon::Reveal => r#"<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.5h8A1.5 1.5 0 0 1 20.5 9.5V17a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17z"/><path d="M12 11v5M9.5 13.5 12 11l2.5 2.5"/>"#,
+            Icon::Queue => r#"<path d="M4 6.5h12M4 11.5h12M4 16.5h7"/><path d="M15.5 14.5v5l4-2.5z" fill="currentColor" stroke="none"/>"#,
             Icon::Copy => r#"<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>"#,
             Icon::Wave => r#"<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>"#,
         }

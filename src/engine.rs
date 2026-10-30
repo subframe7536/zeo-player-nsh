@@ -65,6 +65,11 @@ impl Player {
         self.engine.send(EngineCmd::SetVolume(volume));
     }
 
+    /// 播放当前队列的第 `index` 首。
+    pub fn jump(&self, index: usize) {
+        self.engine.send(EngineCmd::Jump(index as i64));
+    }
+
     pub fn next(&self) {
         self.engine.send(EngineCmd::Next);
     }

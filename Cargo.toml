@@ -25,11 +25,18 @@ fontdb = "0.24.0"
 dunce = "1.0.5"
 font-enumeration = "0.9.0"
 
-# 系统文件夹选择器（NSOpenPanel / IFileDialog）。
+# 系统文件夹选择器（NSOpenPanel / IFileDialog）；托盘图标与菜单。
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 rfd = { version = "0.17", default-features = false }
+tray-icon = "0.26"
 
 # macOS 用 CoreText 注册导入的字体（只对本进程）。
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSResponder"] }
+dispatch2 = "0.3"
 objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFontManager"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFURL", "CFError"] }

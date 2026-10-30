@@ -26,9 +26,27 @@ impl MediaSession {
         std::thread::Builder::new()
             .name("zeo-media".into())
             .spawn(move || {
-                let config = PlayerConfig::new("Zeo")
+                #[allow(unused_mut)]
+                let mut config = PlayerConfig::new("Zeo")
                     .desktop_entry("dev.subf.zeo")
                     .track_id_prefix("/dev/subf/zeo/track");
+                // Windows 的系统媒体控件要挂在窗口上：等 window.rs 找到窗口。
+                #[cfg(target_os = "windows")]
+                {
+                    let mut waited = 0;
+                    loop {
+                        if let Some(hwnd) = crate::window::hwnd() {
+                            config = config.hwnd(hwnd).app_media_id("dev.subf.zeo");
+                            break;
+                        }
+                        if waited > 300 {
+                            eprintln!("zeo: 没找到窗口，系统媒体控件不可用");
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                        waited += 1;
+                    }
+                }
                 let mut controls = match MediaControls::new(config, move |event: Event| {
                     // OS 回调线程：只做转发，不阻塞。
                     let cmd = match event {

@@ -5,6 +5,7 @@ mod bar;
 mod full;
 mod icons;
 mod parts;
+mod queue;
 pub mod store;
 mod theme;
 mod views;
@@ -69,30 +70,90 @@ pub fn App() -> impl IntoElement {
     bench(open.clone());
 
     let nav = global::<Nav>();
-    let content = dynamic(move || match nav.get() {
+
+    let queue_open = signal(false);
+    // 窗口隐藏到托盘时整个界面拆掉（视图、图片、列表都释放），只留播放与
+    // 状态轮询；再次显示时重建，导航位置在全局信号里，不丢。
+    let shell = move || {
+        let content = page(nav);
+        let (open, close, fade) = (open.clone(), close.clone(), fade.clone());
+        view()
+            .flex_1()
+            .flex_row()
+            .child(sidebar())
+            .child(
+                view()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .child(view().flex_1().child(content))
+                    .child(when(move || queue_open.get(), move || queue::queue_panel(queue_open)))
+                    .child(bar::player_bar(open, queue_open)),
+            )
+            .child(when(move || full_open.get(), move || full::full_player(fade.clone(), close.clone())))
+    };
+
+    view()
+        .flex_1()
+        .bg(bg())
+        .text_color(fg())
+        // 文字样式由里面的文字继承：整个界面跟着设置里的字体走。
+        .font_family(store::font_family)
+        .child(when(move || !s.hidden.get(), shell))
+        .child(when(move || s.close_prompt.get(), close_prompt))
+}
+
+fn page(nav: Signal<Nav>) -> AnyElement {
+    dynamic(move || match nav.get() {
         Nav::Folders => views::folders().into_element(),
         Nav::Artists => views::artists().into_element(),
         Nav::Albums => views::albums().into_element(),
         Nav::Genres => views::genres().into_element(),
         Nav::Settings => views::settings().into_element(),
-    });
+    })
+}
 
+/// 第一次点关闭：最小化到托盘还是退出。选择会记住（设置里可改）。
+fn close_prompt() -> View {
+    use crate::library::CloseAction;
+    let s = store::store();
+    on_key("escape", move |_| s.close_prompt.set(false));
     view()
-        .flex_1()
-        .flex_row()
-        .bg(bg())
-        .text_color(fg())
-        // 文字样式由里面的文字继承：整个界面跟着设置里的字体走。
-        .font_family(store::font_family)
-        .child(sidebar())
+        .absolute()
+        .inset(px(0.0))
+        .z_index(100)
+        .bg(black_a(0.4))
+        .items_center()
+        .justify_center()
+        .on_press(move || s.close_prompt.set(false))
         .child(
             view()
-                .flex_1()
-                .min_w(px(0.0))
-                .child(view().flex_1().child(content))
-                .child(bar::player_bar(open)),
+                .w(px(400.0))
+                .p(px(24.0))
+                .gap(px(8.0))
+                .rounded(px(16.0))
+                .bg(nsh_base::theme().popover)
+                .border_1()
+                .border_color(border())
+                .shadow_2xl()
+                // 点卡片本身不关闭。
+                .on_press(|| {})
+                .child(text("关闭窗口").text_size(px(17.0)).font_weight(FontWeight::SEMIBOLD).text_color(theme::fg()))
+                .child(
+                    text("最小化到托盘后音乐继续播放，可以从托盘图标打开窗口、切歌或退出。这个选择会被记住，可以在「设置」里更改。")
+                        .text_size(px(13.0))
+                        .line_height(px(20.0))
+                        .text_color(muted_fg()),
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .justify_end()
+                        .gap(px(8.0))
+                        .mt(px(12.0))
+                        .child(parts::outline_button(Icon::Close, "退出 Zeo", || store::answer_close(CloseAction::Quit)))
+                        .child(parts::pill_button(Icon::ChevronDown, "最小化到托盘", || store::answer_close(CloseAction::Tray))),
+                ),
         )
-        .child(when(move || full_open.get(), move || full::full_player(fade.clone(), close.clone())))
 }
 
 fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> View {
@@ -211,6 +272,9 @@ fn bench(open_full: Rc<dyn Fn()>) {
     if std::env::var_os("ZEO_BENCH").is_none() {
         return;
     }
+    if std::env::var("ZEO_BENCH").as_deref() == Ok("close") {
+        return bench_close();
+    }
     let nav = global::<Nav>();
     spawn(async move {
         let step = |name: &str| eprintln!("ZEO_BENCH step {name}");
@@ -252,5 +316,46 @@ fn bench(open_full: Rc<dyn Fn()>) {
         }
         wait(6).await;
         step("done");
+    });
+}
+
+/// `ZEO_BENCH=close`：点关闭 → 询问 → 最小化到托盘 → 从托盘显示 → 退出。
+fn bench_close() {
+    use crate::library::CloseAction;
+    spawn(async move {
+        let s = store::store();
+        let step = |name: &str| eprintln!("ZEO_BENCH step {name} hidden={} prompt={}", crate::window::is_hidden(), s.close_prompt.get_untracked());
+        let wait = |ms: u64| timer(std::time::Duration::from_millis(ms));
+        while s.tracks.with_untracked(|t| t.is_empty()) {
+            wait(500).await;
+        }
+        store::set_close_action(CloseAction::Ask);
+        wait(3000).await;
+        let tracks = s.tracks.get_untracked();
+        store::play_list(&tracks, 0);
+        wait(1500).await;
+        nsh_core::element::desktop::close_window();
+        wait(1000).await;
+        step("asked");
+        store::answer_close(CloseAction::Tray);
+        wait(4000).await;
+        step("tray");
+        eprintln!("ZEO_BENCH playing={} time={:.1}", s.playback.with_untracked(|p| p.playing), s.playback.with_untracked(|p| p.time));
+        wait(6000).await;
+        eprintln!("ZEO_BENCH playing={} time={:.1}", s.playback.with_untracked(|p| p.playing), s.playback.with_untracked(|p| p.time));
+        nsh_core::element::desktop::close_window();
+        wait(500).await;
+        step("closed-again-while-hidden");
+        crate::window::show();
+        wait(2000).await;
+        step("shown");
+        // 已记住「托盘」：再点关闭直接隐藏，不再询问。
+        nsh_core::element::desktop::close_window();
+        wait(1500).await;
+        step("remembered");
+        store::set_close_action(CloseAction::Ask);
+        wait(500).await;
+        eprintln!("ZEO_BENCH step quit");
+        crate::window::quit();
     });
 }

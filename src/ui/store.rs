@@ -72,6 +72,7 @@ pub struct LibraryState {
     pub watch: crate::watcher::WatchStatus,
     /// 界面字体（`None`：系统字体）。
     pub font: Option<String>,
+    pub close_action: crate::library::CloseAction,
 }
 
 fn library_state() -> LibraryState {
@@ -85,6 +86,7 @@ fn library_state() -> LibraryState {
         watching: lib.watching(),
         watch: crate::watcher::status(),
         font: lib.font(),
+        close_action: lib.close_action(),
     }
 }
 
@@ -113,6 +115,12 @@ pub struct Store {
     last_volume: Signal<f64>,
     /// 当前歌词行（-1：无）。
     pub active_line: Memo<i64>,
+    /// 播放队列（路径）。
+    pub queue: Signal<Same<Vec<String>>>,
+    /// 窗口已隐藏到托盘：界面拆掉，只留播放。
+    pub hidden: Signal<bool>,
+    /// 点了关闭、等用户选择「托盘 / 退出」。
+    pub close_prompt: Signal<bool>,
 }
 
 thread_local! {
@@ -167,6 +175,9 @@ pub fn install() -> Store {
         owner: Owner::current(),
         last_volume: signal(0.8),
         active_line,
+        queue: signal(Same(snap.queue.clone())),
+        hidden: signal(false),
+        close_prompt: signal(false),
     };
     STORE.with(|cell| cell.set(Some(s)));
 
@@ -183,8 +194,33 @@ pub fn install() -> Store {
                 volume: snap.volume,
             });
             s.track.set(now_playing(&snap));
+            s.queue.set(Same(snap.queue.clone()));
             drain_covers();
+            // 窗口与托盘。
+            if crate::window::take_close_request() {
+                s.close_prompt.set(true);
+            }
+            s.hidden.set(crate::window::is_hidden());
+            for action in crate::window::take_tray_actions() {
+                match action {
+                    crate::window::TrayAction::Show => crate::window::show(),
+                    crate::window::TrayAction::Toggle => player().toggle(),
+                    crate::window::TrayAction::Previous => player().previous(),
+                    crate::window::TrayAction::Next => player().next(),
+                    crate::window::TrayAction::Quit => crate::window::quit(),
+                }
+            }
         }
+    });
+
+    // 托盘菜单跟着当前曲目与播放状态。
+    effect(move || {
+        let state = crate::window::TrayState {
+            title: s.track.with(|t| if t.artist.is_empty() { t.title.clone() } else { format!("{} — {}", t.title, t.artist) }),
+            playing: s.playback.with(|p| p.playing),
+            has_track: s.track.with(|t| t.path.is_some()),
+        };
+        crate::window::update_tray(state);
     });
 
     // 曲库：扫盘状态、根目录与索引。
@@ -271,6 +307,8 @@ pub fn install() -> Store {
     });
 
     crate::watcher::sync();
+    crate::window::set_close_action(library_store().close_action());
+    crate::window::start();
     if !library_store().roots().is_empty() {
         scan();
     }
@@ -320,6 +358,23 @@ pub async fn import_fonts() -> Option<(String, Option<String>)> {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Some(("此平台暂不支持导入字体".to_owned(), None))
+    }
+}
+
+/// 关闭窗口时的行为（保存）。
+pub fn set_close_action(action: crate::library::CloseAction) {
+    store().library.update(|l| l.close_action = action);
+    std::thread::spawn(move || library_store().set_close_action(action));
+}
+
+/// 回答关闭询问：记住选择，然后照做。
+pub fn answer_close(action: crate::library::CloseAction) {
+    store().close_prompt.set(false);
+    set_close_action(action);
+    match action {
+        crate::library::CloseAction::Tray => crate::window::hide(),
+        crate::library::CloseAction::Quit => crate::window::quit(),
+        crate::library::CloseAction::Ask => {}
     }
 }
 
