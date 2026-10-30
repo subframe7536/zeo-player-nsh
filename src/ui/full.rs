@@ -340,7 +340,7 @@ fn left_column(swap: &Swap) -> View {
         .child(view().pt(px(18.0)).child(volume_row()))
 }
 
-/// 「⋯」：在访达中显示、拷贝文件路径。
+/// 「⋯」：添加到歌单、在访达中显示、拷贝文件路径。
 fn more_menu() -> AnyElement {
     let s = store();
     let path = move || s.track.with_untracked(|t| t.path.clone());
@@ -380,8 +380,10 @@ fn more_menu() -> AnyElement {
                 .active(|st| st.opacity(0.6))
                 .child(icon(Icon::More, 18.0, || white_a(0.7))),
         )
+        .child(super::playlists::add_to_submenu(move || path().into_iter().collect()))
+        .child(menu_separator().h(px(1.0)).my(px(4.0)).bg(border()))
         .child(item(
-            "在访达中显示",
+            REVEAL_LABEL,
             Icon::Reveal,
             Box::new(move || {
                 if let Some(path) = path() {
@@ -402,8 +404,14 @@ fn more_menu() -> AnyElement {
         .into_element()
 }
 
+/// 「在文件管理器中显示」的文字。
+#[cfg(target_os = "windows")]
+pub(super) const REVEAL_LABEL: &str = "在资源管理器中显示";
+#[cfg(not(target_os = "windows"))]
+pub(super) const REVEAL_LABEL: &str = "在访达中显示";
+
 /// 在系统文件管理器里选中文件。
-fn reveal(path: &str) {
+pub(super) fn reveal(path: &str) {
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
     // explorer 自己解析 `/select,"路径"`：带空格的路径须原样加引号，不能经

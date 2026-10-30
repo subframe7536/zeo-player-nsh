@@ -1,0 +1,621 @@
+//! 歌单界面：侧栏的歌单区、歌单页、曲目的右键菜单（添加到歌单 / 从歌单
+//! 移除）、新建与编辑弹窗（智能歌单的条件编辑器）。
+
+use std::rc::Rc;
+
+use nsh_base::{context_menu, menu, menu_item, menu_separator, submenu};
+use nsh_core::element::input;
+use nsh_core::prelude::*;
+
+use super::icons::{icon, Icon};
+use super::parts::*;
+use super::store::{self, format_total, play_list, store, Draft};
+use super::theme::*;
+use super::Nav;
+use crate::library::{unix_now, TrackEntry};
+use crate::playlists::{Condition, Field, FieldType, Op, Playlist, Rule, Sort};
+
+// --- 菜单部件 -----------------------------------------------------------------
+
+/// 菜单弹层的样子（下拉、右键菜单、子菜单共用）。
+macro_rules! popup {
+    ($menu:expr, $min:expr) => {
+        $menu.popup_style(|st| {
+            st.min_w(px($min))
+                .max_h(px(420.0))
+                .p(px(4.0))
+                .rounded(px(10.0))
+                .border_1()
+                .border_color(border())
+                .bg(nsh_base::theme().popover)
+                .shadow_lg()
+        })
+    };
+}
+
+/// 菜单项的一行：图标（可无）+ 文字。
+fn row_content(glyph: Option<Icon>, label: impl Fn() -> String + 'static) -> View {
+    view()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(10.0))
+        .py(px(6.0))
+        .rounded(px(6.0))
+        .hover(|st| st.bg(hover()))
+        .active(|st| st.bg(hover()))
+        .child(glyph.map(|g| icon(g, 15.0, muted_fg)))
+        .child(text(label).flex_1().number_of_lines(1).text_size(px(13.0)).text_color(fg()))
+}
+
+/// 一个菜单项。
+pub fn item(label: impl Into<String>, glyph: Option<Icon>, on_select: impl Fn() + 'static) -> AnyElement {
+    let label: String = label.into();
+    let shown = label.clone();
+    menu_item()
+        .accessibility_label(SharedString::from(label))
+        .on_select(on_select)
+        .child(row_content(glyph, move || shown.clone()))
+        .into_element()
+}
+
+fn separator() -> AnyElement {
+    menu_separator().h(px(1.0)).my(px(4.0)).bg(border()).into_element()
+}
+
+/// 菜单里的分组小标题（不可选）。
+fn menu_heading(label: &'static str) -> AnyElement {
+    text(label)
+        .text_size(px(11.0))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(faint())
+        .px(px(10.0))
+        .pt(px(6.0))
+        .pb(px(2.0))
+        .into_element()
+}
+
+/// 「添加到歌单」子菜单：新建歌单…，再列出全部手动歌单。`paths` 在选中时取。
+pub fn add_to_submenu(paths: impl Fn() -> Vec<String> + Clone + 'static) -> AnyElement {
+    let s = store();
+    let create = paths.clone();
+    submenu()
+        .trigger(
+            view()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(10.0))
+                .py(px(6.0))
+                .rounded(px(6.0))
+                .role(AccessibilityRole::Menuitem)
+                .label("添加到歌单")
+                .hover(|st| st.bg(hover()))
+                .child(icon(Icon::Plus, 15.0, muted_fg))
+                .child(text("添加到歌单").flex_1().text_size(px(13.0)).text_color(fg()))
+                .child(icon(Icon::ChevronRight, 12.0, faint)),
+        )
+        .child(item("新建歌单…", Some(Icon::Plus), move || store::new_playlist(false, create())))
+        .child(dynamic(move || {
+            let manual: Vec<Playlist> = s.playlists.with(|l| l.iter().filter(|p| !p.is_smart()).cloned().collect());
+            let mut out = Vec::new();
+            if !manual.is_empty() {
+                out.push(separator());
+            }
+            for p in manual {
+                let paths = paths.clone();
+                let id = p.id;
+                out.push(item(p.name, Some(Icon::Playlist), move || store::add_to_playlist(id, paths())));
+            }
+            out
+        }))
+        .into_element()
+}
+
+/// 曲目的右键菜单（包着 `row`）：播放、添加到歌单、从歌单移除（`from`：
+/// 当前所在的手动歌单）、在访达中显示。
+pub fn track_menu(row: View, track: Memo<Option<TrackEntry>>, from: Option<u64>, play: impl Fn() + 'static) -> AnyElement {
+    let path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
+    let paths = move || path().into_iter().collect::<Vec<_>>();
+    let menu = context_menu().trigger(row);
+    popup!(menu, 220.0)
+        .child(item("播放", Some(Icon::Play), play))
+        .child(separator())
+        .child(add_to_submenu(paths))
+        .child(from.map(|id| {
+            item("从歌单中移除", Some(Icon::Close), move || {
+                // 等菜单关掉再移除：移除会拆掉这一行（连同它的菜单）。
+                if let Some(p) = path() {
+                    store::later(move || store::remove_from_playlist(id, &p));
+                }
+            })
+        }))
+        .child(separator())
+        .child(item(super::full::REVEAL_LABEL, Some(Icon::Reveal), move || {
+            if let Some(p) = path() {
+                super::full::reveal(&p);
+            }
+        }))
+        .into_element()
+}
+
+// --- 侧栏 ---------------------------------------------------------------------
+
+/// 侧栏的歌单区：小标题 + 新建按钮，下面是歌单列表（可滚动）。
+pub fn sidebar_section() -> View {
+    let s = store();
+    let add = menu().offset(px(4.0)).trigger(
+        view()
+            .size(px(22.0))
+            .rounded(px(6.0))
+            .items_center()
+            .justify_center()
+            .role(AccessibilityRole::Button)
+            .label("添加歌单")
+            .window_drag(false)
+            .hover(|st| st.bg(sidebar_accent()))
+            .active(|st| st.opacity(0.6))
+            .child(icon(Icon::Plus, 14.0, faint)),
+    );
+    let add = popup!(add, 200.0)
+        .child(item("新建歌单", Some(Icon::Playlist), || store::new_playlist(false, Vec::new())))
+        .child(item("新建智能歌单", Some(Icon::Smart), || store::new_playlist(true, Vec::new())));
+    view()
+        .flex_1()
+        .min_h(px(0.0))
+        .window_drag(true)
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .px(px(10.0))
+                .child(super::section_label("歌单").px(px(10.0)).flex_1())
+                .child(view().pt(px(10.0)).child(add)),
+        )
+        .child(
+            scroll().flex_1().child(
+                view().px(px(10.0)).pb(px(8.0)).gap(px(2.0)).child(dynamic(move || {
+                    let lists = s.playlists.get();
+                    if lists.is_empty() {
+                        return vec![
+                            text("点 + 新建歌单，或在曲目上点右键添加。")
+                                .text_size(px(12.0))
+                                .line_height(px(18.0))
+                                .text_color(faint())
+                                .px(px(10.0))
+                                .py(px(4.0))
+                                .into_element(),
+                        ];
+                    }
+                    lists.iter().map(|p| sidebar_row(p.id, p.name.clone(), p.is_smart())).collect()
+                })),
+            ),
+        )
+}
+
+fn sidebar_row(id: u64, name: String, smart: bool) -> AnyElement {
+    let nav = global::<Nav>();
+    let active = move || nav.get() == Nav::Playlist(id);
+    let row = view()
+        .h(px(32.0))
+        .flex_row()
+        .items_center()
+        .gap(px(10.0))
+        .px(px(10.0))
+        .rounded(px(8.0))
+        .window_drag(false)
+        .role(AccessibilityRole::Button)
+        .label(name.clone())
+        .accessibility_state(move || AccessibilityState { selected: active(), ..AccessibilityState::default() })
+        .style_when(active, |st| st.bg(sidebar_accent()))
+        .hover(|st| st.bg(sidebar_accent()))
+        .active(|st| st.opacity(0.7))
+        .on_press(move || {
+            store().search.set(String::new());
+            nav.set(Nav::Playlist(id));
+        })
+        .child(icon(if smart { Icon::Smart } else { Icon::Playlist }, 16.0, move || {
+            if active() { primary() } else { sidebar_fg() }
+        }))
+        .child(
+            text(name)
+                .flex_1()
+                .number_of_lines(1)
+                .text_size(px(14.0))
+                .text_color(move || if active() { fg() } else { sidebar_fg() }),
+        );
+    let menu = context_menu().trigger(row);
+    popup!(menu, 180.0)
+        .child(item(if smart { "编辑条件…" } else { "重命名…" }, Some(Icon::Edit), move || store::edit_playlist(id)))
+        .child(separator())
+        .child(item("删除歌单", Some(Icon::Trash), move || confirm_delete(id)))
+        .into_element()
+}
+
+/// 删除前确认（系统对话框）。
+pub fn confirm_delete(id: u64) {
+    let Some(p) = store::playlist(id) else { return };
+    let body = if p.is_smart() {
+        "只删除歌单本身，曲库里的文件不受影响。".to_owned()
+    } else {
+        "歌单里的曲目只会从歌单中移除，文件不受影响。".to_owned()
+    };
+    let answer = nsh_base::alert_dialog()
+        .title(format!("删除「{}」？", p.name))
+        .description(body)
+        .cancel("取消")
+        .destructive("删除")
+        .show();
+    spawn(async move {
+        if answer.await == Ok(Some("删除".into())) {
+            store::delete_playlist(id);
+        }
+    });
+}
+
+// --- 歌单页 -------------------------------------------------------------------
+
+/// 歌单页：头部（名称、种类与曲目数、播放 / 编辑 / 删除）+ 曲目列表。
+pub fn page(id: u64) -> View {
+    let s = store();
+    let list = computed(move || s.playlists.with(|l| l.iter().find(|p| p.id == id).cloned()));
+    let items = computed(move || {
+        let tracks = s.tracks.get();
+        Rc::new(list.with(|p| p.as_ref().map(|p| p.tracks(&tracks)).unwrap_or_default()))
+    });
+    let smart = move || list.with(|p| p.as_ref().is_some_and(Playlist::is_smart));
+    let title = move || list.with(|p| p.as_ref().map(|p| p.name.clone()).unwrap_or_default());
+    let subtitle = move || {
+        let kind = if smart() { "智能歌单" } else { "歌单" };
+        items.with(|v| {
+            let total: f64 = v.iter().map(|t| t.duration).sum();
+            if v.is_empty() { kind.to_owned() } else { format!("{kind} · {} 首 · {}", v.len(), format_total(total)) }
+        })
+    };
+    let actions = view()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .child(when(move || items.with(|v| !v.is_empty()), move || {
+            pill_button(Icon::Play, "播放", move || items.with_untracked(|v| play_list(v, 0)))
+        }))
+        .child(
+            when(smart, move || outline_button(Icon::Edit, "编辑条件", move || store::edit_playlist(id)))
+                .otherwise(move || outline_button(Icon::Edit, "重命名", move || store::edit_playlist(id))),
+        )
+        .child(icon_button(|| Icon::Trash, 16.0, "删除歌单", muted_fg, move || confirm_delete(id)));
+    let header = view()
+        .child(page_header(title, subtitle, None, Some(actions.into_element())))
+        .child(track_columns(Columns::ALL));
+    let empty = dynamic(move || {
+        if smart() {
+            empty_state(Icon::Smart, "没有符合条件的曲目", "调整条件后，符合的曲目会自动出现在这里。")
+                .child(view().mt(px(12.0)).child(outline_button(Icon::Edit, "编辑条件", move || store::edit_playlist(id))))
+        } else {
+            empty_state(Icon::Playlist, "歌单是空的", "在任意曲目上点右键，选「添加到歌单」。")
+        }
+    });
+    let from = untracked(|| list.with(|p| p.as_ref().filter(|p| !p.is_smart()).map(|p| p.id)));
+    view()
+        .flex_1()
+        .child(super::views::track_list_in(items, Columns::ALL, header.into_element(), from).empty(empty))
+}
+
+// --- 编辑弹窗 -----------------------------------------------------------------
+
+/// 新建 / 编辑歌单的弹窗（`store().editor` 有草稿时显示）。
+pub fn editor_dialog() -> View {
+    let s = store();
+    let draft = signal(s.editor.get_untracked().unwrap_or(Draft { id: None, name: String::new(), rule: None, add: Vec::new() }));
+    let close = move || s.editor.set(None);
+    let save = move || {
+        store::save_draft(draft.get_untracked());
+    };
+    on_key("escape", move |_| close());
+    let smart = untracked(|| draft.with(|d| d.rule.is_some()));
+    let heading = untracked(|| match (draft.with(|d| d.id.is_some()), smart) {
+        (false, false) => "新建歌单",
+        (false, true) => "新建智能歌单",
+        (true, false) => "重命名歌单",
+        (true, true) => "编辑智能歌单",
+    });
+    let name_input = input()
+        .w_full()
+        .h(px(36.0))
+        .px(px(12.0))
+        .rounded(px(8.0))
+        .border_1()
+        .border_color(border())
+        .bg(bg())
+        .text_size(px(14.0))
+        .text_color(fg())
+        .label("歌单名称")
+        .auto_focus(true)
+        .default_value(untracked(|| draft.with(|d| d.name.clone())))
+        .placeholder("歌单名称")
+        .on_change(move |t: &str| draft.update(|d| d.name = t.to_owned()))
+        .on_submit(move |_: &str| save());
+    let card = view()
+        .w(px(if smart { 640.0 } else { 400.0 }))
+        .max_h(move || px((window().height.0 - 80.0).max(240.0)))
+        .p(px(24.0))
+        .gap(px(14.0))
+        .rounded(px(16.0))
+        .bg(nsh_base::theme().popover)
+        .border_1()
+        .border_color(border())
+        .shadow_2xl()
+        .on_press(|| {})
+        .child(text(heading).text_size(px(17.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg()))
+        .child(name_input)
+        .child(smart.then(|| rule_editor(draft)))
+        .child(
+            view()
+                .flex_row()
+                .justify_end()
+                .gap(px(8.0))
+                .mt(px(6.0))
+                .child(outline_button(Icon::Close, "取消", close))
+                .child(pill_button(Icon::Plus, if heading.starts_with("新建") { "创建" } else { "保存" }, save)),
+        );
+    view()
+        .absolute()
+        .inset(px(0.0))
+        .z_index(100)
+        .bg(black_a(0.4))
+        .items_center()
+        .justify_center()
+        .on_press(close)
+        .child(card)
+}
+
+/// 智能规则编辑：全部 / 任一、条件行、添加条件、排序、数量上限、实时匹配数。
+fn rule_editor(draft: Signal<Draft>) -> View {
+    let s = store();
+    let rule = move |f: &dyn Fn(&Rule) -> String| draft.with(|d| d.rule.as_ref().map(f).unwrap_or_default());
+    let change = move |f: Box<dyn FnOnce(&mut Rule)>| {
+        draft.update(|d| {
+            if let Some(r) = d.rule.as_mut() {
+                f(r);
+            }
+        })
+    };
+    let count = computed(move || draft.with(|d| d.rule.as_ref().map(|r| r.conditions.len()).unwrap_or(0)));
+    let matched = computed(move || {
+        let tracks = s.tracks.get();
+        draft.with(|d| d.rule.as_ref().map(|r| r.select(&tracks, unix_now()).len()).unwrap_or(0))
+    });
+    let match_all = move || draft.with(|d| d.rule.as_ref().is_none_or(|r| r.match_all));
+    let chip = move |label: &'static str, all: bool| {
+        let on = move || match_all() == all;
+        view()
+            .h(px(28.0))
+            .px(px(12.0))
+            .rounded(px(7.0))
+            .items_center()
+            .justify_center()
+            .role(AccessibilityRole::Button)
+            .label(label)
+            .accessibility_state(move || AccessibilityState { selected: on(), ..AccessibilityState::default() })
+            .style_when(on, |st| st.bg(bg()).shadow_sm())
+            .on_press(move || change(Box::new(move |r| r.match_all = all)))
+            .child(text(label).text_size(px(13.0)).text_color(move || if on() { fg() } else { muted_fg() }))
+    };
+    let mode = view()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .child(text("符合以下").text_size(px(13.0)).text_color(muted_fg()))
+        .child(view().flex_row().p(px(2.0)).gap(px(2.0)).rounded(px(9.0)).bg(muted()).child(chip("全部", true)).child(chip("任一", false)))
+        .child(text("条件").text_size(px(13.0)).text_color(muted_fg()))
+        .child(view().flex_1())
+        .child(
+            text(move || format!("匹配 {} 首", matched.get()))
+                .text_size(px(13.0))
+                .font_weight(FontWeight::MEDIUM)
+                .tabular_nums()
+                .text_color(primary()),
+        );
+    // 行数变化（添加 / 删除）时整组重建；改字段、条件、值只更新所在行。
+    let rows = dynamic(move || (0..count.get()).map(|i| condition_row(draft, i).into_element()).collect::<Vec<_>>());
+    let add = view()
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
+        .self_start()
+        .h(px(28.0))
+        .px(px(10.0))
+        .rounded(px(7.0))
+        .role(AccessibilityRole::Button)
+        .label("添加条件")
+        .hover(|st| st.bg(hover()))
+        .active(|st| st.opacity(0.6))
+        .on_press(move || change(Box::new(|r| r.conditions.push(Condition::default()))))
+        .child(icon(Icon::Plus, 13.0, primary))
+        .child(text("添加条件").text_size(px(13.0)).text_color(primary()));
+    let sort = select(
+        move || rule(&|r| r.sort.label().to_owned()),
+        "排序",
+        Sort::ALL.iter().map(|&o| (None, o.label(), Box::new(move || change(Box::new(move |r| r.sort = o))) as Box<dyn Fn()>)).collect(),
+        170.0,
+    );
+    let limit = input()
+        .w(px(72.0))
+        .h(px(30.0))
+        .px(px(10.0))
+        .rounded(px(7.0))
+        .border_1()
+        .border_color(border())
+        .bg(bg())
+        .text_size(px(13.0))
+        .text_color(fg())
+        .label("数量上限")
+        .keyboard_type(KeyboardType::Number)
+        .default_value(untracked(|| rule(&|r| r.limit.map(|n| n.to_string()).unwrap_or_default())))
+        .placeholder("不限")
+        .on_change(move |t: &str| {
+            let limit = t.trim().parse::<usize>().ok().filter(|n| *n > 0);
+            change(Box::new(move |r| r.limit = limit));
+        });
+    let footer = view()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .child(text("排序").text_size(px(13.0)).text_color(muted_fg()))
+        .child(sort)
+        .child(view().w(px(12.0)))
+        .child(text("最多").text_size(px(13.0)).text_color(muted_fg()))
+        .child(limit)
+        .child(text("首").text_size(px(13.0)).text_color(muted_fg()));
+    view()
+        .gap(px(10.0))
+        .flex_shrink(1.0)
+        .min_h(px(0.0))
+        .child(mode)
+        .child(scroll().flex_shrink(1.0).max_h(px(300.0)).child(view().gap(px(8.0)).child(rows)))
+        .child(add)
+        .child(view().h(px(1.0)).bg(border()))
+        .child(footer)
+}
+
+/// 一行条件：字段、比较方式、值、单位、删除。
+fn condition_row(draft: Signal<Draft>, index: usize) -> View {
+    let get = move || draft.with(|d| d.rule.as_ref().and_then(|r| r.conditions.get(index).cloned()).unwrap_or_default());
+    let change = move |f: Box<dyn FnOnce(&mut Condition)>| {
+        draft.update(|d| {
+            if let Some(c) = d.rule.as_mut().and_then(|r| r.conditions.get_mut(index)) {
+                f(c);
+            }
+        })
+    };
+    let field = computed(move || get().field);
+    let field_options = Field::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, &f)| {
+            let heading = (i == 0 || Field::ALL[i - 1].group() != f.group()).then(|| f.group());
+            let pick = Box::new(move || {
+                change(Box::new(move |c| {
+                    if c.field.kind() != f.kind() {
+                        c.value.clear();
+                    }
+                    c.field = f;
+                    if !f.ops().contains(&c.op) {
+                        c.op = f.ops()[0];
+                    }
+                }))
+            }) as Box<dyn Fn()>;
+            (heading, f.label(), pick)
+        })
+        .collect();
+    let field_select = select(move || get().field.label().to_owned(), "字段", field_options, 120.0);
+    // 比较方式随字段变：字段换了整个下拉重建。
+    let op_select = dynamic(move || {
+        let options = field
+            .get()
+            .ops()
+            .iter()
+            .map(|&o: &Op| (None, o.label(), Box::new(move || change(Box::new(move |c| c.op = o))) as Box<dyn Fn()>))
+            .collect();
+        select(move || get().op.label().to_owned(), "条件", options, 110.0)
+    });
+    // 值：换了字段（可能清空了值）时重建输入框，打字时不重建。
+    let value_input = dynamic(move || {
+        let f = field.get();
+        let placeholder = match f.kind() {
+            FieldType::Text if f == Field::Format => "mp3 / flac / wav",
+            FieldType::Text => "",
+            FieldType::Number if f == Field::Duration => "3:30",
+            FieldType::Number => "数值",
+            FieldType::Date => "天数",
+        };
+        input()
+            .flex_1()
+            .min_w(px(80.0))
+            .h(px(30.0))
+            .px(px(10.0))
+            .rounded(px(7.0))
+            .border_1()
+            .border_color(border())
+            .bg(bg())
+            .text_size(px(13.0))
+            .text_color(fg())
+            .label("值")
+            .default_value(untracked(|| get().value))
+            .placeholder(placeholder)
+            .on_change(move |t: &str| {
+                let t = t.to_owned();
+                change(Box::new(move |c| c.value = t));
+            })
+    });
+    let unit = move || {
+        let c = get();
+        match (c.field.kind(), c.field.unit()) {
+            (FieldType::Date, _) => "天内".to_owned(),
+            (_, unit) => unit.to_owned(),
+        }
+    };
+    let invalid = move || {
+        let c = get();
+        !c.value.trim().is_empty() && !c.is_complete()
+    };
+    view()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .child(field_select)
+        .child(op_select)
+        .child(view().flex_1().flex_row().items_center().child(value_input))
+        .child(
+            text(move || if invalid() { "无效".to_owned() } else { unit() })
+                .w(px(70.0))
+                .number_of_lines(1)
+                .text_size(px(12.0))
+                .text_color(move || if invalid() { nsh_base::theme().destructive } else { faint() }),
+        )
+        .child(icon_button(|| Icon::Close, 11.0, "删除条件", faint, move || {
+            draft.update(|d| {
+                if let Some(r) = d.rule.as_mut()
+                    && index < r.conditions.len()
+                {
+                    r.conditions.remove(index);
+                }
+            })
+        }))
+}
+
+/// 下拉选择：按钮显示当前值，菜单列出选项（可带分组小标题）。
+#[allow(clippy::type_complexity)]
+fn select(
+    current: impl Fn() -> String + 'static,
+    label: &'static str,
+    options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)>,
+    width: f32,
+) -> AnyElement {
+    let trigger = view()
+        .w(px(width))
+        .h(px(30.0))
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
+        .px(px(10.0))
+        .rounded(px(7.0))
+        .border_1()
+        .border_color(border())
+        .bg(bg())
+        .role(AccessibilityRole::Button)
+        .label(label)
+        .hover(|st| st.bg(hover()))
+        .child(text(current).flex_1().number_of_lines(1).text_size(px(13.0)).text_color(fg()))
+        .child(icon(Icon::ChevronDown, 12.0, faint));
+    let menu = menu().offset(px(4.0)).trigger(trigger);
+    let mut menu = popup!(menu, width.max(140.0));
+    for (heading, option, pick) in options {
+        if let Some(h) = heading {
+            menu = menu.child(menu_heading(h));
+        }
+        menu = menu.child(item(option, None, pick));
+    }
+    menu.into_element()
+}
+

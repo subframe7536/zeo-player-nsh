@@ -15,6 +15,7 @@ mod library;
 mod lyrics;
 mod media;
 mod metadata;
+mod playlists;
 mod ui;
 mod watcher;
 mod window;

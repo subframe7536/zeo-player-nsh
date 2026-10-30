@@ -119,3 +119,64 @@ fn queue_panel_opens_from_the_player_bar() {
     assert!(t.iter().any(|s| s == "没有曲目" || s.starts_with("第 ")), "{t:?}");
     app.press("label:关闭播放队列").unwrap();
 }
+
+/// 歌单：新建手动歌单、右键把曲目加进去、从歌单移除；新建智能歌单并看
+/// 实时匹配数；删除前确认。（歌单文件在共享的数据目录里，只在这一个用例里改。）
+#[test]
+fn playlists_manual_and_smart() {
+    let mut app = start(1200.0, 800.0);
+    let corpus = isolate();
+    assert!(has(&app, "歌单"), "{:?}", texts(&app));
+
+    // 新建手动歌单：打开页面，空状态。
+    app.press("label:添加歌单").unwrap();
+    app.press("role:menuitem[新建歌单]").unwrap();
+    app.wait_for("label:歌单名称").unwrap();
+    app.clear("label:歌单名称").unwrap();
+    app.type_text("label:歌单名称", "测试歌单").unwrap();
+    app.press("label:创建").unwrap();
+    app.wait_for_gone("label:歌单名称", Duration::from_secs(2)).unwrap();
+    app.wait_for("歌单是空的").unwrap();
+    assert!(has(&app, "测试歌单"), "{:?}", texts(&app));
+
+    if corpus {
+        // 文件夹页右键第一首 → 添加到歌单 → 测试歌单。
+        app.press("文件夹").unwrap();
+        app.wait_for_within("大小", Duration::from_secs(20)).unwrap();
+        app.press(&format!("text:{}", root_name())).unwrap();
+        app.wait_for_within("label:测试歌曲", Duration::from_secs(5)).unwrap();
+        app.right_click("label:测试歌曲").unwrap();
+        app.press("label:添加到歌单").unwrap();
+        app.press("role:menuitem[测试歌单]").unwrap();
+        app.press("role:button[测试歌单]").unwrap();
+        app.wait_for("label:测试歌曲").unwrap();
+        assert!(!has(&app, "歌单是空的"));
+        // 从歌单移除。
+        app.right_click("label:测试歌曲").unwrap();
+        app.press("role:menuitem[从歌单中移除]").unwrap();
+        app.wait_for("歌单是空的").unwrap();
+    }
+
+    // 新建智能歌单：条件为空时匹配整个曲库，填了不可能的值后为 0。
+    app.press("label:添加歌单").unwrap();
+    app.press("role:menuitem[新建智能歌单]").unwrap();
+    app.wait_for("编辑智能歌单").or_else(|_| app.wait_for("新建智能歌单")).unwrap();
+    app.wait_for("text:/^匹配 \\d+ 首$/").unwrap();
+    app.type_text("label:值", "不存在的歌手-zz").unwrap();
+    app.wait_for("匹配 0 首").unwrap();
+    app.press("label:创建").unwrap();
+    app.wait_for("没有符合条件的曲目").unwrap();
+    assert!(has(&app, "智能歌单"), "{:?}", texts(&app));
+
+    // 删除：确认后回到文件夹页，侧栏里没有了。
+    app.on_dialog(|_| nsh_testing::DialogAnswer::Press("删除".into()));
+    app.press("label:删除歌单").unwrap();
+    app.wait_for_gone("没有符合条件的曲目", Duration::from_secs(2)).unwrap();
+    assert!(!has(&app, "智能歌单"), "{:?}", texts(&app));
+    assert!(has(&app, "测试歌单"));
+}
+
+/// 测试语料根文件夹在文件夹页里的名字。
+fn root_name() -> String {
+    dunce::canonicalize(CORPUS).unwrap().file_name().unwrap().to_string_lossy().into_owned()
+}

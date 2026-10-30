@@ -13,6 +13,7 @@ use crate::engine::{LyricsSource, Meta, Player};
 use crate::library::{library_store, ScanProgress, TrackEntry};
 use crate::lyrics::LyricsOutput;
 use crate::metadata::{MetaCache, MetaInfo};
+use crate::playlists::{Kind, Playlist, Rule};
 
 /// 按指针比较的共享值（信号里放大对象，换了才通知）。
 #[derive(Debug)]
@@ -127,6 +128,21 @@ pub struct Store {
     pub close_prompt: Signal<bool>,
     /// 标题栏搜索框的内容；非空时内容区显示搜索结果。
     pub search: Signal<String>,
+    /// 全部歌单（侧栏顺序）。
+    pub playlists: Signal<Same<Vec<Playlist>>>,
+    /// 正在编辑的歌单（弹窗打开时为 `Some`）。
+    pub editor: Signal<Option<Draft>>,
+}
+
+/// 歌单编辑弹窗的草稿：`id` 为 `None` 时是新建。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Draft {
+    pub id: Option<u64>,
+    pub name: String,
+    /// 手动歌单为 `None`。
+    pub rule: Option<Rule>,
+    /// 新建手动歌单时一并加入的曲目（「添加到歌单 → 新建歌单…」）。
+    pub add: Vec<String>,
 }
 
 thread_local! {
@@ -186,6 +202,8 @@ pub fn install() -> Store {
         hidden: signal(false),
         close_prompt: signal(false),
         search: signal(String::new()),
+        playlists: signal(Same(Arc::new(crate::playlists::load()))),
+        editor: signal(None),
     };
     STORE.with(|cell| cell.set(Some(s)));
 
@@ -443,6 +461,122 @@ pub fn active_index(output: &LyricsOutput, time: f64) -> i64 {
         }
     }
     active
+}
+
+// --- 歌单 ---------------------------------------------------------------------
+
+/// 改歌单并保存（文件只有几 KB，直接在界面线程写）。
+fn change_playlists(f: impl FnOnce(&mut Vec<Playlist>)) {
+    let s = store();
+    let mut lists = s.playlists.with_untracked(|l| l.0.as_ref().clone());
+    f(&mut lists);
+    if let Err(err) = crate::playlists::save(&lists) {
+        eprintln!("zeo: 歌单保存失败: {err}");
+    }
+    s.playlists.set(Same(Arc::new(lists)));
+}
+
+/// 按 id 取歌单。
+pub fn playlist(id: u64) -> Option<Playlist> {
+    store().playlists.with_untracked(|l| l.iter().find(|p| p.id == id).cloned())
+}
+
+/// 打开新建弹窗（`smart`：智能歌单；`add`：建好后加入的曲目）。
+pub fn new_playlist(smart: bool, add: Vec<String>) {
+    let name = if smart { "智能歌单" } else { "新歌单" };
+    store().editor.set(Some(Draft { id: None, name: name.to_owned(), rule: smart.then(Rule::default), add }));
+}
+
+/// 打开编辑弹窗。
+pub fn edit_playlist(id: u64) {
+    if let Some(p) = playlist(id) {
+        let rule = match p.kind {
+            Kind::Smart { rule } => Some(rule),
+            Kind::Manual { .. } => None,
+        };
+        store().editor.set(Some(Draft { id: Some(id), name: p.name, rule, add: Vec::new() }));
+    }
+}
+
+/// 保存弹窗里的草稿；新建的歌单会打开。返回歌单 id。
+pub fn save_draft(draft: Draft) -> u64 {
+    let name = match draft.name.trim() {
+        "" if draft.rule.is_some() => "智能歌单".to_owned(),
+        "" => "新歌单".to_owned(),
+        name => name.to_owned(),
+    };
+    let mut id = 0;
+    change_playlists(|lists| match draft.id.and_then(|id| lists.iter_mut().find(|p| p.id == id)) {
+        Some(p) => {
+            id = p.id;
+            p.name = name;
+            if let (Kind::Smart { rule }, Some(new)) = (&mut p.kind, draft.rule) {
+                *rule = new;
+            }
+        }
+        None => {
+            id = crate::playlists::next_id(lists);
+            let kind = match draft.rule {
+                Some(rule) => Kind::Smart { rule },
+                None => Kind::Manual { tracks: dedup(draft.add) },
+            };
+            lists.push(Playlist { id, name, kind });
+        }
+    });
+    store().editor.set(None);
+    if draft.id.is_none() {
+        store().search.set(String::new());
+        global::<super::Nav>().set(super::Nav::Playlist(id));
+    }
+    id
+}
+
+fn dedup(paths: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    paths.into_iter().filter(|p| seen.insert(p.clone())).collect()
+}
+
+/// 删除歌单（正看着它时回到文件夹页）。
+pub fn delete_playlist(id: u64) {
+    change_playlists(|lists| lists.retain(|p| p.id != id));
+    let nav = global::<super::Nav>();
+    if nav.get_untracked() == super::Nav::Playlist(id) {
+        nav.set(super::Nav::Folders);
+    }
+}
+
+/// 把曲目加到手动歌单末尾（已在里面的不重复加）。
+pub fn add_to_playlist(id: u64, paths: Vec<String>) {
+    change_playlists(|lists| {
+        if let Some(Playlist { kind: Kind::Manual { tracks }, .. }) = lists.iter_mut().find(|p| p.id == id) {
+            for path in paths {
+                if !tracks.contains(&path) {
+                    tracks.push(path);
+                }
+            }
+        }
+    });
+}
+
+/// 在根组件的生命周期里、下一轮再做 `f`：菜单项触发、但做的事会拆掉
+/// 菜单自己所在的那一行时用（行里的任务会随行一起取消）。
+pub fn later(f: impl FnOnce() + 'static) {
+    store().owner.run(|| {
+        spawn(async move {
+            // 让菜单先关完（关闭也是一轮更新），再做会拆掉菜单的事。
+            timer(Duration::from_millis(16)).await;
+            f()
+        });
+    });
+}
+
+/// 从手动歌单里移除一首。
+pub fn remove_from_playlist(id: u64, path: &str) {
+    change_playlists(|lists| {
+        if let Some(Playlist { kind: Kind::Manual { tracks }, .. }) = lists.iter_mut().find(|p| p.id == id) {
+            tracks.retain(|p| p != path);
+        }
+    });
 }
 
 // --- 命令 ---------------------------------------------------------------------

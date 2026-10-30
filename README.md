@@ -15,6 +15,10 @@
   - 文件夹：顶层列出所有根文件夹，逐级进入；列包括封面、标题 / 歌手、专辑、文件大小、时长，文件夹行显示总大小与总时长；窗口变窄时依次收起专辑、大小、序号列。
   - 歌手、专辑（封面网格）、标签（流派）。
   - 封面在后台生成 400 px JPEG 缩略图并缓存（macOS `~/Library/Caches/Zeo/covers`，Windows `%LOCALAPPDATA%\Zeo\covers`）。
+- **歌单**（侧栏「歌单」区直接列出，存到数据目录的 `playlists.json`）
+  - 手动歌单：在任意曲目上点右键（或全屏页「⋯」）→「添加到歌单」，可选已有歌单或「新建歌单…」；歌单页里右键「从歌单中移除」。文件被移走后条目保留，回到曲库时重新出现。
+  - 智能歌单：按条件从曲库自动聚合，曲库变化时跟着更新。条件可选标签（标题、歌手、专辑、专辑歌手、流派、年份）、音频（格式、时长、采样率、比特率、声道数）、文件（文件夹、文件名、大小、修改时间）；文本比较不分大小写，流派有多个值时任一满足即可；组合方式为「全部」或「任一」，可排序并限制数量，编辑时实时显示匹配数。
+  - 侧栏「+」新建；右键歌单可重命名 / 编辑条件、删除（删除前确认，不动文件）。
 - **播放**：symphonia 解码 → 声道转换 → rubato 重采样 → cpal 输出；精确 seek；队列上一首 / 下一首；playwire 接入系统 Now Playing、媒体键与锁屏控制。
   - 淡入淡出：播放、暂停、跳转、切歌时音量渐变（设置里选 关闭 / 0.1–1.5 秒，默认 0.2 秒）；在输出回调里逐帧推进，一首自然播完接下一首时不淡变。
 - **全屏播放**
@@ -34,12 +38,14 @@ nsh.json           应用配置："rust": "."、"root": "App"、"theme": "theme.
 theme.json         主题（shadcn cssVars 格式，浅色 / 深色）
 src/lib.rs         crate 入口，导出根组件 App
 src/ui/            界面：mod（外壳、侧栏）、store（信号与命令）、views（四视图与设置）、
+                   playlists（歌单区、歌单页、右键菜单、编辑弹窗）、
                    bar（底部播放条）、full（全屏播放与歌词）、parts、icons、theme
 src/engine.rs      引擎门面：Player / Library / Meta
 src/audio.rs       解码线程与 cpal 输出        src/codec.rs     symphonia 封装
 src/library.rs     曲库、扫描进度、流派拆分    src/watcher.rs   文件夹监视（notify / FSEvents）
 src/metadata.rs    lofty 标签与缓存            src/covers.rs    封面缩略图
 src/lyrics.rs      LRC 解析                    src/waveform.rs  波形
+src/playlists.rs   歌单模型、智能规则、持久化
 src/media.rs       playwire 系统媒体会话        src/e2e.rs       端到端测试
 src/fonts.rs       字体列表与导入            src/window.rs    关闭拦截、托盘
 tests/ui.rs        界面测试（nsh_testing::Headless 无头运行根组件）

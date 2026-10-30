@@ -5,6 +5,7 @@ mod bar;
 mod full;
 mod icons;
 mod parts;
+mod playlists;
 mod queue;
 pub mod store;
 mod theme;
@@ -29,6 +30,8 @@ pub enum Nav {
     Albums,
     Genres,
     Settings,
+    /// 一个歌单（id）。
+    Playlist(u64),
 }
 
 const LIBRARY: [(Nav, &str, Icon); 4] = [
@@ -106,6 +109,7 @@ pub fn App() -> impl IntoElement {
         .font_family(store::font_family)
         .child(when(move || !s.hidden.get(), shell))
         .child(when(move || s.close_prompt.get(), close_prompt))
+        .child(when(move || s.editor.with(Option::is_some), playlists::editor_dialog))
 }
 
 /// 标题栏行：中间是应用图标与名称，右侧搜索框；两端让出系统按钮
@@ -173,6 +177,7 @@ fn page(nav: Signal<Nav>) -> AnyElement {
             Nav::Albums => views::albums().into_element(),
             Nav::Genres => views::genres().into_element(),
             Nav::Settings => views::settings().into_element(),
+            Nav::Playlist(id) => playlists::page(id).into_element(),
         }
     })
 }
@@ -248,7 +253,7 @@ fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> View {
         )
 }
 
-fn section_label(label: &'static str) -> Text {
+pub(crate) fn section_label(label: &'static str) -> Text {
     text(label)
         .text_size(px(11.0))
         .font_weight(FontWeight::SEMIBOLD)
@@ -275,7 +280,7 @@ fn sidebar() -> View {
                 .child(section_label("曲库"))
                 .children(LIBRARY.iter().map(|&(target, label, glyph)| nav_row(target, label, glyph))),
         )
-        .child(view().flex_1().window_drag(true))
+        .child(playlists::sidebar_section())
         .child(
             view()
                 .px(px(10.0))

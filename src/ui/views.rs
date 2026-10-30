@@ -52,6 +52,26 @@ fn track_list(
     cols: Columns,
     header: AnyElement,
 ) -> VirtualList {
+    list_of_tracks(items, use_track_numbers, cols, header, None)
+}
+
+/// 歌单页的曲目列表：`from` 为手动歌单时右键菜单可从中移除。
+pub(super) fn track_list_in(
+    items: Memo<Rc<Vec<TrackEntry>>>,
+    cols: Columns,
+    header: AnyElement,
+    from: Option<u64>,
+) -> VirtualList {
+    list_of_tracks(items, false, cols, header, from)
+}
+
+fn list_of_tracks(
+    items: Memo<Rc<Vec<TrackEntry>>>,
+    use_track_numbers: bool,
+    cols: Columns,
+    header: AnyElement,
+    from: Option<u64>,
+) -> VirtualList {
     let count = computed(move || items.with(|v| v.len()));
     virtual_list(count, move |at| {
         let track = computed(move || items.with(|v| v.get(at.index()).cloned()));
@@ -63,10 +83,13 @@ fn track_list(
                 (index + 1).to_string()
             }
         });
-        track_row(track, number, cols, move || {
-            items.with_untracked(|v| play_list(v, untracked(|| at.index())))
+        let play = Rc::new(move || items.with_untracked(|v| play_list(v, untracked(|| at.index()))));
+        let row = track_row(track, number, cols, {
+            let play = play.clone();
+            move || play()
         })
-        .mx(px(20.0))
+        .mx(px(20.0));
+        super::playlists::track_menu(row, track, from, move || play())
     })
     .estimated_item_size(px(ROW))
     .header(header)
@@ -458,11 +481,16 @@ pub fn Folders() -> impl IntoElement {
                         Some(FolderRow::Track { number, .. }) => number.to_string(),
                         _ => String::new(),
                     });
-                    track_row(track, number, FOLDER_COLS, move || {
+                    let play = Rc::new(move || {
                         let Some(FolderRow::Track { number, .. }) = row.get_untracked() else { return };
                         let queue = here.with_untracked(|p| p.queue.clone());
                         play_indices(&queue, number - 1);
-                    })
+                    });
+                    let row = track_row(track, number, FOLDER_COLS, {
+                        let play = play.clone();
+                        move || play()
+                    });
+                    super::playlists::track_menu(row, track, None, move || play())
                 })
                 .into_element()
         })
