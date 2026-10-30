@@ -28,6 +28,7 @@ test("folders page lists the root folders with a size column", async () => {
   const texts = app.texts();
   expect(texts.some((t) => t.includes("个根文件夹"))).toBe(true);
   expect(texts).toContain("时长");
+  expect(texts).toContain("格式");
 });
 
 test("narrow windows drop the album and size columns", async () => {

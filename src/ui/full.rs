@@ -233,6 +233,8 @@ fn left_column(swap: &Swap) -> View {
     };
 
     let tags = dynamic(move || {
+        // 流派按设置里的分隔符拆开（和标签页一致），分隔符一改就跟着变。
+        let separators = s.library.with(|l| l.separators.clone());
         let list: Vec<(String, bool)> = s.meta.with(|m| {
             let Some(m) = m else { return Vec::new() };
             let mut out = Vec::new();
@@ -242,7 +244,8 @@ fn left_column(swap: &Swap) -> View {
             if let Some(year) = m.year {
                 out.push((year.to_string(), false));
             }
-            out.extend(m.genres.iter().take(3).map(|g| (g.clone(), false)));
+            let genres = crate::library::split_genres(&m.genres, &separators);
+            out.extend(genres.into_iter().take(3).map(|g| (g, false)));
             if let Some(codec) = &m.codec {
                 out.push((codec.clone(), false));
             }

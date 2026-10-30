@@ -15,8 +15,11 @@ use crate::codec::Source;
 use crate::media::MediaSession;
 use crate::metadata::MetaCache;
 
-/// 环形缓冲上限（输出帧数，约 250ms @48k）。
-const RING_MAX_FRAMES: usize = 12_000;
+/// 环形缓冲目标（输出帧数，约 0.5 s @48k）。Windows 的 sleep 粒度约 15.6 ms，
+/// 余量要足；每轮把缓冲一次填到目标，而不是只解一个包。
+const RING_MAX_FRAMES: usize = 24_000;
+/// 每轮最多解码的包数（防止一轮占太久，命令响应变慢）。
+const MAX_PACKETS_PER_TICK: usize = 64;
 
 pub enum EngineCmd {
     Load { path: PathBuf, queue: Vec<String> },
@@ -162,15 +165,61 @@ impl EngineHandle {
 struct Loaded {
     source: Source,
     resampler: Option<ResamplerState>,
-    carry: Vec<f32>,           // 通道转换后的输入暂存（交交错、dev 声道数）
-    src_rate: u32,
+    carry: Vec<f32>,           // 通道转换后的输入暂存（交错、dev 声道数）
+    out: Vec<f32>,             // 重采样产出暂存
     src_channels: usize,
 }
 
-struct ResamplerState {
+/// 流式重采样：解码包大小不定，攒够重采样器一块的输入才处理，余下留到
+/// 下一包。（以前每包的尾巴补零送入，等于每秒插入几十段静音：断续、爆音。）
+pub(crate) struct ResamplerState {
     fft: rubato::Fft<f32>,
-    input_scratch: Vec<f32>,
+    channels: usize,
+    pending: Vec<f32>,
     output_scratch: Vec<f32>,
+}
+
+impl ResamplerState {
+    pub(crate) fn new(from: u32, to: u32, channels: usize) -> Result<Self, String> {
+        let fft = rubato::Fft::<f32>::new(from as usize, to as usize, 1024, channels, rubato::FixedSync::Input)
+            .map_err(|e| e.to_string())?;
+        Ok(ResamplerState { fft, channels, pending: Vec::new(), output_scratch: Vec::new() })
+    }
+
+    /// 清空延迟线与暂存（seek 后）。
+    fn reset(&mut self) {
+        self.fft.reset();
+        self.pending.clear();
+    }
+
+    /// 送入交错样本，把产出追加到 `out`。
+    pub(crate) fn push(&mut self, input: &[f32], out: &mut Vec<f32>) -> Result<(), String> {
+        let ch = self.channels;
+        self.pending.extend_from_slice(input);
+        let mut start = 0;
+        loop {
+            let needed = self.fft.input_frames_next().max(1);
+            if self.pending.len() - start < needed * ch {
+                break;
+            }
+            let out_max = self.fft.output_frames_max();
+            self.output_scratch.resize(out_max * ch, 0.0);
+            let chunk = &self.pending[start..start + needed * ch];
+            let input = rubato::audioadapter_buffers::direct::InterleavedSlice::new(chunk, ch, needed)
+                .map_err(|e| format!("重采样输入错误: {e}"))?;
+            let mut output =
+                rubato::audioadapter_buffers::direct::InterleavedSlice::new_mut(&mut self.output_scratch, ch, out_max)
+                    .map_err(|e| format!("重采样输出错误: {e}"))?;
+            let (_, written) = self
+                .fft
+                .process_into_buffer(&input, &mut output, None)
+                .map_err(|e| format!("重采样错误: {e}"))?;
+            out.extend_from_slice(&self.output_scratch[..written * ch]);
+            start += needed * ch;
+        }
+        self.pending.drain(..start);
+        Ok(())
+    }
 }
 
 fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: MediaSession) {
@@ -219,9 +268,20 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
         // 2. 解码填充
         if let Some(l) = loaded.as_mut() {
             let playing = shared.playing.load(Ordering::Relaxed);
-            let ring_len = shared.ring.lock().unwrap().len();
-            if playing && ring_len < RING_MAX_FRAMES * dev_channels {
-                match fill_ring(l, &shared, dev_channels) {
+            let mut result = Ok(false);
+            if playing {
+                for _ in 0..MAX_PACKETS_PER_TICK {
+                    if shared.ring.lock().unwrap().len() >= RING_MAX_FRAMES * dev_channels {
+                        break;
+                    }
+                    result = fill_ring(l, &shared, dev_channels);
+                    if !matches!(result, Ok(false)) {
+                        break;
+                    }
+                }
+            }
+            if playing {
+                match result {
                     Ok(ended) => {
                         if ended {
                             let (queue, index) = {
@@ -307,18 +367,8 @@ fn handle_cmd(
                         reset_ring(shared, actual, dev_rate);
                         l.carry.clear();
                         if let Some(r) = l.resampler.as_mut() {
-                            // 重建重采样器以清空其内部延迟线。
-                            let new = rubato::Fft::<f32>::new(
-                                l.src_rate as usize,
-                                dev_rate as usize,
-                                1024,
-                                dev_channels,
-                                rubato::FixedSync::Input,
-                            );
-                            if let Ok(fft) = new {
-                                r.fft = fft;
-                                r.output_scratch.clear();
-                            }
+                            // 清空延迟线与暂存，跳转点之前的样本不再输出。
+                            r.reset();
                         }
                         publish_media(shared, media, true);
                     }
@@ -380,14 +430,8 @@ fn load_track(
             let src_rate = source.sample_rate;
             let src_channels = source.channels;
             let resampler = if src_rate != dev_rate {
-                match rubato::Fft::<f32>::new(
-                    src_rate as usize,
-                    dev_rate as usize,
-                    1024,
-                    dev_channels,
-                    rubato::FixedSync::Input,
-                ) {
-                    Ok(fft) => Some(ResamplerState { fft, input_scratch: Vec::new(), output_scratch: Vec::new() }),
+                match ResamplerState::new(src_rate, dev_rate, dev_channels) {
+                    Ok(r) => Some(r),
                     Err(err) => {
                         set_error(shared, &format!("重采样器创建失败: {err}"));
                         shared.loading.store(false, Ordering::Relaxed);
@@ -397,7 +441,7 @@ fn load_track(
             } else {
                 None
             };
-            *loaded = Some(Loaded { source, resampler, carry: Vec::new(), src_rate, src_channels });
+            *loaded = Some(Loaded { source, resampler, carry: Vec::new(), out: Vec::new(), src_channels });
 
             let actual_index = if queue_index_hint >= 0 {
                 queue_index_hint
@@ -466,56 +510,17 @@ fn fill_ring(l: &mut Loaded, shared: &Arc<Shared>, dev_channels: usize) -> Resul
     let Some(block) = l.source.next_block()? else {
         return Ok(true);
     };
-    let frames = block.len() / l.src_channels.max(1);
-    if frames == 0 {
+    if block.len() / l.src_channels.max(1) == 0 {
         return Ok(false);
     }
     // 1) 声道数转换 → dev_channels
     convert_channels(block, l.src_channels, dev_channels, &mut l.carry);
-    // 2) 重采样或直通
+    // 2) 重采样或直通；锁只在最后追加时短暂持有（输出回调也要这把锁）。
     if let Some(r) = l.resampler.as_mut() {
-        let mut consumed = 0usize;
-        while consumed < frames {
-            let needed = r.fft.input_frames_next().max(1);
-            let take = needed.min(frames - consumed);
-            let is_last_partial = take < needed;
-            r.input_scratch.clear();
-            r.input_scratch.extend_from_slice(
-                &l.carry[consumed * dev_channels..(consumed + take) * dev_channels],
-            );
-            if is_last_partial {
-                // 包内尾块不足一块：补零凑整（可忽略的边界损失）。
-                r.input_scratch.resize(needed * dev_channels, 0.0);
-            }
-            let out_max = r.fft.output_frames_max();
-            r.output_scratch.resize(out_max * dev_channels, 0.0);
-            let input = rubato::audioadapter_buffers::direct::InterleavedSlice::new(
-                &r.input_scratch,
-                dev_channels,
-                needed,
-            )
-            .map_err(|e| format!("重采样输入错误: {e}"))?;
-            let mut output = rubato::audioadapter_buffers::direct::InterleavedSlice::new_mut(
-                &mut r.output_scratch,
-                dev_channels,
-                out_max,
-            )
-            .map_err(|e| format!("重采样输出错误: {e}"))?;
-            let (_, written) = r
-                .fft
-                .process_into_buffer(&input, &mut output, None)
-                .map_err(|e| format!("重采样错误: {e}"))?;
-            if written > 0 {
-                shared
-                    .ring
-                    .lock()
-                    .unwrap()
-                    .extend(r.output_scratch[..written * dev_channels].iter().copied());
-            }
-            consumed += take;
-            if is_last_partial {
-                break;
-            }
+        l.out.clear();
+        r.push(&l.carry, &mut l.out)?;
+        if !l.out.is_empty() {
+            shared.ring.lock().unwrap().extend(l.out.iter().copied());
         }
     } else {
         shared.ring.lock().unwrap().extend(l.carry.iter().copied());
@@ -588,4 +593,42 @@ fn output_callback(shared: &Shared, data: &mut [f32], channels: usize) {
 fn publish_media(shared: &Arc<Shared>, media: &MediaSession, _force: bool) {
     let snap = shared.snapshot();
     media.publish(&snap);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 44.1 kHz → 48 kHz（Windows 共享模式的常见组合），按 MP3 / FLAC 那样
+    /// 大小不一的包送入：输出连续、没有插入的静音或跳变，长度符合比例。
+    #[test]
+    fn resampling_odd_packets_is_continuous() {
+        let (from, to, ch) = (44_100_u32, 48_000_u32, 2_usize);
+        let freq = 1000.0_f32;
+        let total = from as usize * 2; // 2 s
+        let input: Vec<f32> = (0..total)
+            .flat_map(|i| {
+                let v = (i as f32 * freq * std::f32::consts::TAU / from as f32).sin() * 0.5;
+                [v, v]
+            })
+            .collect();
+        let mut r = ResamplerState::new(from, to, ch).unwrap();
+        let mut out = Vec::new();
+        let sizes = [1152_usize, 4096, 576, 1000, 4608, 17];
+        let (mut at, mut k) = (0, 0);
+        while at < total {
+            let n = sizes[k % sizes.len()].min(total - at);
+            r.push(&input[at * ch..(at + n) * ch], &mut out).unwrap();
+            at += n;
+            k += 1;
+        }
+        let frames = out.len() / ch;
+        let expected = total as f64 * to as f64 / from as f64;
+        assert!((frames as f64) > expected - 3000.0 && (frames as f64) <= expected + 10.0, "{frames} vs {expected}");
+        // 跳过开头的滤波器延迟，此后相邻样本的差不超过正弦的最大斜率（加余量）。
+        let max_step = 0.5 * freq * std::f32::consts::TAU / to as f32 * 1.3;
+        let left: Vec<f32> = out.iter().step_by(ch).copied().collect();
+        let worst = left[2048..].windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0_f32, f32::max);
+        assert!(worst < max_step, "跳变 {worst} ≥ {max_step}");
+    }
 }

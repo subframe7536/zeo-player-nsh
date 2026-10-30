@@ -193,10 +193,12 @@ pub struct Columns {
     pub cover: bool,
     pub album: bool,
     pub size: bool,
+    /// 音频格式（MP3 / FLAC / WAV）。
+    pub format: bool,
 }
 
 impl Columns {
-    pub const ALL: Columns = Columns { cover: true, album: true, size: false };
+    pub const ALL: Columns = Columns { cover: true, album: true, size: false, format: false };
 }
 
 /// 列宽（列头、曲目行、文件夹行共用，保证对齐）。
@@ -204,6 +206,7 @@ pub const W_NUMBER: f32 = 28.0;
 pub const W_COVER: f32 = 40.0;
 pub const W_ALBUM: f32 = 220.0;
 pub const W_SIZE: f32 = 72.0;
+pub const W_FORMAT: f32 = 48.0;
 pub const W_TIME: f32 = 56.0;
 
 /// 内容区宽度（窗口减侧栏）。读取即订阅窗口大小。
@@ -220,6 +223,35 @@ pub fn fits_size() -> bool {
 }
 pub fn fits_number() -> bool {
     content_width() >= 420.0
+}
+
+/// 文件的音频格式（扩展名大写）：MP3、FLAC、WAV。
+pub fn audio_format(path: &str) -> String {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_uppercase())
+        .unwrap_or_default()
+}
+
+/// 格式小标签（定宽列内左对齐）；值为空时不画框。
+pub fn format_cell(value: impl Fn() -> String + Copy + 'static) -> View {
+    view().w(px(W_FORMAT)).items_start().child(when(move || !value().is_empty(), move || {
+        view()
+            .h(px(18.0))
+            .px(px(5.0))
+            .justify_center()
+            .rounded(px(4.0))
+            .border_1()
+            .border_color(border())
+            .child(
+                text(value)
+                    .text_size(px(10.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .letter_spacing(px(0.4))
+                    .text_color(muted_fg()),
+            )
+    }))
 }
 
 /// 字节数 → 1.2 GB / 34.5 MB / 820 KB。
@@ -267,6 +299,7 @@ pub fn track_columns(cols: Columns) -> View {
         .child(cols.cover.then(|| view().w(px(W_COVER))))
         .child(view().flex_1().min_w(px(60.0)).child(label("标题")))
         .child(cols.album.then(|| when(fits_album, move || view().w(px(W_ALBUM)).child(label("专辑")))))
+        .child(cols.format.then(|| when(fits_size, move || view().w(px(W_FORMAT)).child(label("格式")))))
         .child(cols.size.then(|| when(fits_size, move || view().w(px(W_SIZE)).items_end().child(label("大小")))))
         .child(view().w(px(W_TIME)).items_end().child(label("时长")))
 }
@@ -352,6 +385,7 @@ pub fn track_row(
                     .text_color(muted_fg()),
             )
         })))
+        .child(cols.format.then(|| when(fits_size, move || format_cell(field(|t| audio_format(&t.path))))))
         .child(cols.size.then(|| when(fits_size, move || value_cell(W_SIZE, field(|t| format_bytes(t.size_bytes))))))
         .child(value_cell(W_TIME, field(|t| format_time(t.duration))))
 }

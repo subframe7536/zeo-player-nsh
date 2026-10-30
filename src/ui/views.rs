@@ -17,9 +17,9 @@ use crate::library::{library_store, TrackEntry};
 // --- 共用 ---------------------------------------------------------------------
 
 /// 专辑详情：头部已有封面与专辑名。
-const ALBUM_COLS: Columns = Columns { cover: false, album: false, size: false };
+const ALBUM_COLS: Columns = Columns { cover: false, album: false, size: false, format: false };
 /// 文件夹：面向文件，带大小列。
-const FOLDER_COLS: Columns = Columns { cover: true, album: true, size: true };
+const FOLDER_COLS: Columns = Columns { cover: true, album: true, size: true, format: true };
 
 fn compare(a: &str, b: &str) -> std::cmp::Ordering {
     a.to_lowercase().cmp(&b.to_lowercase())
@@ -531,6 +531,8 @@ fn folder_cell(row: Memo<Option<FolderRow>>, cwd: Signal<Option<String>>) -> Vie
                 .text_color(muted_fg()),
             )
         }))
+        // 文件夹行的格式列留空，保持与曲目行对齐。
+        .child(when(fits_size, || view().w(px(W_FORMAT))))
         .child(when(fits_size, move || {
             value_cell(W_SIZE, pick(|r| match r {
                 FolderRow::Folder { bytes, .. } => format_bytes(*bytes),
@@ -1762,6 +1764,8 @@ mod tests {
         assert_eq!(place_with(&two, Some("/x"), '/').parent, Some(None));
         assert_eq!(place_with(&two, Some("/gone"), '/').path, None);
         assert_eq!(format_total_short(3725.0), "1:02:05");
+        assert_eq!(audio_format("/m/a.flac"), "FLAC");
+        assert_eq!(audio_format("C:\\m\\b.Mp3"), "MP3");
         assert_eq!(format_bytes(1536 * 1024), "1.5 MB");
     }
 }
