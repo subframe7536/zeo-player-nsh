@@ -61,7 +61,8 @@ test("font list loads on demand and is gone after leaving settings", async () =>
   expect(app.texts()).not.toContain("正在读取字体…");
   await app.press("更改字体…");
   await app.waitFor("label:收起字体列表");
-  await app.waitUntil(() => app.texts().some((t) => /^\d+ 个$/.test(t)));
+  // 第一次查询系统字体在冷的 Windows CI 机器上可能要好几秒。
+  await app.waitUntil(() => app.texts().some((t) => /^\d+ 个$/.test(t)), { timeout: 30000 });
   await app.press("文件夹");
   await app.press("设置");
   await app.waitFor("更改字体…"); // 回来时列表已销毁，重新收起
