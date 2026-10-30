@@ -21,7 +21,7 @@
   - 56 根波形进度：按 ap-spec `createWaveformGenerator` 计算（第一声道约 2000 块 RMS，以 95 分位为参考峰值，映射到 0.1–0.9）；播放头所在的那根只亮到播放头；可点击或拖动 seek。
   - 行级歌词（外置同名 `.lrc` 优先，其次内嵌）：自动滚动、手动滚动后 3 秒恢复跟随、点击行 seek、按距离变暗变模糊、翻译行；悬停时文字有高亮，行最右侧浮出时间戳。
   - 键盘：Space 播放 / 暂停，← → 快退 / 快进 5 秒，↑ ↓ 音量，Esc 收起。
-- **字体**：界面字体可选系统字体或任一已安装字体（fontdb 列出，懒加载，离开设置页即释放），可导入 .ttf / .otf / .ttc（只在 Zeo 内注册）。
+- **字体**：界面字体可选系统字体或任一已安装字体（fontdb 列出，懒加载，离开设置页即释放）；macOS 上可导入 .ttf / .otf / .ttc（只在 Zeo 内注册，Windows 见「待上游」）。
 - **LRC 解析**：多时间戳、卡拉 OK 碎片清理、元数据头合并、翻译行、短空行跳过、连续空行合并、无时间戳回退。
 
 ## 结构
@@ -40,27 +40,33 @@ src/lyrics.rs      LRC 解析                    src/waveform.rs  波形
 src/media.rs       playwire 系统媒体会话        src/e2e.rs       端到端测试
 src/fonts.rs       字体列表与导入
 App.test.tsx       nsh test 的界面测试（无头打开 Rust 根组件）
-vendor/            补丁版 nsh-platform-macos / -windows（见下文「内存」）
 scripts/           make-test-music.sh：端到端测试语料
 .github/workflows/ CI：macOS 与 Windows 上 check / test / package
 ```
 
 ## 内存
 
-Release 包（`nsh package`）实测 footprint（macOS，949 首、全部带内嵌封面的曲库）：
+Release 包（`nsh package`）实测 footprint（macOS，949 首、全部带内嵌封面、868 张专辑）：
 
 | 场景 | 内存 |
 |---|---|
 | 启动扫描完、停在文件夹页 | 23 MB |
-| 专辑封面网格从头滚到底 | 81 MB |
-| 再打开全屏播放并连续切 20 首 | 87 MB（峰值 91 MB） |
+| 打开专辑页（首屏封面） | 58 MB |
+| 打开全屏播放并连续切 20 首 | 136 MB |
+| 专辑封面网格从头滚到底（最坏情况） | 约 300 MB |
 
-做法：
+应用侧的做法：
 - 标签缓存不存封面原图（每首约 170 KB）：只记 `has_art`，用到时 `metadata::read_artwork` 读一次即释放。
 - 列表用 400 px 缩略图文件，全屏页用 720 px 文件，背景用预先模糊好的 64 px 小图（不在窗口尺寸上实时模糊）；都不用 data URI。
-- NSH 0.3.0 的解码图片缓存上限是 128 MB（`CACHE_BYTES`），封面多时它本身就占满，Core Animation 还另有一份。`vendor/` 里是改成 24 MB 的 `nsh-platform-macos` / `nsh-platform-windows`，经 `.cargo/config.toml` 的 `[patch.crates-io]` 替换，nsh 生成的 runner 同样生效。Windows 版另导出 `register_font`，用于运行时导入字体。升级 nsh 时运行 `sh vendor/update.sh <版本>` 重新打补丁。
 
-测量方法：`ZEO_BENCH=1` 启动时自动依次打开各视图、滚动专辑网格、播放并切歌（`src/ui/mod.rs` 的 `bench`），步骤打印到 stderr，期间用 `footprint <pid>` 取样。
+剩下的大头在 NSH 里，见下文「待上游」。
+
+测量方法：`ZEO_BENCH=1` 启动时自动依次打开各视图、滚动专辑网格、播放并切歌（`src/ui/mod.rs` 的 `bench`；`ZEO_BENCH_NO_SCROLL=1` 跳过滚动），步骤打印到 stderr，期间用 `footprint <pid>` 取样。
+
+## 待上游（NSH）
+
+- **解码图片缓存上限不可配置。** `nsh-platform-macos` / `nsh-platform-windows` 0.3.0 的 `src/image.rs` 里 `CACHE_BYTES` 固定为 128 MB，按最近使用淘汰。封面多时它会被填满，macOS 上 Core Animation 还持有同一批图片的副本，所以滚完整个专辑网格后 footprint 约 300 MB。本地实验把它改成 24 MB 后，同一场景峰值为 91 MB，滚动时没有可见的重新加载。希望 NSH 提供配置项（例如 `AppOptions` 或 `nsh.json` 里的图片缓存上限），或在内存压力时清理该缓存。
+- **Windows 无运行时注册字体的公开接口。** Windows 后端内部有 `add_font`（DirectWrite 进程内字体集合），但没有导出；Rust 应用只能在编译期通过 `assets!()` 带字体。因此 Zeo 的「导入字体」目前只在 macOS（CoreText，进程内注册）提供，Windows 上可以选择系统已安装的字体。
 
 ## 工具链
 
@@ -73,7 +79,7 @@ nsh --version                                   # nsh 0.3.0
 
 Windows 用 PowerShell：`irm https://nsh.dev/install.ps1 | iex`（装到 `%LOCALAPPDATA%\nsh`）。
 
-另需 Rust（[rustup](https://rustup.rs)），以及各平台的构建工具：macOS 为 Xcode 命令行工具；Windows 为 Visual Studio Build Tools（“使用 C++ 的桌面开发”与 Windows SDK）和 LLVM（libclang，`nsh test` 的无头 runner 需要；不在 `C:\Program Files\LLVM` 时设 `LIBCLANG_PATH`）。`Cargo.toml` 中 `nsh-core` / `nsh-base` / `nsh-platform-*` 的版本须与 CLI 一致（当前 `0.3.0`），升级 CLI 时一起改。
+另需 Rust（[rustup](https://rustup.rs)），以及各平台的构建工具：macOS 为 Xcode 命令行工具；Windows 为 Visual Studio Build Tools（“使用 C++ 的桌面开发”与 Windows SDK）和 LLVM（libclang，`nsh test` 的无头 runner 需要；不在 `C:\Program Files\LLVM` 时设 `LIBCLANG_PATH`）。`Cargo.toml` 中 `nsh-core` / `nsh-base` 的版本须与 CLI 一致（当前 `0.3.0`），升级 CLI 时一起改。
 
 ## 开发
 

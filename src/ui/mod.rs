@@ -227,7 +227,7 @@ fn bench(open_full: Rc<dyn Fn()>) {
             wait(6).await;
         }
         // 专辑网格从头滚到底：每张封面都解码一遍（最坏情况）。
-        if let Some(grid) = BENCH_GRID.with(|g| g.get()) {
+        if let Some(grid) = BENCH_GRID.with(|g| g.get()).filter(|_| std::env::var_os("ZEO_BENCH_NO_SCROLL").is_none()) {
             for i in 0..120 {
                 grid.scroll_to_offset(px(i as f32 * 400.0), false);
                 timer(std::time::Duration::from_millis(150)).await;

@@ -17,7 +17,6 @@ test("sidebar navigates between library views", async () => {
   expect(app.texts()).toContain("流派标签");
   expect(app.texts()).toContain("分号");
   expect(app.texts()).toContain("监视文件夹变化");
-  expect(app.texts()).toContain("导入字体…");
   expect(app.texts()).toContain("系统字体");
 });
 

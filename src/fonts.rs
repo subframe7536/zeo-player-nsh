@@ -131,26 +131,14 @@ mod platform {
     }
 }
 
-/// Windows：交给 DirectWrite 的进程内字体集合（vendor 里的
-/// `nsh_platform_windows::register_font`，见 vendor/README.md）。删除要
-/// 重启后生效。
-#[cfg(target_os = "windows")]
-mod platform {
-    use std::path::Path;
-
-    pub fn register(path: &Path) -> Result<(), String> {
-        let data = std::fs::read(path).map_err(|e| format!("无法读取 {}：{e}", path.display()))?;
-        nsh_platform_windows::register_font(&data).map_err(|e| format!("无法注册 {}：{e}", path.display()))
-    }
-    pub fn unregister(_path: &Path) {}
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+/// 其它平台（含 Windows）：NSH 0.3.0 没有运行时注册字体的公开接口，导入
+/// 暂不可用（见 README「待上游」）；已安装字体照常可选。
+#[cfg(not(target_os = "macos"))]
 mod platform {
     use std::path::Path;
 
     pub fn register(_path: &Path) -> Result<(), String> {
-        Err("此平台暂不支持导入字体".into())
+        Err("此平台暂不支持导入字体，可以选择系统里已安装的字体".into())
     }
     pub fn unregister(_path: &Path) {}
 }
@@ -199,7 +187,9 @@ mod tests {
         let list = installed_families();
         eprintln!("{} 个字体家族，{:?}", list.len(), started.elapsed());
         assert!(list.len() > 20, "{} 个", list.len());
-        assert!(list.iter().any(|f| f == "Helvetica" || f == "PingFang SC"));
+        // 各系统必有的界面字体。
+        let expected: &[&str] = if cfg!(windows) { &["Segoe UI", "Arial"] } else { &["Helvetica", "PingFang SC"] };
+        assert!(list.iter().any(|f| expected.contains(&f.as_str())), "{list:?}");
         assert!(list.iter().all(|f| !f.starts_with('.')));
     }
 }

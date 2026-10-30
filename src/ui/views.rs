@@ -1514,10 +1514,16 @@ fn font_card() -> View {
 
     let toggle = move || view().self_start().child(outline_button(Icon::ChevronDown, "更改字体…", move || expanded.set(true)));
 
+    // 导入字体目前只有 macOS 支持（Windows 待 NSH 提供运行时注册字体的接口）。
+    let can_import = cfg!(target_os = "macos");
     card_section(
         "字体",
-        "整个界面（包括歌词）换用所选字体，立即生效。可以导入 .ttf / .otf / .ttc 文件，只在 Zeo 里可用，不会装进系统。",
-        Some(pill_button(Icon::Plus, "导入字体…", import).into_element()),
+        if can_import {
+            "整个界面（包括歌词）换用所选字体，立即生效。可以导入 .ttf / .otf / .ttc 文件，只在 Zeo 里可用，不会装进系统。"
+        } else {
+            "整个界面（包括歌词）换用所选字体，立即生效。"
+        },
+        can_import.then(|| pill_button(Icon::Plus, "导入字体…", import).into_element()),
     )
     .child(system)
     .child(when(move || expanded.get(), move || font_browser(version, message, expanded)).otherwise(toggle))
@@ -1701,7 +1707,7 @@ mod tests {
     #[test]
     fn tree_groups_by_root_and_folder() {
         let tracks = vec![entry("/m/a/1.mp3"), entry("/m/a/b/2.mp3"), entry("/m/3.mp3"), entry("/x/4.mp3")];
-        let tree = build_tree(&["/m".into()], &tracks);
+        let tree = build_tree_with(&["/m".into()], &tracks, '/');
         assert_eq!(tree.len(), 1);
         assert_eq!(tree[0].total, 3);
         assert_eq!(tree[0].tracks, vec![2]);
@@ -1732,29 +1738,29 @@ mod tests {
             t.size_bytes = size;
             t.duration = 60.0;
         }
-        let tree = build_tree(&["/m".into()], &tracks);
+        let tree = build_tree_with(&["/m".into()], &tracks, '/');
         // 顶层：一个根也列出来。
-        let top = place(&tree, None);
+        let top = place_with(&tree, None, '/');
         assert_eq!(top.path, None);
         assert_eq!(top.parent, None);
         assert!(matches!(&top.rows[..], [FolderRow::Folder { root: true, count: 3, bytes: 600, .. }]));
         // 根：子文件夹在前，再是本层曲目；返回顶层。
-        let m = place(&tree, Some("/m"));
+        let m = place_with(&tree, Some("/m"), '/');
         assert_eq!(m.parent, Some(None));
         assert_eq!(m.trail, "/m");
         assert!(matches!(&m.rows[0], FolderRow::Folder { name, root: false, count: 2, bytes: 300, .. } if name == "a"));
         assert!(matches!(m.rows[1], FolderRow::Track { index: 2, number: 1 }));
-        let a = place(&tree, Some("/m/a"));
+        let a = place_with(&tree, Some("/m/a"), '/');
         assert_eq!(a.parent, Some(Some("/m".into())));
         assert_eq!(a.trail, "m / a");
         assert_eq!(*a.queue, vec![0]);
         assert_eq!(*a.all, vec![1, 0]);
         // 多个根；不存在的位置回到顶层。
         let both = vec![entry("/m/1.mp3"), entry("/x/2.mp3")];
-        let two = build_tree(&["/m".into(), "/x".into()], &both);
-        assert_eq!(place(&two, None).rows.len(), 2);
-        assert_eq!(place(&two, Some("/x")).parent, Some(None));
-        assert_eq!(place(&two, Some("/gone")).path, None);
+        let two = build_tree_with(&["/m".into(), "/x".into()], &both, '/');
+        assert_eq!(place_with(&two, None, '/').rows.len(), 2);
+        assert_eq!(place_with(&two, Some("/x"), '/').parent, Some(None));
+        assert_eq!(place_with(&two, Some("/gone"), '/').path, None);
         assert_eq!(format_total_short(3725.0), "1:02:05");
         assert_eq!(format_bytes(1536 * 1024), "1.5 MB");
     }
