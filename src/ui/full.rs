@@ -581,6 +581,8 @@ fn lyrics_scroller() -> View {
     let viewport = signal(0.0_f32);
     let laid = signal(0_usize);
     let follow = signal(true);
+    // 指针在歌词区域内：所有行去掉模糊（看清再点）。
+    let hovering = signal(false);
     let line_ys: Rc<RefCell<Vec<f32>>> = Rc::default();
     let target: Rc<RefCell<Option<(f32, std::time::Instant)>>> = Rc::default();
     let resume: Rc<RefCell<Option<Spawned<()>>>> = Rc::default();
@@ -727,19 +729,21 @@ fn lyrics_scroller() -> View {
                     .w_full()
                     .style_with(move |st| {
                         let d = distance();
-                        let (opacity, blur) = if !timed {
-                            (0.85, 0.0)
+                        let opacity = if !timed {
+                            0.85
                         } else if d == 0.0 {
-                            (1.0, 0.0)
+                            1.0
                         } else {
-                            ((0.42 - d * 0.035).max(0.16), (0.8 + d * 0.7).min(4.0))
+                            (0.42 - d * 0.035).max(0.16)
                         };
+                        // 鼠标在歌词区时不模糊；否则按与高亮行的距离模糊。
+                        let blur = if hovering.get() { 0.0 } else { lyric_blur(timed, d) };
                         st.opacity(opacity).blur(px(blur))
                     })
                     .transition_all()
                     .duration(300.0)
-                    // 悬停时这一行也变清楚，便于看清再点。
-                    .group_hover(|st| st.opacity(1.0).blur(px(0.0)))
+                    // 悬停的这一行也变亮，便于看清再点。
+                    .group_hover(|st| st.opacity(1.0))
                     .child(content_view),
             )
             .child(stamp)
@@ -771,6 +775,8 @@ fn lyrics_scroller() -> View {
     view()
         .flex_1()
         .w_full()
+        .on_hover_in(move || hovering.set(true))
+        .on_hover_out(move || hovering.set(false))
         .child((!timed).then(|| {
             text("歌词无时间信息")
                 .text_center()
@@ -806,9 +812,25 @@ fn lyrics_scroller() -> View {
         )
 }
 
+/// 歌词行的模糊半径（点）：高亮行清晰，距离每多一行加 1.2，最多 8
+/// （ap-spec：`blur(min(8, distance × 1.2))`）。无时间轴的歌词不模糊。
+fn lyric_blur(timed: bool, distance: f32) -> f32 {
+    if timed { (distance * 1.2).min(8.0) } else { 0.0 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blur_grows_with_distance_from_the_active_line() {
+        assert_eq!(lyric_blur(true, 0.0), 0.0);
+        let steps: Vec<f32> = (1..=8).map(|d| lyric_blur(true, d as f32)).collect();
+        assert!(steps.windows(2).all(|w| w[0] < w[1] || w[1] == 8.0), "{steps:?}");
+        assert!((lyric_blur(true, 1.0) - 1.2).abs() < 1e-6);
+        assert_eq!(lyric_blur(true, 20.0), 8.0);
+        assert_eq!(lyric_blur(false, 5.0), 0.0);
+    }
 
     fn meta() -> MetaInfo {
         MetaInfo {
