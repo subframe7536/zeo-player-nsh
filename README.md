@@ -41,7 +41,7 @@ src/media.rs       playwire 系统媒体会话        src/e2e.rs       端到端
 src/fonts.rs       字体列表与导入
 App.test.tsx       nsh test 的界面测试（无头打开 Rust 根组件）
 scripts/           make-test-music.sh：端到端测试语料
-.github/workflows/ CI：macOS 与 Windows 上 check / test / package
+.github/            CI：推送 / PR 在 macOS 与 Windows 上 check + test；手动运行打包并建草稿 Release
 ```
 
 ## 内存
