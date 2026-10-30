@@ -40,3 +40,8 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 dispatch2 = "0.3"
 objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFontManager"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFURL", "CFError"] }
+
+# 界面测试（tests/ui.rs）：无头引擎运行根组件，不带 QuickJS。
+[dev-dependencies]
+nsh-engine = "0.3.0"
+nsh-testing = { version = "0.3.0", default-features = false }

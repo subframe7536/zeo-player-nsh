@@ -42,7 +42,7 @@ src/metadata.rs    lofty 标签与缓存            src/covers.rs    封面缩�
 src/lyrics.rs      LRC 解析                    src/waveform.rs  波形
 src/media.rs       playwire 系统媒体会话        src/e2e.rs       端到端测试
 src/fonts.rs       字体列表与导入            src/window.rs    关闭拦截、托盘
-App.test.tsx       nsh test 的界面测试（无头打开 Rust 根组件）
+tests/ui.rs        界面测试（nsh_testing::Headless 无头运行根组件）
 scripts/           make-test-music.sh：端到端测试语料
 .github/            CI：推送 / PR 在 macOS 与 Windows 上 check + test；手动运行打包并建草稿 Release
 ```
@@ -90,7 +90,7 @@ Windows 用 PowerShell：`irm https://nsh.dev/install.ps1 | iex`（装到 `%LOCA
 ```sh
 nsh run .                          # 本机窗口（macOS AppKit / Windows Win32）；改代码重建并重启
 nsh check .                        # cargo 检查与类型检查
-nsh test .                         # Rust 单元测试 + App.test.tsx 界面测试
+nsh test .                         # 单元测试 + tests/ui.rs 界面测试（等同 cargo test）
 nsh package . --target macos       # 生成 .nsh/out/Zeo.app（在 macOS 上）
 nsh package . --target windows     # 生成 Windows 安装包（在 Windows 上）
 ```
@@ -110,7 +110,7 @@ cargo test --release -- --ignored watcher_rescans         # 文件夹监视：�
 cargo test --release -- --ignored real_track_waveform --nocapture
 ```
 
-`src/e2e.rs` 的播放端到端测试需要 `/tmp/zeo-test-music` 测试语料（`sh scripts/make-test-music.sh` 用 ffmpeg 生成），没有时跳过。
+`src/e2e.rs` 的播放端到端测试和 `tests/ui.rs` 里依赖曲目的用例需要 `/tmp/zeo-test-music` 测试语料（`sh scripts/make-test-music.sh` 用 ffmpeg 生成），没有时跳过。
 
 ## 平台差异
 
