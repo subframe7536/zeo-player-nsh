@@ -5,9 +5,10 @@ use std::rc::Rc;
 use nsh_core::prelude::*;
 
 use super::icons::Icon;
-use super::parts::{cover, icon_button, progress_fraction, scrub, shown_time, thin_bar};
+use super::parts::{cover, growing_bar, icon_button, progress_fraction, scrub, shown_time, thin_bar};
 use super::store::{format_time, player, seek_to, set_volume, store, toggle_mute};
 use super::theme::*;
+use crate::audio::LoopMode;
 
 pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
     let s = store();
@@ -75,11 +76,23 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
             bg,
         ));
 
+    let mode_icon = move || match s.playback.with(|p| p.loop_mode) {
+        LoopMode::List => Icon::Repeat,
+        LoopMode::Single => Icon::RepeatOne,
+        LoopMode::Random => Icon::Shuffle,
+    };
     let controls = view()
         .flex_row()
         .items_center()
         .justify_center()
         .gap(px(12.0))
+        .child(icon_button(
+            mode_icon,
+            15.0,
+            "循环模式（顺序 / 单曲 / 随机）",
+            move || if s.playback.with(|p| p.loop_mode) == LoopMode::List { muted_fg() } else { primary() },
+            super::store::cycle_loop_mode,
+        ))
         .child(icon_button(|| Icon::Prev, 16.0, "上一首", fg, || player().previous()))
         .child(play)
         .child(icon_button(|| Icon::Next, 16.0, "下一首", fg, || player().next()));
@@ -141,7 +154,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
             toggle_mute,
         ))
         .child(scrub(
-            view().w(px(96.0)).child(thin_bar(volume, muted(), muted_fg())),
+            view().w(px(96.0)).child(growing_bar(volume, muted(), muted_fg())),
             set_volume,
             set_volume,
         ))

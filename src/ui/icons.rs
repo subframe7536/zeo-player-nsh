@@ -1,5 +1,6 @@
-//! 线条图标（24 × 24 SVG，data: URI）。颜色写进 SVG，按（图标, 颜色）缓存；
-//! 绑定读当前外观，切换深浅色时换图。
+//! 线条图标（24 × 24 SVG，data: URI）。颜色写进 SVG，按（图标, 尺寸, 颜色）
+//! 缓存；绑定读当前外观，切换深浅色时换图。SVG 声明的宽高就是显示尺寸：
+//! 光栅化按自然尺寸出图再缩放会糊边、粗细不匀（Windows 上尤其明显）。
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -38,6 +39,10 @@ pub enum Icon {
     Reveal,
     Copy,
     Queue,
+    Search,
+    Repeat,
+    RepeatOne,
+    Shuffle,
 }
 
 impl Icon {
@@ -72,12 +77,16 @@ impl Icon {
             Icon::Queue => r#"<path d="M4 6.5h12M4 11.5h12M4 16.5h7"/><path d="M15.5 14.5v5l4-2.5z" fill="currentColor" stroke="none"/>"#,
             Icon::Copy => r#"<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>"#,
             Icon::Wave => r#"<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>"#,
+            Icon::Search => r#"<circle cx="11" cy="11" r="7"/><path d="M20.5 20.5 16.6 16.6"/>"#,
+            Icon::Repeat => r#"<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>"#,
+            Icon::RepeatOne => r#"<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/><path d="M11 10h1v4"/>"#,
+            Icon::Shuffle => r#"<path d="m18 14 4 4-4 4"/><path d="m18 2 4 4-4 4"/><path d="M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22"/><path d="M2 6h1.972a4 4 0 0 1 3.6 2.2"/><path d="M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45"/>"#,
         }
     }
 }
 
 thread_local! {
-    static CACHE: RefCell<HashMap<(Icon, u32), SharedString>> = RefCell::new(HashMap::new());
+    static CACHE: RefCell<HashMap<(Icon, u32, u32), SharedString>> = RefCell::new(HashMap::new());
 }
 
 fn hex(color: Hsla) -> (u32, String) {
@@ -101,16 +110,16 @@ fn percent_encode(text: &str) -> String {
     out.replace(' ', "%20")
 }
 
-/// `icon` in `color` as an image URI.
-pub fn icon_uri(icon: Icon, color: Hsla) -> SharedString {
+/// `icon` in `color` as an image URI, drawn at `size` points.
+pub fn icon_uri(icon: Icon, size: f32, color: Hsla) -> SharedString {
     let (key, css) = hex(color);
     CACHE.with(|cache| {
         cache
             .borrow_mut()
-            .entry((icon, key))
+            .entry((icon, size.to_bits(), key))
             .or_insert_with(|| {
                 let svg = format!(
-                    r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="{css}" color="{css}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
+                    r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="{size}" height="{size}" fill="none" stroke="{css}" color="{css}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
                     icon.body()
                 );
                 format!("data:image/svg+xml,{}", percent_encode(&svg)).into()
@@ -121,7 +130,7 @@ pub fn icon_uri(icon: Icon, color: Hsla) -> SharedString {
 
 /// 一个 `size` 点的图标，颜色随 `tint`（可为绑定）。
 pub fn icon(name: Icon, size: f32, tint: impl Fn() -> AdaptiveColor + 'static) -> Image {
-    image(move || icon_uri(name, color(tint())))
+    image(move || icon_uri(name, size, color(tint())))
         .size(px(size))
         .pointer_events(PointerEvents::None)
 }
@@ -132,7 +141,34 @@ pub fn icon_dyn(
     size: f32,
     tint: impl Fn() -> AdaptiveColor + 'static,
 ) -> Image {
-    image(move || icon_uri(name(), color(tint())))
+    image(move || icon_uri(name(), size, color(tint())))
         .size(px(size))
         .pointer_events(PointerEvents::None)
+}
+
+/// 应用图标的 SVG 版（icon.png 的矢量重画）：深色圆角底、绿色均衡条、
+/// 奶油色音符。填充图形没有描边，任何缩放级别下边缘都干净。
+fn logo_svg(size: f32) -> SharedString {
+    const BODY: &str = concat!(
+        r##"<rect x="1" y="1" width="22" height="22" rx="6" fill="#2f3341"/>"##,
+        r##"<g fill="#b3c07d">"##,
+        r#"<rect x="4.2" y="9.6" width="1.7" height="4.8" rx="0.85"/>"#,
+        r#"<rect x="6.8" y="7.8" width="1.7" height="8.4" rx="0.85"/>"#,
+        r#"<rect x="9.4" y="5.8" width="1.7" height="12.4" rx="0.85"/>"#,
+        r#"</g>"#,
+        r##"<g fill="#f1f0e2">"##,
+        r#"<ellipse cx="16.1" cy="16.8" rx="2.5" ry="1.9" transform="rotate(-14 16.1 16.8)"/>"#,
+        r#"<rect x="17.9" y="7.4" width="1.5" height="9.6"/>"#,
+        r#"<path d="M17.9 7.4c2.4 0 3.5 1.3 3.5 3.2-1-1.1-2.1-1.6-3.5-1.6z"/>"#,
+        r#"</g>"#,
+    );
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="{size}" height="{size}">{BODY}</svg>"#
+    );
+    format!("data:image/svg+xml,{}", percent_encode(&svg)).into()
+}
+
+/// 应用图标（标题栏）：`size` 点的 logo。
+pub fn logo(size: f32) -> Image {
+    image(logo_svg(size)).size(px(size)).pointer_events(PointerEvents::None)
 }

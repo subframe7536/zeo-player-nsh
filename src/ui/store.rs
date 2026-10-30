@@ -45,6 +45,8 @@ pub struct Playback {
     pub time: f64,
     pub duration: f64,
     pub volume: f64,
+    /// 队列循环模式（顺序 / 单曲 / 随机）。
+    pub loop_mode: crate::audio::LoopMode,
 }
 
 /// 当前曲目（换曲时变化）。
@@ -123,6 +125,8 @@ pub struct Store {
     pub hidden: Signal<bool>,
     /// 点了关闭、等用户选择「托盘 / 退出」。
     pub close_prompt: Signal<bool>,
+    /// 标题栏搜索框的内容；非空时内容区显示搜索结果。
+    pub search: Signal<String>,
 }
 
 thread_local! {
@@ -153,6 +157,7 @@ pub fn install() -> Store {
         time: snap.current_time,
         duration: snap.duration,
         volume: snap.volume,
+        loop_mode: snap.loop_mode,
     });
     let track = signal(now_playing(&snap));
     let library = signal(library_state());
@@ -180,6 +185,7 @@ pub fn install() -> Store {
         queue: signal(Same(snap.queue.clone())),
         hidden: signal(false),
         close_prompt: signal(false),
+        search: signal(String::new()),
     };
     STORE.with(|cell| cell.set(Some(s)));
 
@@ -194,6 +200,7 @@ pub fn install() -> Store {
                 time: snap.current_time,
                 duration: snap.duration,
                 volume: snap.volume,
+                loop_mode: snap.loop_mode,
             });
             s.track.set(now_playing(&snap));
             s.queue.set(Same(snap.queue.clone()));
@@ -202,7 +209,18 @@ pub fn install() -> Store {
             if crate::window::take_close_request() {
                 s.close_prompt.set(true);
             }
-            s.hidden.set(crate::window::is_hidden());
+            let hidden = crate::window::is_hidden();
+            if hidden && !s.hidden.get_untracked() {
+                // 刚进托盘：封面信号图可以拆掉（缩略图在磁盘缓存，显示时
+                // 重新请求）；延迟 1 秒等界面拆完，再把空闲堆页还给系统。
+                COVERS.with(|c| c.borrow_mut().clear());
+                COVER_STAMPS.with(|c| c.borrow_mut().clear());
+                spawn(async {
+                    timer(Duration::from_secs(1)).await;
+                    crate::window::trim_memory();
+                });
+            }
+            s.hidden.set(hidden);
             for action in crate::window::take_tray_actions() {
                 match action {
                     crate::window::TrayAction::Show => crate::window::show(),
@@ -311,6 +329,7 @@ pub fn install() -> Store {
     crate::watcher::sync();
     crate::window::set_close_action(library_store().close_action());
     player().set_fade_ms(library_store().fade_ms());
+    player().set_loop_mode(library_store().loop_mode());
     crate::window::start();
     if !library_store().roots().is_empty() {
         scan();
@@ -369,6 +388,13 @@ pub fn set_fade_ms(ms: u32) {
     store().library.update(|l| l.fade_ms = ms);
     player().set_fade_ms(ms);
     std::thread::spawn(move || library_store().set_fade_ms(ms));
+}
+
+/// 切到下一个循环模式（顺序 → 单曲 → 随机），并保存。
+pub fn cycle_loop_mode() {
+    let mode = player().loop_mode().cycle();
+    player().set_loop_mode(mode);
+    std::thread::spawn(move || library_store().set_loop_mode(mode));
 }
 
 /// 关闭窗口时的行为（保存）。

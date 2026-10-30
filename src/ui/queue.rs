@@ -10,6 +10,7 @@ use super::icons::{icon, icon_dyn, Icon};
 use super::parts::{cover, icon_button};
 use super::store::{cover_of, format_time, player, store};
 use super::theme::*;
+use crate::audio::LoopMode;
 
 const ROW: f32 = 52.0;
 
@@ -141,6 +142,17 @@ pub fn queue_panel(open: Signal<bool>) -> View {
                             .text_color(muted_fg()),
                         ),
                 )
+                .child(icon_button(
+                    move || match s.playback.with(|p| p.loop_mode) {
+                        LoopMode::List => Icon::Repeat,
+                        LoopMode::Single => Icon::RepeatOne,
+                        LoopMode::Random => Icon::Shuffle,
+                    },
+                    14.0,
+                    "循环模式（顺序 / 单曲 / 随机）",
+                    move || if s.playback.with(|p| p.loop_mode) == LoopMode::List { muted_fg() } else { primary() },
+                    super::store::cycle_loop_mode,
+                ))
                 .child(icon_button(|| Icon::Close, 13.0, "关闭播放队列", muted_fg, move || open.set(false))),
         )
         .child(view().h(px(1.0)).bg(border()))

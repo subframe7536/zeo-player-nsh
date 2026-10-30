@@ -129,6 +129,9 @@ fn end_to_end_playback() {
         "下一首切到 flac: {:?}",
         player.state().path
     );
+    // flac 只有 ~2s：先暂停再操作，不然自然播完按顺序循环回绕到第一首。
+    player.pause();
+    assert!(wait_for(1000, || !player.state().is_playing), "暂停生效");
     player.seek(1.2);
     assert!(
         wait_for(1500, || (player.state().current_time - 1.2).abs() < 0.4),

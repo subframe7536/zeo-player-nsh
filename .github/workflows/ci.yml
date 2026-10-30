@@ -49,10 +49,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Move-Item .nsh/out/Zeo.zip .nsh/out/Zeo-windows-x64.zip
-      - uses: actions/upload-artifact@v4
+      # archive: false uploads the zip itself instead of wrapping it in a
+      # second artifact zip; the artifact is named after the file.
+      - uses: actions/upload-artifact@v7
         with:
-          name: Zeo-${{ matrix.target }}
           path: .nsh/out/Zeo-*.zip
+          archive: false
 
   release:
     needs: package
@@ -61,10 +63,14 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      # The artifacts are the zips themselves: keep them as files.
+      - uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: Zeo-*.zip
           merge-multiple: true
+          skip-decompress: true
+      - run: ls -l dist
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}

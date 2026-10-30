@@ -812,10 +812,10 @@ fn lyrics_scroller() -> View {
         )
 }
 
-/// 歌词行的模糊半径（点）：高亮行清晰，距离每多一行加 1.2，最多 8
-/// （ap-spec：`blur(min(8, distance × 1.2))`）。无时间轴的歌词不模糊。
+/// 歌词行的模糊半径（点）：高亮行清晰，距离每多一行加 0.6，最多 4
+/// （ap-spec 的 `blur(min(8, distance × 1.2))` 减半）。无时间轴的歌词不模糊。
 fn lyric_blur(timed: bool, distance: f32) -> f32 {
-    if timed { (distance * 1.2).min(8.0) } else { 0.0 }
+    if timed { (distance * 0.6).min(4.0) } else { 0.0 }
 }
 
 #[cfg(test)]
@@ -826,9 +826,9 @@ mod tests {
     fn blur_grows_with_distance_from_the_active_line() {
         assert_eq!(lyric_blur(true, 0.0), 0.0);
         let steps: Vec<f32> = (1..=8).map(|d| lyric_blur(true, d as f32)).collect();
-        assert!(steps.windows(2).all(|w| w[0] < w[1] || w[1] == 8.0), "{steps:?}");
-        assert!((lyric_blur(true, 1.0) - 1.2).abs() < 1e-6);
-        assert_eq!(lyric_blur(true, 20.0), 8.0);
+        assert!(steps.windows(2).all(|w| w[0] < w[1] || w[1] == 4.0), "{steps:?}");
+        assert!((lyric_blur(true, 1.0) - 0.6).abs() < 1e-6);
+        assert_eq!(lyric_blur(true, 20.0), 4.0);
         assert_eq!(lyric_blur(false, 5.0), 0.0);
     }
 

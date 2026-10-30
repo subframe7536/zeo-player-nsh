@@ -14,6 +14,7 @@ use std::rc::Rc;
 
 use nsh_core::desktop::TitleBarStyle;
 use nsh_core::element::desktop::set_title_bar;
+use nsh_core::element::input;
 use nsh_core::prelude::*;
 
 use icons::{icon, Icon};
@@ -79,17 +80,22 @@ pub fn App() -> impl IntoElement {
         let (open, close, fade) = (open.clone(), close.clone(), fade.clone());
         view()
             .flex_1()
-            .flex_row()
-            .child(sidebar())
+            .child(title_bar())
             .child(
                 view()
                     .flex_1()
-                    .min_w(px(0.0))
-                    .child(view().flex_1().child(content))
-                    .child(when(move || queue_open.get(), move || queue::queue_panel(queue_open)))
-                    .child(bar::player_bar(open, queue_open)),
+                    .flex_row()
+                    .child(sidebar())
+                    .child(
+                        view()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(view().flex_1().child(content))
+                            .child(when(move || queue_open.get(), move || queue::queue_panel(queue_open)))
+                            .child(bar::player_bar(open, queue_open)),
+                    )
+                    .child(when(move || full_open.get(), move || full::full_player(fade.clone(), close.clone()))),
             )
-            .child(when(move || full_open.get(), move || full::full_player(fade.clone(), close.clone())))
     };
 
     view()
@@ -102,13 +108,72 @@ pub fn App() -> impl IntoElement {
         .child(when(move || s.close_prompt.get(), close_prompt))
 }
 
+/// 标题栏行：中间是应用图标与名称，右侧搜索框；两端让出系统按钮
+/// （macOS 交通灯在左，Windows 标题栏按钮在右），其余区域拖动窗口。
+fn title_bar() -> View {
+    let s = store::store();
+    let query_empty = move || s.search.with(|q| q.is_empty());
+    view()
+        .h(move || px(top_inset()))
+        .flex_row()
+        .items_center()
+        .window_drag(true)
+        .pl(move || px(nsh_core::element::desktop::title_bar().left.0 + 8.0))
+        .pr(move || px(controls_right() + 12.0))
+        .child(view().flex_1())
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .child(icons::logo(20.0))
+                .child(text("Zeo").text_size(px(15.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg())),
+        )
+        .child(
+            view().flex_1().flex_row().items_center().justify_end().window_drag(false).child(
+                view()
+                    .w(px(200.0))
+                    .h(px(30.0))
+                    .child(icon(Icon::Search, 13.0, faint).absolute().left(px(10.0)).top(px(8.5)))
+                    .child(
+                        input()
+                            .w_full()
+                            .h(px(30.0))
+                            .pl(px(30.0))
+                            .pr(px(26.0))
+                            .rounded(px(15.0))
+                            .border_1()
+                            .border_color(border())
+                            .bg(bg())
+                            .text_size(px(13.0))
+                            .text_color(fg())
+                            .value(move || s.search.get())
+                            .placeholder("搜索")
+                            .on_change(move |t: &str| s.search.set(t.to_owned())),
+                    )
+                    .child(when(move || !query_empty(), move || {
+                        parts::icon_button(|| Icon::Close, 10.0, "清除搜索", faint, || store::store().search.set(String::new()))
+                            .absolute()
+                            .right(px(2.0))
+                            .top(px(2.0))
+                    })),
+            ),
+        )
+}
+
 fn page(nav: Signal<Nav>) -> AnyElement {
-    dynamic(move || match nav.get() {
-        Nav::Folders => views::folders().into_element(),
-        Nav::Artists => views::artists().into_element(),
-        Nav::Albums => views::albums().into_element(),
-        Nav::Genres => views::genres().into_element(),
-        Nav::Settings => views::settings().into_element(),
+    let s = store::store();
+    dynamic(move || {
+        if !s.search.with(|q| q.trim().is_empty()) {
+            return views::search_results().into_element();
+        }
+        match nav.get() {
+            Nav::Folders => views::folders().into_element(),
+            Nav::Artists => views::artists().into_element(),
+            Nav::Albums => views::albums().into_element(),
+            Nav::Genres => views::genres().into_element(),
+            Nav::Settings => views::settings().into_element(),
+        }
     })
 }
 
@@ -202,31 +267,7 @@ fn sidebar() -> View {
         .bg(theme::sidebar())
         .border_r_1()
         .border_r_color(sidebar_border())
-        .child(view().h(move || px(top_inset())).window_drag(true))
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap(px(10.0))
-                .px(px(18.0))
-                .pb(px(6.0))
-                .window_drag(true)
-                .child(
-                    view()
-                        .size(px(30.0))
-                        .rounded(px(8.0))
-                        .bg(primary())
-                        .items_center()
-                        .justify_center()
-                        .child(icon(Icon::Note, 17.0, primary_fg)),
-                )
-                .child(
-                    text("Zeo")
-                        .text_size(px(18.0))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(theme::fg()),
-                ),
-        )
+        .pt(px(4.0))
         .child(
             view()
                 .px(px(10.0))

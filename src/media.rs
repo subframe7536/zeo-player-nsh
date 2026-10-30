@@ -109,9 +109,8 @@ impl MediaSession {
     /// 发布快照到系统媒体面。
     pub fn publish(&self, snapshot: &Snapshot) {
         let Some(path) = snapshot.path.as_ref() else { return };
-        let index = snapshot.queue_index;
-        let can_next = index + 1 < snapshot.queue.len() as i64;
-        let can_prev = index > 0;
+        // 循环模式都在端点回绕（单曲是重播自己）：有多于一首就能切。
+        let can_switch = snapshot.queue.len() > 1;
         let state = PlaybackState {
             track: Some(Track {
                 id: path.clone(),
@@ -129,9 +128,12 @@ impl MediaSession {
                 None
             },
             volume: snapshot.volume,
-            repeat: Repeat::Off,
-            shuffle: false,
-            capabilities: Capabilities { can_go_next: can_next, can_go_previous: can_prev, can_seek: true },
+            repeat: match snapshot.loop_mode {
+                crate::audio::LoopMode::Single => Repeat::One,
+                _ => Repeat::All,
+            },
+            shuffle: snapshot.loop_mode == crate::audio::LoopMode::Random,
+            capabilities: Capabilities { can_go_next: can_switch, can_go_previous: can_switch, can_seek: true },
         };
         let _ = self.tx.send(Op::Publish(Box::new(state)));
     }

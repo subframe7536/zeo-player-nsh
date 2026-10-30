@@ -143,7 +143,7 @@ pub fn page_header(
         .items_end()
         .gap(px(16.0))
         .px(px(32.0))
-        .pt(move || px(top_inset() - 8.0))
+        .pt(px(10.0))
         .pb(px(16.0))
         .window_drag(true)
         .child(
@@ -417,26 +417,44 @@ pub fn thin_bar(
     track: AdaptiveColor,
     fill: AdaptiveColor,
 ) -> View {
-    view()
-        .h(px(18.0))
-        .justify_center()
-        .group()
+    bar(fraction, track, fill, false)
+}
+
+/// 细进度条，鼠标靠近时变粗（`transition_transform` 过渡）：音量条用。
+pub fn growing_bar(
+    fraction: impl Fn() -> f64 + 'static,
+    track: AdaptiveColor,
+    fill: AdaptiveColor,
+) -> View {
+    bar(fraction, track, fill, true)
+}
+
+fn bar(
+    fraction: impl Fn() -> f64 + 'static,
+    track: AdaptiveColor,
+    fill: AdaptiveColor,
+    grow: bool,
+) -> View {
+    let pill = view()
+        .h(px(4.0))
+        .w_full()
+        .rounded_full()
+        .bg(track)
+        .overflow_hidden()
+        .pointer_events(PointerEvents::None)
         .child(
             view()
-                .h(px(4.0))
-                .w_full()
+                .h_full()
                 .rounded_full()
-                .bg(track)
-                .overflow_hidden()
-                .pointer_events(PointerEvents::None)
-                .child(
-                    view()
-                        .h_full()
-                        .rounded_full()
-                        .bg(fill)
-                        .w(move || relative(fraction().clamp(0.0, 1.0) as f32)),
-                ),
-        )
+                .bg(fill)
+                .w(move || relative(fraction().clamp(0.0, 1.0) as f32)),
+        );
+    let pill = if grow {
+        pill.group_hover(|s| s.scale_y(1.75)).transition_transform().duration(140.0)
+    } else {
+        pill
+    };
+    view().h(px(18.0)).justify_center().group().child(pill)
 }
 
 /// 当前播放进度（拖动时为预览）。

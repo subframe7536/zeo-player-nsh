@@ -155,6 +155,13 @@ pub fn update_tray(state: TrayState) {
     platform::update(state);
 }
 
+/// 把空闲内存还给系统（隐藏到托盘后调用）：界面拆掉释放的堆页
+/// 一直留在进程工作集 / malloc 分区里，任务管理器 / 活动监视器的
+/// 数值不会降，要手动裁剪。
+pub fn trim_memory() {
+    platform::trim_memory();
+}
+
 /// Windows 的窗口句柄（系统媒体控件要用）；找到窗口前为 `None`。
 #[cfg(target_os = "windows")]
 pub fn hwnd() -> Option<u64> {
@@ -340,6 +347,14 @@ mod platform {
     pub fn update(state: TrayState) {
         DispatchQueue::main().exec_async(move || super::tray::apply(&state));
     }
+
+    pub fn trim_memory() {
+        unsafe extern "C" {
+            fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
+        }
+        // SAFETY: zone 传 NULL 表示默认分区；goal 0 表示尽量释放空闲页。
+        unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
+    }
 }
 
 // --- Windows -------------------------------------------------------------------
@@ -352,7 +367,7 @@ mod platform {
     use std::time::Duration;
 
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetCurrentProcessId, SetProcessWorkingSetSize};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, DispatchMessageW, EnumWindows, GetClassNameW, GetWindow, GetWindowThreadProcessId,
         PeekMessageW, PostMessageW, SetForegroundWindow, SetWindowLongPtrW, ShowWindowAsync,
@@ -480,6 +495,12 @@ mod platform {
             let _ = tx.lock().unwrap().send(state);
         }
     }
+
+    pub fn trim_memory() {
+        // SAFETY: 伪句柄加两个 usize::MAX 等价于 EmptyWorkingSet：系统只
+        // 在最小化窗口时自动裁剪，SW_HIDE 不会，所以这里手动做。
+        unsafe { SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX) };
+    }
 }
 
 // --- 其它平台：没有托盘，关闭即退出 -------------------------------------------
@@ -495,4 +516,5 @@ mod platform {
         std::process::exit(0);
     }
     pub fn update(_state: TrayState) {}
+    pub fn trim_memory() {}
 }

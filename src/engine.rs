@@ -83,6 +83,21 @@ impl Player {
         self.engine.shared.fade_ms.store(ms.min(5000), std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// 设置循环模式（队列按新模式重排，当前曲目不变）。
+    pub fn set_loop_mode(&self, mode: crate::audio::LoopMode) {
+        self.engine.send(EngineCmd::SetLoopMode(mode));
+    }
+
+    /// 切到下一个循环模式（顺序 → 单曲 → 随机）。
+    pub fn cycle_loop_mode(&self) {
+        self.set_loop_mode(self.engine.shared.loop_mode().cycle());
+    }
+
+    /// 当前循环模式。
+    pub fn loop_mode(&self) -> crate::audio::LoopMode {
+        self.engine.shared.loop_mode()
+    }
+
     /// 当前状态快照。
     pub fn state(&self) -> Snapshot {
         self.engine.snapshot()

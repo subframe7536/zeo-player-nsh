@@ -86,7 +86,7 @@ fn hero(
 ) -> View {
     view()
         .px(px(32.0))
-        .pt(move || px(top_inset() - 8.0))
+        .pt(px(12.0))
         .pb(px(20.0))
         .gap(px(16.0))
         .window_drag(true)
@@ -153,6 +153,40 @@ fn hero(
                         ),
                 ),
         )
+}
+
+// --- 搜索 ---------------------------------------------------------------------
+
+/// 标题栏搜索的结果页：标题 / 歌手 / 专辑 / 文件名匹配（不分大小写）。
+/// 点一首播放时，播放队列就是这份结果列表。
+pub fn search_results() -> View {
+    let s = store();
+    let items = computed(move || {
+        let query = s.search.with(|q| q.trim().to_lowercase());
+        let tracks = s.tracks.get();
+        let hits: Vec<TrackEntry> = if query.is_empty() {
+            Vec::new()
+        } else {
+            tracks
+                .iter()
+                .filter(|t| {
+                    [&t.title, &t.artist, &t.album, &t.file_name]
+                        .iter()
+                        .any(|f| f.to_lowercase().contains(&query))
+                })
+                .cloned()
+                .collect()
+        };
+        Rc::new(hits)
+    });
+    let count = computed(move || items.with(|v| v.len()));
+    let header = view()
+        .child(page_header(|| "搜索".into(), move || format!("{} 个结果", count.get()), None, None))
+        .child(track_columns(Columns::ALL));
+    view().flex_1().child(
+        track_list(items, false, Columns::ALL, header.into_element())
+            .empty(empty_state(Icon::Search, "没有匹配的曲目", "搜索匹配曲目的标题、歌手、专辑和文件名。")),
+    )
 }
 
 // --- 文件夹 -------------------------------------------------------------------
