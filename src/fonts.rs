@@ -1,4 +1,4 @@
-//! 自定义字体：用 fontdb 列出系统字体家族、读字体文件的家族名；导入 .ttf / .otf / .ttc 文件（复制
+//! 自定义字体：用 font-enumeration 列出系统字体家族，用 fontdb 读导入文件的家族名；导入 .ttf / .otf / .ttc 文件（复制
 //! 到 `~/Library/Application Support/Zeo/fonts`，只对本进程注册，不装进系统）。
 
 use std::path::{Path, PathBuf};
@@ -143,13 +143,18 @@ mod platform {
     pub fn unregister(_path: &Path) {}
 }
 
-/// 系统字体家族（fontdb 扫描系统字体目录；排序、去重，不含以 `.` 开头的
-/// 系统私有字体）。要读全部字体文件头（约 0.2 s），在后台线程调用；不缓存，
-/// 字体数据库用完即释放。
+/// 系统字体家族：font-enumeration 向系统字体服务查询（macOS CoreText、
+/// Windows DirectWrite、Linux fontconfig），得到的家族名就是渲染时能解析的
+/// 名字。排序、去重，不含以 `.` 开头的系统私有字体。在后台线程调用；不缓存，
+/// 查询结果用完即释放。
 pub fn installed_families() -> Vec<String> {
-    let mut db = fontdb::Database::new();
-    db.load_system_fonts();
-    let mut list: Vec<String> = families_of(&db).into_iter().filter(|n| !n.starts_with('.')).collect();
+    let Ok(collection) = font_enumeration::Collection::new() else { return Vec::new() };
+    let mut list: Vec<String> = collection
+        .take()
+        .into_iter()
+        .map(|f| f.family_name)
+        .filter(|n| !n.trim().is_empty() && !n.starts_with('.'))
+        .collect();
     list.sort_by_key(|n| n.to_lowercase());
     list.dedup();
     list

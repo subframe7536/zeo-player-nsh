@@ -23,6 +23,7 @@ notify = { version = "8", default-features = false, features = ["macos_fsevent"]
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
 fontdb = "0.24.0"
 dunce = "1.0.5"
+font-enumeration = "0.9.0"
 
 # 系统文件夹选择器（NSOpenPanel / IFileDialog）。
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
