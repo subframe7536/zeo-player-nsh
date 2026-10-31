@@ -24,8 +24,12 @@ use crate::metadata::MetaInfo;
 const COLUMN: f32 = 326.0;
 /// 歌词列最大宽度。
 const LYRICS: f32 = 520.0;
-/// 当前歌词行停在视口从上往下的这个比例处（垂直居中）。
-const ANCHOR: f32 = 0.5;
+/// 每次打开全屏播放加一：已有的歌词据此回到高亮行（见 `lyrics_scroller`）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Reveal(pub u32);
+
+/// 当前歌词行停在视口从上往下的这个比例处（偏上，下方留出更多后续歌词）。
+const ANCHOR: f32 = 0.35;
 
 /// 打开：淡入并从下方滑入，先快后慢。
 pub(super) const IN_MS: f32 = 380.0;
@@ -679,32 +683,64 @@ fn lyrics_scroller() -> View {
     let count = lines.lines.len();
     let align = move || s.library.with(|l| l.lyrics_align);
 
-    // 打开全屏（或歌词刚载入）时，第一次定位不带动画，定位前歌词隐藏：
-    // 一出现高亮行就在中间，不会先显示开头再滚过去。
+    // 打开全屏（或歌词刚载入）时直接定位到高亮行，不带动画；定位好之前
+    // 歌词隐藏，不会先显示开头再滚过去。
+    //
+    // 行的位置量的是它在歌词列（上方留白之下的那一层）里的 y：上方留白
+    // 正好是 `viewport * ANCHOR`，所以把第 i 行放到锚点的滚动偏移就是它的
+    // y，与视口高度无关。留白随视口高度变化时不会用到过期的位置。
     let placed = signal(false);
-    let scroll_to_line = {
+    let offset_of = {
         let line_ys = line_ys.clone();
+        move |index: i64| usize::try_from(index).ok().and_then(|i| line_ys.borrow().get(i).copied())
+    };
+    let scroll_to_line = {
         let target = target.clone();
+        let offset_of = offset_of.clone();
         Rc::new(move |index: i64| {
-            let ys = line_ys.borrow();
-            let Some(&y) = usize::try_from(index).ok().and_then(|i| ys.get(i)) else { return };
-            let y = (y - viewport.get_untracked() * ANCHOR).max(0.0);
+            let Some(y) = offset_of(index) else { return };
             *target.borrow_mut() = Some((y, std::time::Instant::now()));
-            let first = !placed.get_untracked();
-            scroller.scroll_to(point(px(0.0), px(y)), !first);
-            if first {
-                scroll_y.set(y);
-                // 内容尺寸可能在下一帧才提交，那时再定位一次（超出范围的
-                // 偏移会被夹住），然后才显示。
-                spawn(async move {
-                    next_frame().await;
-                    scroller.scroll_to(point(px(0.0), px(y)), false);
-                    scroll_y.set(y);
-                    placed.set(true);
-                });
-            }
+            scroller.scroll_to(point(px(0.0), px(y)), true);
         })
     };
+
+    // 首次定位：组件自己的任务（不放在跟随的 effect 里：那个 effect 随
+    // 播放时间重跑，里面起的任务会跟着结束，歌词就一直隐藏）。等布局就绪
+    // 后逐帧不带动画地定位，连续三帧（每次重新读行的位置，内容尺寸可能
+    // 晚几帧提交）后显示；最多等 600 ms，到时无论如何都显示。
+    {
+        let target = target.clone();
+        let offset_of = offset_of.clone();
+        let last_followed = last_followed.clone();
+        spawn(async move {
+            let start = std::time::Instant::now();
+            let mut settled = 0;
+            loop {
+                next_frame().await;
+                let ready = viewport.get_untracked() > 0.0 && laid.get_untracked() >= count;
+                if ready {
+                    let index = s.active_line.get_untracked();
+                    if index < 0 {
+                        break;
+                    }
+                    if let Some(y) = offset_of(index) {
+                        *last_followed.borrow_mut() = index;
+                        *target.borrow_mut() = Some((y, std::time::Instant::now()));
+                        scroller.scroll_to(point(px(0.0), px(y)), false);
+                        scroll_y.set(y);
+                        settled += 1;
+                        if settled >= 3 {
+                            break;
+                        }
+                    }
+                }
+                if start.elapsed() >= Duration::from_millis(600) {
+                    break;
+                }
+            }
+            placed.set(true);
+        });
+    }
 
     // 时间推进：行变化或 seek 跳变时滚动跟随。
     {
@@ -716,12 +752,9 @@ fn lyrics_scroller() -> View {
             let ready = viewport.get() > 0.0 && laid.get() >= count;
             let time = s.playback.with(|p| p.time);
             let index = s.active_line.get();
-            if !ready {
+            // 首次定位由上面的任务做；定位好之前不跟随。
+            if !ready || !placed.get() {
                 return;
-            }
-            // 没有可定位的行（无时间轴，或还没到第一行）：直接显示。
-            if index < 0 && !placed.get_untracked() {
-                placed.set(true);
             }
             let jumped = {
                 let mut prev = prev_time.borrow_mut();
@@ -743,6 +776,38 @@ fn lyrics_scroller() -> View {
             }
             *last_followed.borrow_mut() = index;
             scroll_to_line(index);
+        });
+    }
+
+    // 收起途中又打开时歌词还在（没有重建）：同样直接回到高亮行，恢复跟随。
+    {
+        let last_followed = last_followed.clone();
+        let resume = resume.clone();
+        let pending = pending.clone();
+        let target = target.clone();
+        let offset_of = offset_of.clone();
+        let reveal = global::<Reveal>();
+        let first = std::cell::Cell::new(true);
+        effect(move || {
+            reveal.get();
+            if first.replace(false) {
+                return;
+            }
+            untracked(|| {
+                if let Some(task) = resume.borrow_mut().take() {
+                    task.cancel();
+                }
+                *pending.borrow_mut() = None;
+                follow.set(true);
+                let index = s.active_line.get();
+                *last_followed.borrow_mut() = index;
+                // 歌词一直在显示，不隐藏：直接跳过去（不带动画）。
+                if let Some(y) = offset_of(index) {
+                    *target.borrow_mut() = Some((y, std::time::Instant::now()));
+                    scroller.scroll_to(point(px(0.0), px(y)), false);
+                    scroll_y.set(y);
+                }
+            });
         });
     }
 
@@ -843,7 +908,7 @@ fn lyrics_scroller() -> View {
         let fade = move || {
             let viewport = viewport.get();
             let y = scroll_y.get();
-            rows_box.with(|b| b.get(index).map_or(1.0, |&(top, h)| edge_fade(top + h / 2.0 - y, viewport)))
+            rows_box.with(|b| b.get(index).map_or(1.0, |&(top, h)| edge_fade(viewport * ANCHOR + top + h / 2.0 - y, viewport)))
         };
         view()
             .w_full()
@@ -942,7 +1007,7 @@ fn lyrics_scroller() -> View {
                     view()
                         .w_full()
                         .child(view().h(move || px(viewport.get() * ANCHOR)))
-                        .children(rows)
+                        .child(view().w_full().children(rows))
                         .child(view().h(move || px(viewport.get() * (1.0 - ANCHOR)))),
                 ),
         )
@@ -966,7 +1031,7 @@ fn edge_fade(center: f32, viewport: f32) -> f32 {
     top.min(bottom).clamp(0.0, 1.0)
 }
 
-/// 顶部淡出区（视口高度的比例），远小于 [`ANCHOR`]，高亮行不受影响。
+/// 顶部淡出区（视口高度的比例），小于 [`ANCHOR`]，高亮行不受影响。
 const EDGE_TOP: f32 = 0.18;
 /// 底部淡出区。
 const EDGE_BOTTOM: f32 = 0.28;
