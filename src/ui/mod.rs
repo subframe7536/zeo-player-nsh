@@ -68,6 +68,7 @@ pub fn App() -> impl IntoElement {
             }
             full_closing.set(false);
             full_open.set(true);
+            global::<full::Reveal>().update(|r| r.0 = r.0.wrapping_add(1));
             if untracked(reduce_motion) {
                 fade.set(1.0);
             } else {
@@ -131,12 +132,6 @@ pub fn App() -> impl IntoElement {
             .child(when(move || full_open.get(), move || full::full_player(fade, close.clone())))
     };
 
-    // 关闭提示：标志置位时弹出一次。
-    effect(move || {
-        if s.close_prompt.get() {
-            untracked(ask_close);
-        }
-    });
     let root = view()
         .flex_1()
         .bg(bg())
@@ -147,6 +142,7 @@ pub fn App() -> impl IntoElement {
         // Space 等快捷键也被它吃掉）。
         .on_touch(move |e: &TouchEvent| search.outside_touch(e))
         .child(when(move || !s.hidden.get(), shell))
+        .child(when(move || s.close_prompt.get() && !s.hidden.get(), close_prompt))
         .child(when(move || s.editor.with(Option::is_some), playlists::editor_dialog));
     // Windows 的窗口按钮在最上层（盖过全屏播放与弹窗，和系统按钮一样）。
     #[cfg(target_os = "windows")]
@@ -280,26 +276,30 @@ fn page(nav: Signal<Nav>) -> AnyElement {
     })
 }
 
-/// 第一次点关闭：最小化到托盘还是退出（nsh-base `alert_dialog`，系统的
-/// 警告框）。选择会记住（设置里可改）；取消或 Esc 不关窗口。
-fn ask_close() {
+/// 第一次点关闭：最小化到托盘还是退出。应用内的弹窗（nsh-base `dialog`，
+/// shadcn AlertDialog 的外观）；选择会记住（设置里可改）。取消、Esc 或点
+/// 遮罩时不关窗口。
+fn close_prompt() -> AnyElement {
     use crate::library::CloseAction;
-    const QUIT: &str = "退出 Zeo Player";
-    const TRAY: &str = "最小化到托盘";
-    let answer = nsh_base::alert_dialog()
-        .title("关闭窗口")
-        .description("最小化到托盘后音乐继续播放，可以从托盘图标打开窗口、切歌或退出。这个选择会被记住，可以在「设置」里更改。")
-        .action(TRAY)
-        .action(QUIT)
-        .cancel("取消")
-        .show();
-    spawn(async move {
-        match answer.await {
-            Ok(Some(label)) if label == TRAY => store::answer_close(CloseAction::Tray),
-            Ok(Some(label)) if label == QUIT => store::answer_close(CloseAction::Quit),
-            _ => store::store().close_prompt.set(false),
-        }
-    });
+    use button::{text_button, Size, Variant};
+    let s = store::store();
+    let cancel = move || s.close_prompt.set(false);
+    let content = form::dialog_content(440.0)
+        .child(form::dialog_header(
+            "关闭窗口",
+            Some("最小化到托盘后音乐继续播放，可以从托盘图标打开窗口、切歌或退出。这个选择会被记住，可以在「设置」里更改。"),
+        ))
+        .child(
+            form::dialog_footer()
+                .child(text_button(Variant::Outline, Size::Default, None, "取消", cancel))
+                .child(text_button(Variant::Secondary, Size::Default, None, "退出 Zeo Player", || {
+                    store::answer_close(CloseAction::Quit)
+                }))
+                .child(text_button(Variant::Default, Size::Default, None, "最小化到托盘", || {
+                    store::answer_close(CloseAction::Tray)
+                })),
+        );
+    form::modal(content, cancel)
 }
 
 fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> View {
@@ -458,7 +458,7 @@ fn bench_close() {
         let tracks = s.tracks.get_untracked();
         store::play_list(&tracks, 0);
         wait(1500).await;
-        nsh_core::element::desktop::close_window();
+        crate::window::simulate_close();
         wait(1000).await;
         step("asked");
         store::answer_close(CloseAction::Tray);
@@ -467,14 +467,14 @@ fn bench_close() {
         eprintln!("ZEO_PLAYER_BENCH playing={} time={:.1}", s.playback.with_untracked(|p| p.playing), s.playback.with_untracked(|p| p.time));
         wait(6000).await;
         eprintln!("ZEO_PLAYER_BENCH playing={} time={:.1}", s.playback.with_untracked(|p| p.playing), s.playback.with_untracked(|p| p.time));
-        nsh_core::element::desktop::close_window();
+        crate::window::simulate_close();
         wait(500).await;
         step("closed-again-while-hidden");
-        crate::window::show();
+        crate::window::simulate_tray(crate::window::TrayAction::Show);
         wait(2000).await;
         step("shown");
         // 已记住「托盘」：再点关闭直接隐藏，不再询问。
-        nsh_core::element::desktop::close_window();
+        crate::window::simulate_close();
         wait(1500).await;
         step("remembered");
         store::set_close_action(CloseAction::Ask);

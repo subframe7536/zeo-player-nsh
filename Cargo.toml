@@ -28,6 +28,8 @@ dunce = "1"
 # 持久化：数据 / 缓存目录与 JSON；曲目元数据与播放状态存 SQLite（bundled：自带 SQLite，不依赖系统库）。
 dirs = "7"
 serde = { version = "1", features = ["derive"] }
+# 窗口事件唤醒界面（`window::changed`）；NSH 已依赖 tokio，只加 sync。
+tokio = { version = "1", default-features = false, features = ["sync"] }
 serde_json = "1"
 rusqlite = { version = "0.41", features = ["bundled"] }
 

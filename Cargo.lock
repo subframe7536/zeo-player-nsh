@@ -5845,6 +5845,7 @@ dependencies = [
  "serde",
  "serde_json",
  "symphonia",
+ "tokio",
  "tray-icon",
  "walkdir",
  "windows-sys 0.61.2",

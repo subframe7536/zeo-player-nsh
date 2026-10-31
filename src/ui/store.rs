@@ -230,7 +230,13 @@ pub fn install() -> Store {
             s.queue.set(Same(snap.queue.clone()));
             player().remember(&snap);
             drain_covers();
-            // 窗口与托盘。
+        }
+    });
+
+    // 窗口与托盘：等窗口事件（关闭请求、托盘操作、显示 / 隐藏）再处理。
+    spawn(async move {
+        loop {
+            crate::window::changed().await;
             if crate::window::take_close_request() {
                 s.close_prompt.set(true);
             }

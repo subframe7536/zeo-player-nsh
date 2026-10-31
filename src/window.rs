@@ -23,6 +23,28 @@ static CLOSE_REQUESTED: AtomicBool = AtomicBool::new(false);
 static QUITTING: AtomicBool = AtomicBool::new(false);
 /// 窗口已隐藏到托盘。
 static HIDDEN: AtomicBool = AtomicBool::new(false);
+/// 窗口事件（关闭请求、托盘操作、显示 / 隐藏）发生时唤醒界面
+/// （[`changed`]），界面不必轮询。
+static CHANGED: tokio::sync::Notify = tokio::sync::Notify::const_new();
+/// 托盘上发生、还没被界面取走的操作。
+static TRAY_ACTIONS: std::sync::Mutex<Vec<TrayAction>> = std::sync::Mutex::new(Vec::new());
+
+/// 等到下一个窗口事件（之前错过的也算：`Notify` 存一个许可）。
+pub async fn changed() {
+    CHANGED.notified().await;
+}
+
+fn notify() {
+    CHANGED.notify_one();
+}
+
+/// 窗口被系统重新显示（macOS 点 Dock 图标，Windows 任务栏 / Alt+Tab）而
+/// 不是走 [`show`]：同样算显示，界面重新装上（否则窗口是空的）。
+fn shown_by_system() {
+    if HIDDEN.swap(false, Ordering::Relaxed) {
+        notify();
+    }
+}
 
 fn mode() -> CloseAction {
     match MODE.load(Ordering::Relaxed) {
@@ -65,6 +87,7 @@ fn on_close_clicked() -> bool {
         }
         CloseAction::Ask => {
             CLOSE_REQUESTED.store(true, Ordering::Relaxed);
+            notify();
             false
         }
     }
@@ -90,39 +113,62 @@ pub struct TrayState {
 
 /// 取走托盘上发生的操作（菜单项、Windows 上单击图标）。
 pub fn take_tray_actions() -> Vec<TrayAction> {
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    {
-        let mut out = Vec::new();
-        while let Ok(event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
-            let action = match event.id.0.as_str() {
-                "show" => TrayAction::Show,
-                "toggle" => TrayAction::Toggle,
-                "prev" => TrayAction::Previous,
-                "next" => TrayAction::Next,
-                "quit" => TrayAction::Quit,
-                _ => continue,
-            };
-            out.push(action);
+    std::mem::take(&mut *TRAY_ACTIONS.lock().unwrap())
+}
+
+/// 测量脚本用：像点了窗口的关闭按钮（主线程上，不经 NSH 的 `performClose`：
+/// 那会在 NSH 应用界面变更的途中跑嵌套的事件循环）。
+pub fn simulate_close() {
+    #[cfg(target_os = "macos")]
+    dispatch2::DispatchQueue::main().exec_async(|| {
+        if on_close_clicked() {
+            quit();
         }
-        while let Ok(event) = tray_icon::TrayIconEvent::receiver().try_recv() {
-            // Windows：左键单击图标打开窗口（右键出菜单）。
-            if let tray_icon::TrayIconEvent::Click {
-                button: tray_icon::MouseButton::Left,
-                button_state: tray_icon::MouseButtonState::Up,
-                ..
-            } = event
-                && cfg!(target_os = "windows")
-            {
-                out.push(TrayAction::Show);
-            }
-            if let tray_icon::TrayIconEvent::DoubleClick { .. } = event {
-                out.push(TrayAction::Show);
-            }
-        }
-        out
+    });
+    #[cfg(not(target_os = "macos"))]
+    if on_close_clicked() {
+        quit();
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    Vec::new()
+}
+
+/// 测量脚本用：像托盘菜单那样发出一个操作（macOS 在主线程上，与菜单
+/// 回调相同）。
+pub fn simulate_tray(action: TrayAction) {
+    #[cfg(target_os = "macos")]
+    dispatch2::DispatchQueue::main().exec_async(move || push_tray(action));
+    #[cfg(not(target_os = "macos"))]
+    push_tray(action);
+}
+
+fn push_tray(action: TrayAction) {
+    TRAY_ACTIONS.lock().unwrap().push(action);
+    notify();
+}
+
+/// 托盘事件直接回调（不进 tray-icon 的通道），每个事件唤醒界面。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn install_tray_handlers() {
+    tray_icon::menu::MenuEvent::set_event_handler(Some(|event: tray_icon::menu::MenuEvent| {
+        let action = match event.id.0.as_str() {
+            "show" => TrayAction::Show,
+            "toggle" => TrayAction::Toggle,
+            "prev" => TrayAction::Previous,
+            "next" => TrayAction::Next,
+            "quit" => TrayAction::Quit,
+            _ => return,
+        };
+        push_tray(action);
+    }));
+    tray_icon::TrayIconEvent::set_event_handler(Some(|event: tray_icon::TrayIconEvent| match event {
+        // Windows：左键单击图标打开窗口（右键出菜单）。
+        tray_icon::TrayIconEvent::Click {
+            button: tray_icon::MouseButton::Left,
+            button_state: tray_icon::MouseButtonState::Up,
+            ..
+        } if cfg!(target_os = "windows") => push_tray(TrayAction::Show),
+        tray_icon::TrayIconEvent::DoubleClick { .. } => push_tray(TrayAction::Show),
+        _ => {}
+    }));
 }
 
 /// 启动：挂上关闭拦截、创建托盘图标。可以多次调用（只做一次）。
@@ -131,18 +177,22 @@ pub fn start() {
     if STARTED.swap(true, Ordering::AcqRel) {
         return;
     }
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    install_tray_handlers();
     platform::start();
 }
 
 /// 隐藏窗口（播放继续）。
 pub fn hide() {
     HIDDEN.store(true, Ordering::Relaxed);
+    notify();
     platform::hide();
 }
 
 /// 显示并激活窗口。
 pub fn show() {
     HIDDEN.store(false, Ordering::Relaxed);
+    notify();
     platform::show();
 }
 
@@ -291,9 +341,36 @@ mod platform {
         }
     }
 
+    /// NSH 原来的 `applicationShouldHandleReopen:hasVisibleWindows:` 实现。
+    static ORIGINAL_REOPEN: OnceLock<usize> = OnceLock::new();
+
+    type ShouldReopen = unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, Bool) -> Bool;
+
+    /// 点 Dock 图标：NSH 把窗口提到前面，这里先告诉界面窗口回来了。
+    unsafe extern "C-unwind" fn should_reopen(this: *mut AnyObject, cmd: Sel, app: *mut AnyObject, visible: Bool) -> Bool {
+        super::shown_by_system();
+        match ORIGINAL_REOPEN.get() {
+            // SAFETY: 这是被替换下来的同签名实现。
+            Some(&imp) => unsafe { std::mem::transmute::<usize, ShouldReopen>(imp)(this, cmd, app, visible) },
+            None => Bool::NO,
+        }
+    }
+
+    thread_local! {
+        /// 主窗口，挂钩时记下。隐藏（`orderOut`）后它的 `canBecomeMainWindow`
+        /// 变成 NO，再按条件去 `windows()` 里找会找不到（托盘「显示」因此
+        /// 无效），而系统警告框（`_NSAlertPanel`）也有代理，不能只看代理。
+        static MAIN: std::cell::RefCell<Option<Retained<NSWindow>>> = const { std::cell::RefCell::new(None) };
+    }
+
     fn main_window(mtm: MainThreadMarker) -> Option<Retained<NSWindow>> {
+        if let Some(window) = MAIN.with(|m| m.borrow().clone()) {
+            return Some(window);
+        }
         let app = NSApplication::sharedApplication(mtm);
-        app.windows().iter().find(|w| w.delegate().is_some() && w.canBecomeMainWindow())
+        let window = app.windows().iter().find(|w| w.delegate().is_some() && w.canBecomeMainWindow())?;
+        MAIN.with(|m| *m.borrow_mut() = Some(window.clone()));
+        Some(window)
     }
 
     /// 替换窗口代理类的 `windowShouldClose:`；窗口还没建好时稍后重试。
@@ -318,6 +395,13 @@ mod platform {
                 let old = unsafe { method.set_implementation(imp) };
                 let _ = ORIGINAL.set(old as usize);
             }
+            // 应用代理与窗口代理是同一个对象（NSH 的 `Delegate`）。
+            if let Some(method) = class.instance_method(sel!(applicationShouldHandleReopen:hasVisibleWindows:)) {
+                // SAFETY: 签名与 NSApplicationDelegate 的同名方法相同。
+                let imp: Imp = unsafe { std::mem::transmute::<ShouldReopen, Imp>(should_reopen) };
+                let old = unsafe { method.set_implementation(imp) };
+                let _ = ORIGINAL_REOPEN.set(old as usize);
+            }
             super::tray::create();
         });
     }
@@ -335,15 +419,30 @@ mod platform {
         });
     }
 
+    /// 先激活应用再把窗口提到最前：从托盘菜单打开时应用不在前台，只
+    /// `makeKeyAndOrderFront` 窗口会留在别的应用后面。macOS 14 起
+    /// `activateIgnoringOtherApps:` 已弃用、常常不生效，有 `activate` 时用它；
+    /// `orderFrontRegardless` 保证激活被系统推迟时窗口也在最上层。
     pub fn show() {
         DispatchQueue::main().exec_async(|| {
             let Some(mtm) = MainThreadMarker::new() else { return };
             let app = NSApplication::sharedApplication(mtm);
-            if let Some(window) = main_window(mtm) {
-                window.makeKeyAndOrderFront(None);
+            let object: &AnyObject = app.as_ref();
+            // SAFETY: -[NSApplication activate]（macOS 14+），先确认响应。
+            let modern: bool = unsafe { msg_send![object, respondsToSelector: sel!(activate)] };
+            if modern {
+                let _: () = unsafe { msg_send![object, activate] };
+            } else {
+                #[allow(deprecated)]
+                app.activateIgnoringOtherApps(true);
             }
-            #[allow(deprecated)]
-            app.activateIgnoringOtherApps(true);
+            if let Some(window) = main_window(mtm) {
+                if window.isMiniaturized() {
+                    window.deminiaturize(None);
+                }
+                window.makeKeyAndOrderFront(None);
+                window.orderFrontRegardless();
+            }
         });
     }
 
@@ -382,16 +481,18 @@ mod platform {
     use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_VISIBLE_FRAME_BORDER_THICKNESS};
     use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, GetCurrentProcessId, SetProcessWorkingSetSize, TerminateProcess,
+        AttachThreadInput, GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId, SetProcessWorkingSetSize,
+        TerminateProcess,
     };
     use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GetClassNameW, GetClientRect, GetWindow,
-        GetWindowLongPtrW, GetWindowThreadProcessId, IsZoomed, PeekMessageW, PostMessageW, SetForegroundWindow,
+        BringWindowToTop, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic,
+        IsWindowVisible, IsZoomed, PeekMessageW, PostMessageW, SetForegroundWindow,
         SetWindowLongPtrW, ShowWindowAsync, TranslateMessage, GWLP_WNDPROC, GWL_STYLE, GW_OWNER, HTTOP, HTTOPLEFT,
         HTTOPRIGHT, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER,
-        SM_CYFRAME, SW_HIDE, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST,
-        WM_SYSCOMMAND, WNDPROC, WS_CAPTION, WS_THICKFRAME,
+        SM_CYFRAME, SW_HIDE, SW_RESTORE, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST,
+        WM_SHOWWINDOW, WM_SYSCOMMAND, WNDPROC, WS_CAPTION, WS_THICKFRAME,
     };
 
     use super::TrayState;
@@ -408,6 +509,8 @@ mod platform {
         let mut l = l;
         match msg {
             WM_CLOSE if !super::on_close_clicked() => return 0,
+            // 隐藏后被重新显示（任务栏、Alt+Tab、`show`）。
+            WM_SHOWWINDOW if w != 0 => super::shown_by_system(),
             // 标题栏由应用自己画（NSH 的标题栏样式为 Default，不再处理这些）。
             WM_NCCALCSIZE if w != 0 && has_style(hwnd, WS_CAPTION) => {
                 // SAFETY: w 非 0 时 l 指向本消息的 NCCALCSIZE_PARAMS。
@@ -654,14 +757,36 @@ mod platform {
         }
     }
 
+    /// 显示并提到最前。Windows 只允许前台进程调用 `SetForegroundWindow`
+    /// 抢前台（否则只在任务栏闪烁）：托盘菜单的点击已经结束，所以暂时把
+    /// 本线程的输入挂到当前前台窗口的线程上，再提前台。窗口由 nsh-ui 线程
+    /// 处理显示命令，等它显示出来（最多约 0.5 秒）再提。
     pub fn show() {
-        if let Some(h) = hwnd() {
-            // SAFETY: 同上。
-            unsafe {
-                ShowWindowAsync(h, SW_SHOW);
-                SetForegroundWindow(h);
+        let Some(h) = hwnd() else { return };
+        let value = h as usize;
+        // SAFETY: 异步显示命令，不等窗口线程。
+        unsafe { ShowWindowAsync(h, if IsIconic(h) != 0 { SW_RESTORE } else { SW_SHOW }) };
+        std::thread::spawn(move || {
+            let h = value as HWND;
+            for _ in 0..25 {
+                // SAFETY: 只读窗口状态。
+                if unsafe { IsWindowVisible(h) } != 0 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
             }
-        }
+            // SAFETY: 挂接只在本次调用内，结束时解除；各函数对无效句柄返回失败。
+            unsafe {
+                let me = GetCurrentThreadId();
+                let foreground = GetWindowThreadProcessId(GetForegroundWindow(), std::ptr::null_mut());
+                let attached = foreground != 0 && foreground != me && AttachThreadInput(me, foreground, 1) != 0;
+                BringWindowToTop(h);
+                SetForegroundWindow(h);
+                if attached {
+                    AttachThreadInput(me, foreground, 0);
+                }
+            }
+        });
     }
 
     pub fn quit() {
