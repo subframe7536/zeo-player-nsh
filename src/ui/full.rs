@@ -9,6 +9,9 @@ use std::time::Duration;
 use nsh_base::{menu, menu_item, menu_separator};
 use nsh_core::prelude::*;
 
+use nsh_core::element::ComponentBuilder;
+
+use super::button::{on_dark, tipped};
 use super::icons::{icon, icon_dyn, Icon};
 use crate::audio::LoopMode;
 use crate::library::LyricsAlign;
@@ -74,17 +77,14 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
         .absolute()
         .top(move || px((top_inset() - 32.0) / 2.0))
         .right(move || px(controls_right() + 8.0))
-        .size(px(32.0))
-        .rounded_full()
-        .items_center()
-        .justify_center()
-        .role(AccessibilityRole::Button)
-        .label("收起")
         .window_drag(false)
-        .hover(|st| st.bg(white_a(0.1)))
-        .active(|st| st.opacity(0.6))
-        .on_press(move || on_close())
-        .child(icon(Icon::ChevronDown, 18.0, || white_a(0.7)));
+        .child(tipped(
+            on_dark(32.0)
+                .accessibility_label("收起")
+                .on_press(move |_: &()| on_close())
+                .child(icon(Icon::ChevronDown, 18.0, || white_a(0.7))),
+            "收起",
+        ));
 
     view()
         .absolute()
@@ -333,43 +333,23 @@ fn left_column(swap: &Swap) -> View {
     // 与播放条一致：两侧是循环模式与喜欢（最小），中间是上一首 / 播放 /
     // 下一首，播放键最大。
     let skip = |glyph: Icon, label: &'static str, press: fn()| {
-        view()
-            .size(px(44.0))
-            .rounded_full()
-            .items_center()
-            .justify_center()
-            .role(AccessibilityRole::Button)
-            .label(label)
-            .hover(|st| st.bg(white_a(0.08)))
-            .active(|st| st.opacity(0.5))
-            .on_press(press)
-            .child(icon(glyph, 18.0, || white_a(0.85)))
+        tipped(
+            on_dark(44.0).accessibility_label(label).on_press(move |_: &()| press()).child(icon(glyph, 18.0, || white_a(0.85))),
+            label,
+        )
     };
-    let side = |glyph: Box<dyn Fn() -> Icon>, label: &'static str, tint: Box<dyn Fn() -> AdaptiveColor>, press: fn()| {
-        view()
-            .size(px(36.0))
-            .rounded_full()
-            .items_center()
-            .justify_center()
-            .role(AccessibilityRole::Button)
-            .label(label)
-            .hover(|st| st.bg(white_a(0.08)))
-            .active(|st| st.opacity(0.5))
-            .on_press(press)
-            .child(icon_dyn(glyph, 16.0, tint))
+    let side = |glyph: Box<dyn Fn() -> Icon>, label: &'static str, tip: &'static str, tint: Box<dyn Fn() -> AdaptiveColor>, press: fn()| {
+        tipped(
+            on_dark(36.0).accessibility_label(label).on_press(move |_: &()| press()).child(icon_dyn(glyph, 16.0, tint)),
+            tip,
+        )
     };
-    let play = view()
-        .size(px(56.0))
-        .rounded_full()
-        .items_center()
-        .justify_center()
-        .role(AccessibilityRole::Button)
-        .label("播放/暂停")
-        .hover(|st| st.bg(white_a(0.08)))
+    let play = on_dark(56.0)
+        .accessibility_label("播放/暂停")
         .active(|st| st.scale(0.92))
         .transition_transform()
         .duration(120.0)
-        .on_press(|| player().toggle())
+        .on_press(|_: &()| player().toggle())
         .child(super::icons::play_pause(34.0, move || s.playback.with(|p| p.playing), || white_a(0.95)));
     let mode_icon = move || match s.playback.with(|p| p.loop_mode) {
         LoopMode::List => Icon::Repeat,
@@ -384,6 +364,7 @@ fn left_column(swap: &Swap) -> View {
         .child(side(
             Box::new(mode_icon),
             "循环模式（顺序 / 单曲 / 随机）",
+            "循环模式",
             Box::new(move || white_a(if s.playback.with(|p| p.loop_mode) == LoopMode::List { 0.55 } else { 0.95 })),
             super::store::cycle_loop_mode,
         ))
@@ -392,6 +373,7 @@ fn left_column(swap: &Swap) -> View {
         .child(skip(Icon::NextLine, "下一首", || player().next()))
         .child(side(
             Box::new(|| if super::store::current_liked() { Icon::HeartFilled } else { Icon::Heart }),
+            "喜欢",
             "喜欢",
             Box::new(like_red),
             super::store::toggle_like_current,
@@ -605,19 +587,13 @@ fn volume_row() -> View {
         .flex_row()
         .items_center()
         .gap(px(12.0))
-        .child(
-            view()
-                .size(px(26.0))
-                .items_center()
-                .justify_center()
-                .rounded(px(6.0))
-                .role(AccessibilityRole::Button)
-                .label("静音")
-                .hover(|st| st.bg(white_a(0.08)))
-                .active(|st| st.opacity(0.6))
-                .on_press(toggle_mute)
+        .child(tipped(
+            on_dark(28.0)
+                .accessibility_label("静音")
+                .on_press(|_: &()| toggle_mute())
                 .child(icon_dyn(move || if volume() <= 0.0 { Icon::Mute } else { Icon::Volume }, 15.0, || white_a(0.7))),
-        )
+            "静音",
+        ))
         .child(slider(volume, white_a(0.2), white_a(0.9), white_a(1.0), set_volume, set_volume).flex_1())
         .child(
             text(move || format!("{}", (volume() * 100.0).round()))

@@ -10,6 +10,7 @@ use super::icons::{icon_dyn, Icon};
 use super::theme::*;
 
 /// shadcn 的 `variant`。
+#[allow(dead_code, reason = "shadcn 的完整变体集，部分暂未用到")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Variant {
     /// 主色底（`bg-primary`）。
@@ -25,6 +26,7 @@ pub enum Variant {
 }
 
 /// shadcn 的 `size`。
+#[allow(dead_code, reason = "shadcn 的完整尺寸集，部分暂未用到")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Size {
     /// `h-6 px-2 gap-1 text-xs`。
@@ -137,6 +139,40 @@ pub fn text_button(
         .on_press(move |_: &()| on_press())
         .child(glyph.map(|g| icon_dyn(move || g, size.glyph(), fg)))
         .child(text(label).text_size(px(size.text_size())).font_weight(FontWeight::MEDIUM).text_color(fg()))
+}
+
+/// 给按钮加提示（nsh-base `tooltip`，桌面上悬停 500 ms 后出现在上方）。
+/// 外观同 shadcn TooltipContent：`rounded-md bg-foreground px-3 py-1.5
+/// text-xs text-background`。nsh-base 0.3.0 的组件元素没有 `.tooltip`，
+/// 所以挂在外面包一层的 view 上。
+pub fn tipped(content: impl IntoElement, tip: impl Into<SharedString>) -> View {
+    let t = nsh_base::theme();
+    let (back, front) = (t.foreground, t.background);
+    view().flex_shrink_0().child(content).tooltip(
+        nsh_base::tooltip()
+            .offset(px(6.0))
+            .px(px(12.0))
+            .py(px(6.0))
+            .rounded(px(RADIUS_MD))
+            .bg(back)
+            .child(text(tip.into()).text_size(px(12.0)).text_color(front)),
+    )
+}
+
+/// 全屏播放页（深色背景上的白色图标）的 ghost 按钮：悬停为白色 8%，
+/// 圆形；`side` 为边长。
+pub fn on_dark(side: f32) -> ButtonElement {
+    button()
+        .size(px(side))
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .transition_colors()
+        .duration(150.0)
+        .hover(|st| st.bg(white_a(0.08)))
+        .active(|st| st.opacity(0.6))
+        .focus(|st| st.ring(px(3.0)).ring_color(white_a(0.4)))
 }
 
 /// shadcn 的 `rounded-md`（`--radius` 0.625rem 减 2 px）。
