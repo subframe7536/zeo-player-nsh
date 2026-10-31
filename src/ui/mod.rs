@@ -124,7 +124,6 @@ pub fn App() -> impl IntoElement {
                             .min_w(px(0.0))
                             .child(view().h(move || px(top_inset())).flex_shrink_0())
                             .child(view().flex_1().child(content))
-                            .child(when(move || queue_open.get(), move || queue::queue_panel(queue_open)))
                             .child(bar::player_bar(open, queue_open)),
                     ),
             )
@@ -132,6 +131,12 @@ pub fn App() -> impl IntoElement {
             .child(when(move || full_open.get(), move || full::full_player(fade, close.clone())))
     };
 
+    // 关闭提示：标志置位时弹出一次。
+    effect(move || {
+        if s.close_prompt.get() {
+            untracked(ask_close);
+        }
+    });
     let root = view()
         .flex_1()
         .bg(bg())
@@ -142,7 +147,6 @@ pub fn App() -> impl IntoElement {
         // Space 等快捷键也被它吃掉）。
         .on_touch(move |e: &TouchEvent| search.outside_touch(e))
         .child(when(move || !s.hidden.get(), shell))
-        .child(when(move || s.close_prompt.get(), close_prompt))
         .child(when(move || s.editor.with(Option::is_some), playlists::editor_dialog));
     // Windows 的窗口按钮在最上层（盖过全屏播放与弹窗，和系统按钮一样）。
     #[cfg(target_os = "windows")]
@@ -276,48 +280,26 @@ fn page(nav: Signal<Nav>) -> AnyElement {
     })
 }
 
-/// 第一次点关闭：最小化到托盘还是退出。选择会记住（设置里可改）。
-fn close_prompt() -> View {
+/// 第一次点关闭：最小化到托盘还是退出（nsh-base `alert_dialog`，系统的
+/// 警告框）。选择会记住（设置里可改）；取消或 Esc 不关窗口。
+fn ask_close() {
     use crate::library::CloseAction;
-    let s = store::store();
-    on_key("escape", move |_| s.close_prompt.set(false));
-    view()
-        .absolute()
-        .inset(px(0.0))
-        .z_index(100)
-        .bg(black_a(0.4))
-        .items_center()
-        .justify_center()
-        .on_press(move || s.close_prompt.set(false))
-        .child(
-            view()
-                .w(px(400.0))
-                .p(px(24.0))
-                .gap(px(8.0))
-                .rounded(px(16.0))
-                .bg(nsh_base::theme().popover)
-                .border_1()
-                .border_color(border())
-                .shadow_2xl()
-                // 点卡片本身不关闭。
-                .on_press(|| {})
-                .child(text("关闭窗口").text_size(px(17.0)).font_weight(FontWeight::SEMIBOLD).text_color(theme::fg()))
-                .child(
-                    text("最小化到托盘后音乐继续播放，可以从托盘图标打开窗口、切歌或退出。这个选择会被记住，可以在「设置」里更改。")
-                        .text_size(px(13.0))
-                        .line_height(px(20.0))
-                        .text_color(muted_fg()),
-                )
-                .child(
-                    view()
-                        .flex_row()
-                        .justify_end()
-                        .gap(px(8.0))
-                        .mt(px(12.0))
-                        .child(parts::outline_button(Icon::Close, "退出 Zeo Player", || store::answer_close(CloseAction::Quit)))
-                        .child(parts::pill_button(Icon::ChevronDown, "最小化到托盘", || store::answer_close(CloseAction::Tray))),
-                ),
-        )
+    const QUIT: &str = "退出 Zeo Player";
+    const TRAY: &str = "最小化到托盘";
+    let answer = nsh_base::alert_dialog()
+        .title("关闭窗口")
+        .description("最小化到托盘后音乐继续播放，可以从托盘图标打开窗口、切歌或退出。这个选择会被记住，可以在「设置」里更改。")
+        .action(TRAY)
+        .action(QUIT)
+        .cancel("取消")
+        .show();
+    spawn(async move {
+        match answer.await {
+            Ok(Some(label)) if label == TRAY => store::answer_close(CloseAction::Tray),
+            Ok(Some(label)) if label == QUIT => store::answer_close(CloseAction::Quit),
+            _ => store::store().close_prompt.set(false),
+        }
+    });
 }
 
 fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> View {

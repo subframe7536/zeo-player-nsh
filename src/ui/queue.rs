@@ -1,11 +1,14 @@
-//! 播放队列面板：从播放条的按钮打开，浮在内容区右侧。列出当前队列，
-//! 正在播放的一首高亮；点一行跳到那首。
+//! 播放队列：播放条上的按钮打开的 nsh-base `popover`（shadcn Popover 的
+//! 外观：`rounded-md border bg-popover shadow-md`），在按钮上方、右边对齐。
+//! 列出当前队列，正在播放的一首高亮；点一行跳到那首。点外面或 Esc 关闭。
 
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use nsh_base::{popover, PopoverEvent};
 use nsh_core::prelude::*;
 
+use super::button::RADIUS_MD;
 use super::icons::{icon, icon_dyn, Icon};
 use super::parts::{cover, icon_button};
 use super::store::{cover_of, format_time, player, store};
@@ -14,9 +17,51 @@ use crate::audio::LoopMode;
 
 const ROW: f32 = 52.0;
 
-pub fn queue_panel(open: Signal<bool>) -> View {
+/// 队列按钮与它打开的弹层。`open` 由应用持有（按钮的高亮也读它）。
+pub fn queue_button(open: Signal<bool>) -> AnyElement {
+    // 触发器由 popover 接管按压（切换开合、`expanded` 状态），所以是普通
+    // view：nsh-base 的 button 自己吃掉按压，popover 收不到。外形同 shadcn
+    // ghost `icon-sm`。
+    let trigger = view()
+        .size(px(32.0))
+        .items_center()
+        .justify_center()
+        .rounded(px(RADIUS_MD))
+        .role(AccessibilityRole::Button)
+        .label("播放队列")
+        .style_when(move || open.get(), |st| st.bg(hover()))
+        .hover(|st| st.bg(hover()))
+        .active(|st| st.opacity(0.8))
+        .transition_colors()
+        .duration(150.0)
+        .child(icon_dyn(|| Icon::Queue, 16.0, move || if open.get() { primary() } else { muted_fg() }));
+    popover()
+        .open(move || Some(open.get()))
+        .on_open_change(move |e: &PopoverEvent| {
+            if let PopoverEvent::OpenChange(next, _) = e {
+                open.set(*next);
+            }
+        })
+        .placement(Placement::Top)
+        .align(Align::End)
+        .offset(px(12.0))
+        .margin(px(8.0))
+        .popup_style(|st| {
+            st.w(px(340.0))
+                .rounded(px(RADIUS_MD))
+                .border_1()
+                .border_color(border())
+                .bg(nsh_base::theme().popover)
+                .shadow_md()
+                .overflow_hidden()
+        })
+        .trigger(trigger)
+        .child(queue_panel(open))
+        .into_element()
+}
+
+fn queue_panel(open: Signal<bool>) -> View {
     let s = store();
-    on_key("escape", move |_| open.set(false));
     // 路径 → 曲库里的条目（队列只存路径）。
     let index = computed(move || {
         let tracks = s.tracks.get();
@@ -48,7 +93,7 @@ pub fn queue_panel(open: Signal<bool>) -> View {
             .items_center()
             .gap(px(10.0))
             .px(px(10.0))
-            .rounded(px(10.0))
+            .rounded(px(RADIUS_MD))
             .role(AccessibilityRole::Button)
             .label(title)
             .style_when(is_current, |st| st.bg(hover()))
@@ -106,31 +151,23 @@ pub fn queue_panel(open: Signal<bool>) -> View {
     )
     .flex_1();
 
+    // 高度：最多 560，窗口矮时让出标题栏与播放条。
     view()
-        .absolute()
-        .top(move || px(top_inset()))
-        .right(px(16.0))
-        .bottom(px(BAR_SPACE))
-        .w(px(340.0))
-        .rounded(px(16.0))
-        .bg(nsh_base::theme().popover)
-        .border_1()
-        .border_color(border())
-        .shadow_xl()
-        .overflow_hidden()
+        .w_full()
+        .h(move || px((window().height.0 - top_inset() - BAR_SPACE - 16.0).clamp(200.0, 560.0)))
         .child(
             view()
                 .flex_row()
                 .items_center()
                 .gap(px(8.0))
                 .px(px(16.0))
-                .pt(px(14.0))
-                .pb(px(10.0))
+                .pt(px(12.0))
+                .pb(px(8.0))
                 .child(
                     view()
                         .flex_1()
                         .gap(px(2.0))
-                        .child(text("播放队列").text_size(px(15.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg()))
+                        .child(text("播放队列").text_size(px(14.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg()))
                         .child(
                             text(move || {
                                 let n = count.get();

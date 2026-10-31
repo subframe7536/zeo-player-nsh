@@ -165,12 +165,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
             toggle_mute,
         ))
         .child(slider(volume, muted(), muted_fg(), fg(), set_volume, set_volume).w(px(96.0)))
-        .child(
-            icon_button(|| Icon::Queue, 16.0, "播放队列", move || if queue_open.get() { primary() } else { muted_fg() }, move || {
-                queue_open.update(|o| *o = !*o)
-            })
-            .style_when(move || queue_open.get(), |st| st.bg(hover())),
-        )
+        .child(super::queue::queue_button(queue_open))
         .child(icon_button(|| Icon::Expand, 14.0, "全屏播放", muted_fg, move || on_expand()));
 
     view()
