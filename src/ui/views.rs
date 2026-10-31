@@ -1671,30 +1671,14 @@ fn font_browser(expanded: Signal<bool>) -> View {
 fn playback_card() -> View {
     let s = store();
     const STEPS: &[(u32, &str)] = &[(0, "关闭"), (100, "0.1 秒"), (200, "0.2 秒"), (400, "0.4 秒"), (800, "0.8 秒"), (1500, "1.5 秒")];
-    let chip = move |ms: u32, label: &'static str| {
-        let on = move || s.library.with(|l| l.fade_ms == ms);
-        view()
-            .h(px(32.0))
-            .px(px(14.0))
-            .justify_center()
-            .rounded_full()
-            .border_1()
-            .border_color(move || if on() { primary() } else { border() })
-            .bg(move || if on() { primary().opacity(0.12) } else { AdaptiveColor::TRANSPARENT })
-            .role(AccessibilityRole::Button)
-            .label(label)
-            .accessibility_state(move || AccessibilityState { selected: on(), ..AccessibilityState::default() })
-            .hover(|st| st.bg(hover()))
-            .active(|st| st.opacity(0.7))
-            .on_press(move || super::store::set_fade_ms(ms))
-            .child(text(label).text_size(px(13.0)).font_weight(FontWeight::MEDIUM).text_color(fg()))
-    };
     card_section(
         "淡入淡出",
         "播放、暂停、拖动进度和切歌时，音量在这段时间里渐变，不会突然响起或戛然而止。一首自然播完接下一首时不淡变。",
         None,
     )
-    .child(view().flex_row().flex_wrap().gap(px(8.0)).children(STEPS.iter().map(|&(ms, label)| chip(ms, label))))
+    .child(super::radio::group_row().children(STEPS.iter().map(|&(ms, label)| {
+        super::radio::item(move || s.library.with(|l| l.fade_ms == ms), label, move || super::store::set_fade_ms(ms))
+    })))
 }
 
 /// 全屏歌词的对齐方式。
@@ -1703,26 +1687,15 @@ fn lyrics_card() -> View {
     let s = store();
     const OPTIONS: &[(LyricsAlign, &str)] =
         &[(LyricsAlign::Left, "左对齐"), (LyricsAlign::Center, "居中"), (LyricsAlign::Right, "右对齐")];
-    let chip = move |align: LyricsAlign, label: &'static str| {
-        let on = move || s.library.with(|l| l.lyrics_align == align);
-        view()
-            .h(px(32.0))
-            .px(px(14.0))
-            .justify_center()
-            .rounded_full()
-            .border_1()
-            .border_color(move || if on() { primary() } else { border() })
-            .bg(move || if on() { primary().opacity(0.12) } else { AdaptiveColor::TRANSPARENT })
-            .role(AccessibilityRole::Button)
-            .label(label)
-            .accessibility_state(move || AccessibilityState { selected: on(), ..AccessibilityState::default() })
-            .hover(|st| st.bg(hover()))
-            .active(|st| st.opacity(0.7))
-            .on_press(move || super::store::set_lyrics_align(align))
-            .child(text(label).text_size(px(13.0)).font_weight(FontWeight::MEDIUM).text_color(fg()))
-    };
-    card_section("歌词对齐", "全屏播放页里歌词的对齐方式。", None)
-        .child(view().flex_row().flex_wrap().gap(px(8.0)).children(OPTIONS.iter().map(|&(a, label)| chip(a, label))))
+    card_section("歌词对齐", "全屏播放页里歌词的对齐方式。", None).child(super::radio::group_row().children(
+        OPTIONS.iter().map(|&(align, label)| {
+            super::radio::item(
+                move || s.library.with(|l| l.lyrics_align == align),
+                label,
+                move || super::store::set_lyrics_align(align),
+            )
+        }),
+    ))
 }
 
 /// 关闭窗口时：每次询问 / 最小化到托盘 / 退出。
@@ -1730,24 +1703,12 @@ fn window_card() -> View {
     use crate::library::CloseAction;
     let s = store();
     let option = move |action: CloseAction, label: &'static str, hint: &'static str| {
-        let on = move || s.library.with(|l| l.close_action == action);
-        view()
-            .flex_1()
-            .min_w(px(140.0))
-            .gap(px(2.0))
-            .p(px(12.0))
-            .rounded(px(10.0))
-            .border_1()
-            .border_color(move || if on() { primary() } else { border() })
-            .bg(move || if on() { primary().opacity(0.12) } else { AdaptiveColor::TRANSPARENT })
-            .role(AccessibilityRole::Button)
-            .label(label)
-            .accessibility_state(move || AccessibilityState { selected: on(), ..AccessibilityState::default() })
-            .hover(|st| st.bg(hover()))
-            .active(|st| st.opacity(0.7))
-            .on_press(move || super::store::set_close_action(action))
-            .child(text(label).text_size(px(14.0)).font_weight(FontWeight::MEDIUM).text_color(fg()))
-            .child(text(hint).text_size(px(12.0)).text_color(muted_fg()))
+        super::radio::card(
+            move || s.library.with(|l| l.close_action == action),
+            label,
+            hint,
+            move || super::store::set_close_action(action),
+        )
     };
     let supported = cfg!(any(target_os = "macos", target_os = "windows"));
     card_section(
@@ -1760,10 +1721,7 @@ fn window_card() -> View {
         None,
     )
     .child(supported.then(|| {
-        view()
-            .flex_row()
-            .flex_wrap()
-            .gap(px(8.0))
+        super::radio::group_cards()
             .child(option(CloseAction::Ask, "每次询问", "第一次关闭时选择"))
             .child(option(CloseAction::Tray, "最小化到托盘", "继续播放"))
             .child(option(CloseAction::Quit, "退出", "停止播放并退出"))

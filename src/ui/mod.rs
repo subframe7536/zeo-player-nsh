@@ -10,6 +10,7 @@ mod icons;
 mod parts;
 mod playlists;
 mod queue;
+mod radio;
 pub mod store;
 mod theme;
 mod views;
