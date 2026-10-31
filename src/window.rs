@@ -206,8 +206,8 @@ mod tray {
         let toggle = MenuItem::with_id("toggle", "播放", false, None);
         let prev = MenuItem::with_id("prev", "上一首", false, None);
         let next = MenuItem::with_id("next", "下一首", false, None);
-        let show = MenuItem::with_id("show", "显示 Zeo", true, None);
-        let quit = MenuItem::with_id("quit", "退出 Zeo", true, None);
+        let show = MenuItem::with_id("show", "显示 Zeo Player", true, None);
+        let quit = MenuItem::with_id("quit", "退出 Zeo Player", true, None);
         let _ = menu.append_items(&[
             &now,
             &PredefinedMenuItem::separator(),
@@ -218,7 +218,7 @@ mod tray {
             &show,
             &quit,
         ]);
-        let mut builder = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip("Zeo");
+        let mut builder = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip("Zeo Player");
         if let Some(icon) = icon() {
             builder = builder.with_icon(icon);
         }
@@ -228,7 +228,7 @@ mod tray {
         }
         match builder.build() {
             Ok(icon) => TRAY.with(|t| *t.borrow_mut() = Some(Tray { _icon: icon, now, toggle, prev, next })),
-            Err(err) => eprintln!("zeo: 托盘图标创建失败：{err}"),
+            Err(err) => eprintln!("zeo-player: 托盘图标创建失败：{err}"),
         }
     }
 
@@ -429,7 +429,7 @@ mod platform {
 
     pub fn start() {
         std::thread::Builder::new()
-            .name("zeo-window".into())
+            .name("zeo-player-window".into())
             .spawn(|| {
                 for _ in 0..150 {
                     if hook() {
@@ -443,7 +443,7 @@ mod platform {
         let (tx, rx) = channel::<TrayState>();
         let _ = TRAY_TX.set(Mutex::new(tx));
         std::thread::Builder::new()
-            .name("zeo-tray".into())
+            .name("zeo-player-tray".into())
             .spawn(move || {
                 super::tray::create();
                 loop {

@@ -24,23 +24,23 @@ impl MediaSession {
     pub fn start(cmd_tx: Sender<EngineCmd>) -> MediaSession {
         let (tx, rx) = std::sync::mpsc::channel::<Op>();
         std::thread::Builder::new()
-            .name("zeo-media".into())
+            .name("zeo-player-media".into())
             .spawn(move || {
                 #[allow(unused_mut)]
-                let mut config = PlayerConfig::new("Zeo")
-                    .desktop_entry("dev.subf.zeo")
-                    .track_id_prefix("/dev/subf/zeo/track");
+                let mut config = PlayerConfig::new("Zeo Player")
+                    .desktop_entry("dev.subf.zeo-player")
+                    .track_id_prefix("/dev/subf/zeo_player/track");
                 // Windows 的系统媒体控件要挂在窗口上：等 window.rs 找到窗口。
                 #[cfg(target_os = "windows")]
                 {
                     let mut waited = 0;
                     loop {
                         if let Some(hwnd) = crate::window::hwnd() {
-                            config = config.hwnd(hwnd).app_media_id("dev.subf.zeo");
+                            config = config.hwnd(hwnd).app_media_id("dev.subf.zeo-player");
                             break;
                         }
                         if waited > 300 {
-                            eprintln!("zeo: 没找到窗口，系统媒体控件不可用");
+                            eprintln!("zeo-player: 没找到窗口，系统媒体控件不可用");
                             return;
                         }
                         std::thread::sleep(Duration::from_millis(100));
@@ -65,7 +65,7 @@ impl MediaSession {
                 }) {
                     Ok(controls) => controls,
                     Err(err) => {
-                        eprintln!("zeo: 系统媒体会话不可用: {err}");
+                        eprintln!("zeo-player: 系统媒体会话不可用: {err}");
                         return;
                     }
                 };
@@ -91,7 +91,7 @@ impl MediaSession {
                                 last_track_id = Some(id);
                             }
                             if let Err(err) = controls.set_state(&state) {
-                                eprintln!("zeo: 媒体状态发布失败: {err}");
+                                eprintln!("zeo-player: 媒体状态发布失败: {err}");
                             }
                         }
                     }

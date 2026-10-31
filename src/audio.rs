@@ -279,7 +279,7 @@ impl EngineHandle {
         });
         let media = MediaSession::start(tx.clone());
         std::thread::Builder::new()
-            .name("zeo-audio".into())
+            .name("zeo-player-audio".into())
             .spawn({
                 let shared = shared.clone();
                 move || run(rx, shared, media)
@@ -403,7 +403,7 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
                         let dev_channels = dev_channels;
                         move |data: &mut [f32], _| output_callback(&shared, data, dev_channels)
                     },
-                    |err| eprintln!("zeo cpal: {err}"),
+                    |err| eprintln!("zeo-player cpal: {err}"),
                     None,
                 );
                 match build {
@@ -837,7 +837,7 @@ fn reset_ring(shared: &Arc<Shared>, seconds: f64, dev_rate: u32) {
 }
 
 fn set_error(shared: &Arc<Shared>, message: &str) {
-    eprintln!("zeo: {message}");
+    eprintln!("zeo-player: {message}");
     shared.track.lock().unwrap().error = Some(message.to_owned());
 }
 

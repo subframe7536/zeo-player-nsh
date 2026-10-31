@@ -1,5 +1,5 @@
 //! 封面缩略图：内嵌封面解码、缩放到 [`THUMB`] 像素、存为 JPEG 缓存文件
-//! （`~/Library/Caches/Zeo/covers`，按 路径 + 修改时间 + 大小 + 文件指纹 命名）。
+//! （`~/Library/Caches/Zeo Player/covers`，按 路径 + 修改时间 + 大小 + 文件指纹 命名）。
 //! 后台线程池处理请求，结果由 UI 轮询取走。
 
 use std::path::{Path, PathBuf};
@@ -31,7 +31,7 @@ fn pool() -> &'static Pool {
             let rx: Arc<Mutex<Receiver<String>>> = rx.clone();
             let done = done.clone();
             std::thread::Builder::new()
-                .name(format!("zeo-cover-{i}"))
+                .name(format!("zeo-player-cover-{i}"))
                 .spawn(move || loop {
                     let next = rx.lock().unwrap().recv();
                     let Ok(path) = next else { return };
@@ -55,9 +55,9 @@ pub fn take_done() -> Vec<(String, Option<String>)> {
 }
 
 fn cache_dir() -> PathBuf {
-    std::env::var_os("ZEO_CACHE_DIR")
+    std::env::var_os("ZEO_PLAYER_CACHE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("Zeo"))
+        .unwrap_or_else(|| dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("Zeo Player"))
         .join("covers")
 }
 
@@ -155,8 +155,8 @@ mod tests {
             return;
         };
         // SAFETY(测试): 只有本测试读写这个变量。
-        unsafe { std::env::set_var("ZEO_CACHE_DIR", "/tmp/zeo-test-cache") };
-        let _ = std::fs::remove_dir_all("/tmp/zeo-test-cache");
+        unsafe { std::env::set_var("ZEO_PLAYER_CACHE_DIR", "/tmp/zeo-player-test-cache") };
+        let _ = std::fs::remove_dir_all("/tmp/zeo-player-test-cache");
         let started = std::time::Instant::now();
         let Some(thumb) = thumbnail(&file) else {
             eprintln!("跳过：{} 没有封面", file.display());

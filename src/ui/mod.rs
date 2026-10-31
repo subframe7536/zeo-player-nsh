@@ -1,4 +1,4 @@
-//! Zeo 的界面（纯 Rust）：侧栏导航 + 内容区 + 浮动播放条；全屏播放为
+//! Zeo Player 的界面（纯 Rust）：侧栏导航 + 内容区 + 浮动播放条；全屏播放为
 //! 带淡入的覆盖层。
 
 mod bar;
@@ -131,7 +131,7 @@ fn title_bar() -> View {
                 .items_center()
                 .gap(px(8.0))
                 .child(icons::logo(20.0))
-                .child(text("Zeo").text_size(px(15.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg())),
+                .child(text("Zeo Player").text_size(px(15.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg())),
         )
         .child(
             view().flex_1().flex_row().items_center().justify_end().window_drag(false).child(
@@ -220,7 +220,7 @@ fn close_prompt() -> View {
                         .justify_end()
                         .gap(px(8.0))
                         .mt(px(12.0))
-                        .child(parts::outline_button(Icon::Close, "退出 Zeo", || store::answer_close(CloseAction::Quit)))
+                        .child(parts::outline_button(Icon::Close, "退出 Zeo Player", || store::answer_close(CloseAction::Quit)))
                         .child(parts::pill_button(Icon::ChevronDown, "最小化到托盘", || store::answer_close(CloseAction::Tray))),
                 ),
         )
@@ -311,19 +311,19 @@ thread_local! {
     pub(crate) static BENCH_GRID: std::cell::Cell<Option<nsh_core::element::ElementRef>> = const { std::cell::Cell::new(None) };
 }
 
-/// 内存测量用的脚本（`ZEO_BENCH=1` 启动时运行，平时不做任何事）：依次打开
+/// 内存测量用的脚本（`ZEO_PLAYER_BENCH=1` 启动时运行，平时不做任何事）：依次打开
 /// 各视图、在专辑页停留、播放并打开全屏、连续切 20 首，每步之间留时间测量。
-/// 进度写到标准错误：`ZEO_BENCH step <名称>`。
+/// 进度写到标准错误：`ZEO_PLAYER_BENCH step <名称>`。
 fn bench(open_full: Rc<dyn Fn()>) {
-    if std::env::var_os("ZEO_BENCH").is_none() {
+    if std::env::var_os("ZEO_PLAYER_BENCH").is_none() {
         return;
     }
-    if std::env::var("ZEO_BENCH").as_deref() == Ok("close") {
+    if std::env::var("ZEO_PLAYER_BENCH").as_deref() == Ok("close") {
         return bench_close();
     }
     let nav = global::<Nav>();
     spawn(async move {
-        let step = |name: &str| eprintln!("ZEO_BENCH step {name}");
+        let step = |name: &str| eprintln!("ZEO_PLAYER_BENCH step {name}");
         let wait = |s: u64| timer(std::time::Duration::from_secs(s));
         // 等扫描结束。
         while store::store().library.with_untracked(|l| l.scanning) || store::store().tracks.with_untracked(|t| t.is_empty()) {
@@ -337,7 +337,7 @@ fn bench(open_full: Rc<dyn Fn()>) {
             wait(6).await;
         }
         // 专辑网格从头滚到底：每张封面都解码一遍（最坏情况）。
-        if let Some(grid) = BENCH_GRID.with(|g| g.get()).filter(|_| std::env::var_os("ZEO_BENCH_NO_SCROLL").is_none()) {
+        if let Some(grid) = BENCH_GRID.with(|g| g.get()).filter(|_| std::env::var_os("ZEO_PLAYER_BENCH_NO_SCROLL").is_none()) {
             for i in 0..120 {
                 grid.scroll_to_offset(px(i as f32 * 400.0), false);
                 timer(std::time::Duration::from_millis(150)).await;
@@ -365,12 +365,12 @@ fn bench(open_full: Rc<dyn Fn()>) {
     });
 }
 
-/// `ZEO_BENCH=close`：点关闭 → 询问 → 最小化到托盘 → 从托盘显示 → 退出。
+/// `ZEO_PLAYER_BENCH=close`：点关闭 → 询问 → 最小化到托盘 → 从托盘显示 → 退出。
 fn bench_close() {
     use crate::library::CloseAction;
     spawn(async move {
         let s = store::store();
-        let step = |name: &str| eprintln!("ZEO_BENCH step {name} hidden={} prompt={}", crate::window::is_hidden(), s.close_prompt.get_untracked());
+        let step = |name: &str| eprintln!("ZEO_PLAYER_BENCH step {name} hidden={} prompt={}", crate::window::is_hidden(), s.close_prompt.get_untracked());
         let wait = |ms: u64| timer(std::time::Duration::from_millis(ms));
         while s.tracks.with_untracked(|t| t.is_empty()) {
             wait(500).await;
@@ -386,9 +386,9 @@ fn bench_close() {
         store::answer_close(CloseAction::Tray);
         wait(4000).await;
         step("tray");
-        eprintln!("ZEO_BENCH playing={} time={:.1}", s.playback.with_untracked(|p| p.playing), s.playback.with_untracked(|p| p.time));
+        eprintln!("ZEO_PLAYER_BENCH playing={} time={:.1}", s.playback.with_untracked(|p| p.playing), s.playback.with_untracked(|p| p.time));
         wait(6000).await;
-        eprintln!("ZEO_BENCH playing={} time={:.1}", s.playback.with_untracked(|p| p.playing), s.playback.with_untracked(|p| p.time));
+        eprintln!("ZEO_PLAYER_BENCH playing={} time={:.1}", s.playback.with_untracked(|p| p.playing), s.playback.with_untracked(|p| p.time));
         nsh_core::element::desktop::close_window();
         wait(500).await;
         step("closed-again-while-hidden");
@@ -401,7 +401,7 @@ fn bench_close() {
         step("remembered");
         store::set_close_action(CloseAction::Ask);
         wait(500).await;
-        eprintln!("ZEO_BENCH step quit");
+        eprintln!("ZEO_PLAYER_BENCH step quit");
         crate::window::quit();
     });
 }

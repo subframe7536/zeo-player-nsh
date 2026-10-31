@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn saves_and_loads_both_kinds() {
-        let dir = std::env::temp_dir().join(format!("zeo-playlists-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zeo-player-playlists-{}", std::process::id()));
         let path = dir.join("playlists.json");
         let lists = vec![
             Playlist { id: 1, name: "手动".into(), kind: Kind::Manual { tracks: vec!["/a.mp3".into()] } },

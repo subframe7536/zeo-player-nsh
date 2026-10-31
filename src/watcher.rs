@@ -44,7 +44,7 @@ fn events() -> &'static Mutex<Sender<usize>> {
     TX.get_or_init(|| {
         let (tx, rx) = channel::<usize>();
         std::thread::Builder::new()
-            .name("zeo-watch".into())
+            .name("zeo-player-watch".into())
             .spawn(move || {
                 loop {
                     // 等第一批变化。
@@ -174,12 +174,12 @@ mod tests {
         else {
             return;
         };
-        let root = PathBuf::from("/tmp/zeo-watch-root");
+        let root = PathBuf::from("/tmp/zeo-player-watch-root");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         // SAFETY(测试): 只有本测试读写这个变量。
-        unsafe { std::env::set_var("ZEO_DATA_DIR", "/tmp/zeo-test-data-watch") };
-        let _ = std::fs::remove_dir_all("/tmp/zeo-test-data-watch");
+        unsafe { std::env::set_var("ZEO_PLAYER_DATA_DIR", "/tmp/zeo-player-test-data-watch") };
+        let _ = std::fs::remove_dir_all("/tmp/zeo-player-test-data-watch");
         let lib = library_store();
         lib.add_root(&root.to_string_lossy()).unwrap();
         let root = PathBuf::from(&lib.roots()[0]);

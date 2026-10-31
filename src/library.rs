@@ -156,11 +156,11 @@ pub struct LibraryStore {
     current: std::sync::Mutex<String>,
 }
 
-/// 应用数据目录（`ZEO_DATA_DIR` 可覆盖）。
+/// 应用数据目录（`ZEO_PLAYER_DATA_DIR` 可覆盖）。
 pub fn data_dir() -> PathBuf {
-    std::env::var_os("ZEO_DATA_DIR")
+    std::env::var_os("ZEO_PLAYER_DATA_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("Zeo"))
+        .unwrap_or_else(|| dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("Zeo Player"))
 }
 
 pub fn library_store() -> &'static LibraryStore {
@@ -507,8 +507,8 @@ mod real_library {
     fn scan_reports_progress() {
         let music = dirs::audio_dir().expect("~/Music");
         // SAFETY(测试): 只有本测试读写这个变量。
-        unsafe { std::env::set_var("ZEO_DATA_DIR", "/tmp/zeo-test-data-progress") };
-        let _ = std::fs::remove_dir_all("/tmp/zeo-test-data-progress");
+        unsafe { std::env::set_var("ZEO_PLAYER_DATA_DIR", "/tmp/zeo-player-test-data-progress") };
+        let _ = std::fs::remove_dir_all("/tmp/zeo-player-test-data-progress");
         let store = library_store();
         store.add_root(&music.to_string_lossy()).unwrap();
         let worker = std::thread::spawn(|| library_store().scan());

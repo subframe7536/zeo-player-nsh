@@ -1,5 +1,5 @@
 //! 自定义字体：用 font-enumeration 列出系统字体家族，用 fontdb 读导入文件的家族名；导入 .ttf / .otf / .ttc 文件（复制
-//! 到 `~/Library/Application Support/Zeo/fonts`，只对本进程注册，不装进系统）。
+//! 到 `~/Library/Application Support/Zeo Player/fonts`，只对本进程注册，不装进系统）。
 
 use std::path::{Path, PathBuf};
 
@@ -84,7 +84,7 @@ pub fn imported_families() -> Vec<String> {
 pub fn register_imported() {
     for file in imported_files() {
         if let Err(error) = register(&file) {
-            eprintln!("zeo: {error}");
+            eprintln!("zeo-player: {error}");
         }
     }
 }
@@ -127,7 +127,7 @@ mod platform {
     }
 
     fn log_once(path: &Path) {
-        eprintln!("zeo: 字体已注册或无法注册：{}", path.display());
+        eprintln!("zeo-player: 字体已注册或无法注册：{}", path.display());
     }
 }
 

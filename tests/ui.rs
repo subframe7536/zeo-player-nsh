@@ -1,25 +1,25 @@
 //! 界面测试：无头引擎运行根组件 `App`（`cargo test` / `nsh test` 都会跑）。
 //!
-//! 曲库用独立的数据目录；有 `/tmp/zeo-test-music` 语料（`scripts/make-test-music.sh`）
+//! 曲库用独立的数据目录；有 `/tmp/zeo-player-test-music` 语料（`scripts/make-test-music.sh`）
 //! 时把它设为根文件夹，没有时只跑不依赖曲目的部分。
 
 use std::sync::Once;
 use std::time::Duration;
 
-use nsh_app_zeo::App;
+use zeo_player::App;
 use nsh_core::geometry::{px, size};
 use nsh_core::platform::Os;
 use nsh_engine::{EngineConfig, Root};
 use nsh_testing::Headless;
 
-const CORPUS: &str = "/tmp/zeo-test-music";
+const CORPUS: &str = "/tmp/zeo-player-test-music";
 
 /// 隔离的数据 / 缓存目录（整个测试进程一次；曲库存储是全局的）。
 fn isolate() -> bool {
     static ONCE: Once = Once::new();
     let corpus = std::path::Path::new(CORPUS).is_dir();
     ONCE.call_once(|| {
-        let data = std::env::temp_dir().join(format!("zeo-ui-test-{}", std::process::id()));
+        let data = std::env::temp_dir().join(format!("zeo-player-ui-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
         std::fs::create_dir_all(&data).unwrap();
         if corpus {
@@ -28,8 +28,8 @@ fn isolate() -> bool {
         }
         // SAFETY: 在任何线程读这些变量之前设置（Once 内，测试开始前）。
         unsafe {
-            std::env::set_var("ZEO_DATA_DIR", &data);
-            std::env::set_var("ZEO_CACHE_DIR", data.join("cache"));
+            std::env::set_var("ZEO_PLAYER_DATA_DIR", &data);
+            std::env::set_var("ZEO_PLAYER_CACHE_DIR", data.join("cache"));
         }
     });
     corpus
@@ -40,7 +40,7 @@ fn start(width: f32, height: f32) -> Headless {
     isolate();
     let theme = nsh_base::Theme::from_json(include_str!("../theme.json")).expect("theme.json");
     let mut config = EngineConfig::new(Root::of::<App>().tokens(theme.into_tokens()));
-    config.ui_sets = vec![nsh_base::registry(), nsh_app_zeo::registry()];
+    config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
     config.viewport = size(px(width), px(height));
     config.environment.os = Os::MacOs;
     let mut app = Headless::start(config).expect("start the app");
@@ -105,7 +105,7 @@ fn full_player_opens_and_closes() {
     app.press("label:全屏播放").unwrap();
     app.wait_for("label:收起").unwrap();
     let t = texts(&app);
-    assert!(t.iter().any(|s| s == "暂无歌词" || s == "正在载入歌词…" || s == "Zeo"), "{t:?}");
+    assert!(t.iter().any(|s| s == "暂无歌词" || s == "正在载入歌词…" || s == "Zeo Player"), "{t:?}");
     app.press("label:收起").unwrap();
     app.wait_for_gone("label:收起", Duration::from_secs(2)).unwrap();
 }

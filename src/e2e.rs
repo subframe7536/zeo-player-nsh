@@ -1,6 +1,6 @@
 //! 端到端测试（真实文件、真实解码与输出设备）：
 //! 扫描 → 标签/流派拆分 → LRC → 波形 → 播放/暂停/seek/切曲。
-//! 依赖 /tmp/zeo-test-music 测试语料（scripts/make-test-music.sh 生成）。
+//! 依赖 /tmp/zeo-player-test-music 测试语料（scripts/make-test-music.sh 生成）。
 
 #![cfg(test)]
 
@@ -14,7 +14,7 @@ use crate::metadata::MetaCache;
 use crate::waveform::waveform;
 
 fn corpus() -> Option<std::path::PathBuf> {
-    let dir = Path::new("/tmp/zeo-test-music");
+    let dir = Path::new("/tmp/zeo-player-test-music");
     dir.is_dir().then(|| dir.to_path_buf())
 }
 
@@ -32,12 +32,12 @@ fn wait_for(timeout_ms: u64, check: impl Fn() -> bool) -> bool {
 #[test]
 fn end_to_end_playback() {
     let Some(root) = corpus() else {
-        eprintln!("跳过：没有 /tmp/zeo-test-music 测试语料");
+        eprintln!("跳过：没有 /tmp/zeo-player-test-music 测试语料");
         return;
     };
     // SAFETY(测试): 其它测试线程不读写环境变量；此处进程内仅本测试使用库存储。
-    unsafe { std::env::set_var("ZEO_DATA_DIR", "/tmp/zeo-test-data-e2e") };
-    let _ = std::fs::remove_dir_all("/tmp/zeo-test-data-e2e");
+    unsafe { std::env::set_var("ZEO_PLAYER_DATA_DIR", "/tmp/zeo-player-test-data-e2e") };
+    let _ = std::fs::remove_dir_all("/tmp/zeo-player-test-data-e2e");
 
     // 1. 曲库：多根目录 + 扫描 + 流派拆分
     let library = Library::new();

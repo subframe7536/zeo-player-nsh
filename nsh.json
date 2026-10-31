@@ -1,6 +1,6 @@
 {
-  "name": "Zeo",
-  "id": "dev.subf.zeo",
+  "name": "Zeo Player",
+  "id": "dev.subf.zeo-player",
   "version": "0.2.0",
   "build": 2,
   "rust": ".",

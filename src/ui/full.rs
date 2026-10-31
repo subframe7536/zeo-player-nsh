@@ -207,7 +207,7 @@ fn left_column(swap: &Swap) -> View {
         .items_center()
         .gap(px(8.0))
         .child(
-            text(move || s.track.with(|t| if t.title.is_empty() { "Zeo".into() } else { t.title.clone() }))
+            text(move || s.track.with(|t| if t.title.is_empty() { "Zeo Player".into() } else { t.title.clone() }))
                 .flex_1()
                 .number_of_lines(1)
                 .text_size(px(20.0))

@@ -37,7 +37,7 @@ fn total_duration(tracks: &[TrackEntry]) -> f64 {
 
 /// 曲库为空时：去设置添加文件夹。
 fn no_library() -> View {
-    empty_state(Icon::Folder, "还没有音乐文件夹", "添加一个包含 MP3、FLAC 或 WAV 的文件夹，Zeo 会扫描并整理它们。")
+    empty_state(Icon::Folder, "还没有音乐文件夹", "添加一个包含 MP3、FLAC 或 WAV 的文件夹，Zeo Player 会扫描并整理它们。")
         .child(
             view()
                 .mt(px(12.0))
@@ -1147,7 +1147,7 @@ fn folders_card() -> View {
 
     card_section(
         "音乐文件夹",
-        "Zeo 会扫描这些文件夹里的 MP3、FLAC 和 WAV，包括子文件夹。也可以把文件夹拖进这张卡片。",
+        "Zeo Player 会扫描这些文件夹里的 MP3、FLAC 和 WAV，包括子文件夹。也可以把文件夹拖进这张卡片。",
         Some(add.into_element()),
     )
     .border_color(move || if dragging.get() { primary() } else { border() })
@@ -1583,7 +1583,7 @@ fn font_card() -> View {
     card_section(
         "字体",
         if can_import {
-            "整个界面（包括歌词）换用所选字体，立即生效。可以导入 .ttf / .otf / .ttc 文件，只在 Zeo 里可用，不会装进系统。"
+            "整个界面（包括歌词）换用所选字体，立即生效。可以导入 .ttf / .otf / .ttc 文件，只在 Zeo Player 里可用，不会装进系统。"
         } else {
             "整个界面（包括歌词）换用所选字体，立即生效。"
         },

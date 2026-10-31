@@ -471,7 +471,7 @@ fn change_playlists(f: impl FnOnce(&mut Vec<Playlist>)) {
     let mut lists = s.playlists.with_untracked(|l| l.0.as_ref().clone());
     f(&mut lists);
     if let Err(err) = crate::playlists::save(&lists) {
-        eprintln!("zeo: 歌单保存失败: {err}");
+        eprintln!("zeo-player: 歌单保存失败: {err}");
     }
     s.playlists.set(Same(Arc::new(lists)));
 }
@@ -682,7 +682,7 @@ pub async fn pick_folders() -> Option<String> {
 /// 生成；每个曲目一个信号，生成后只有读它的绑定再运行。信号属于根组件，
 /// 列表单元格复用或销毁都不会丢掉进行中的请求。
 pub fn cover_of(path: &str) -> Option<SharedString> {
-    if std::env::var_os("ZEO_BENCH_NO_COVERS").is_some() {
+    if std::env::var_os("ZEO_PLAYER_BENCH_NO_COVERS").is_some() {
         return None;
     }
     let hit = COVERS.with(|c| c.borrow().get(path).copied());
