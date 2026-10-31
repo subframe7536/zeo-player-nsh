@@ -1698,6 +1698,34 @@ fn playback_card() -> View {
     .child(view().flex_row().flex_wrap().gap(px(8.0)).children(STEPS.iter().map(|&(ms, label)| chip(ms, label))))
 }
 
+/// 全屏歌词的对齐方式。
+fn lyrics_card() -> View {
+    use crate::library::LyricsAlign;
+    let s = store();
+    const OPTIONS: &[(LyricsAlign, &str)] =
+        &[(LyricsAlign::Left, "左对齐"), (LyricsAlign::Center, "居中"), (LyricsAlign::Right, "右对齐")];
+    let chip = move |align: LyricsAlign, label: &'static str| {
+        let on = move || s.library.with(|l| l.lyrics_align == align);
+        view()
+            .h(px(32.0))
+            .px(px(14.0))
+            .justify_center()
+            .rounded_full()
+            .border_1()
+            .border_color(move || if on() { primary() } else { border() })
+            .bg(move || if on() { primary().opacity(0.12) } else { AdaptiveColor::TRANSPARENT })
+            .role(AccessibilityRole::Button)
+            .label(label)
+            .accessibility_state(move || AccessibilityState { selected: on(), ..AccessibilityState::default() })
+            .hover(|st| st.bg(hover()))
+            .active(|st| st.opacity(0.7))
+            .on_press(move || super::store::set_lyrics_align(align))
+            .child(text(label).text_size(px(13.0)).font_weight(FontWeight::MEDIUM).text_color(fg()))
+    };
+    card_section("歌词对齐", "全屏播放页里歌词的对齐方式。", None)
+        .child(view().flex_row().flex_wrap().gap(px(8.0)).children(OPTIONS.iter().map(|&(a, label)| chip(a, label))))
+}
+
 /// 关闭窗口时：每次询问 / 最小化到托盘 / 退出。
 fn window_card() -> View {
     use crate::library::CloseAction;
@@ -1755,6 +1783,7 @@ pub fn Settings() -> impl IntoElement {
                 .child(folders_card())
                 .child(library_card())
                 .child(playback_card())
+                .child(lyrics_card())
                 .child(window_card())
                 .child(genres_card())
                 .child(font_card()),

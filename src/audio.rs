@@ -169,6 +169,8 @@ pub struct TrackPublic {
     pub artwork: Option<String>,
     /// 全屏背景（预先模糊的小图）。
     pub backdrop: Option<String>,
+    /// 这首的封面已生成（`artwork` / `backdrop` 为 `None` 时即确实没有封面）。
+    pub covers_ready: bool,
     pub duration: f64,
     pub queue: Arc<Vec<String>>,
     pub queue_index: i64,
@@ -225,6 +227,8 @@ pub struct Snapshot {
     pub artwork: Option<String>,
     /// 全屏背景（预先模糊的小图）。
     pub backdrop: Option<String>,
+    /// 这首的封面已生成。
+    pub covers_ready: bool,
     pub queue: Arc<Vec<String>>,
     pub queue_index: i64,
     pub loop_mode: LoopMode,
@@ -247,6 +251,7 @@ impl Shared {
             album: track.album.clone(),
             artwork: track.artwork.clone(),
             backdrop: track.backdrop.clone(),
+            covers_ready: track.covers_ready,
             queue: track.queue.clone(),
             queue_index: track.queue_index,
             loop_mode: self.loop_mode(),
@@ -812,6 +817,7 @@ fn load_track(
                 // 封面在就绪后再生成（缩小的文件，不放原图字节）。
                 t.artwork = None;
                 t.backdrop = None;
+                t.covers_ready = false;
                 t.duration = meta.duration;
                 t.queue = queue;
                 t.queue_index = actual_index;
@@ -841,6 +847,7 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
         }
         t.artwork = cover.clone();
         t.backdrop = backdrop;
+        t.covers_ready = true;
     }
     media.set_artwork_file(cover.map(|c| file_url(&c)));
     publish_media(shared, media, true);

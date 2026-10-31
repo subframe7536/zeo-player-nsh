@@ -59,6 +59,8 @@ pub struct NowPlaying {
     pub album: String,
     pub artwork: Option<SharedString>,
     pub backdrop: Option<SharedString>,
+    /// 封面已生成（换歌后、生成前为 `false`）。
+    pub covers_ready: bool,
     pub error: Option<String>,
     /// 在播放队列中的位置（判断切歌方向）。
     pub index: i64,
@@ -77,6 +79,7 @@ pub struct LibraryState {
     pub font: Option<String>,
     pub close_action: crate::library::CloseAction,
     pub fade_ms: u32,
+    pub lyrics_align: crate::library::LyricsAlign,
 }
 
 fn library_state() -> LibraryState {
@@ -92,6 +95,7 @@ fn library_state() -> LibraryState {
         font: lib.font(),
         close_action: lib.close_action(),
         fade_ms: lib.fade_ms(),
+        lyrics_align: lib.lyrics_align(),
     }
 }
 
@@ -371,6 +375,12 @@ pub fn font_family() -> SharedString {
     store().library.with(|l| l.font.clone()).map_or_else(|| SharedString::from("system-ui"), SharedString::from)
 }
 
+/// 全屏歌词的对齐方式（立即生效并保存）。
+pub fn set_lyrics_align(align: crate::library::LyricsAlign) {
+    store().library.update(|l| l.lyrics_align = align);
+    std::thread::spawn(move || library_store().set_lyrics_align(align));
+}
+
 /// 淡入淡出时长（立即生效并保存）。
 pub fn set_fade_ms(ms: u32) {
     store().library.update(|l| l.fade_ms = ms);
@@ -416,6 +426,7 @@ fn now_playing(snap: &crate::audio::Snapshot) -> NowPlaying {
         album: snap.album.clone(),
         artwork: snap.artwork.clone().map(SharedString::from),
         backdrop: snap.backdrop.clone().map(SharedString::from),
+        covers_ready: snap.covers_ready,
         error: snap.error.clone(),
         index: snap.queue_index,
     }

@@ -49,6 +49,16 @@ pub enum CloseAction {
     Quit,
 }
 
+/// 全屏歌词的对齐方式。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LyricsAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
 /// 出厂流派分隔符。
 pub const DEFAULT_SEPARATORS: &[&str] = &[";"];
 
@@ -77,6 +87,9 @@ pub struct LibraryConfig {
     /// 队列循环模式（顺序 / 单曲 / 随机）。
     #[serde(default)]
     pub loop_mode: crate::audio::LoopMode,
+    /// 全屏歌词的对齐方式。
+    #[serde(default)]
+    pub lyrics_align: LyricsAlign,
 }
 
 fn default_fade_ms() -> u32 {
@@ -94,6 +107,7 @@ impl Default for LibraryConfig {
             close_action: CloseAction::Ask,
             fade_ms: default_fade_ms(),
             loop_mode: crate::audio::LoopMode::default(),
+            lyrics_align: LyricsAlign::default(),
         }
     }
 }
@@ -268,6 +282,16 @@ impl LibraryStore {
     pub fn set_fade_ms(&self, ms: u32) {
         let mut config = self.config.lock().unwrap();
         config.fade_ms = ms;
+        self.save_config(&config);
+    }
+
+    pub fn lyrics_align(&self) -> LyricsAlign {
+        self.config().lyrics_align
+    }
+
+    pub fn set_lyrics_align(&self, align: LyricsAlign) {
+        let mut config = self.config.lock().unwrap();
+        config.lyrics_align = align;
         self.save_config(&config);
     }
 

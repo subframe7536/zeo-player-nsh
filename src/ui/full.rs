@@ -11,6 +11,7 @@ use nsh_core::prelude::*;
 
 use super::icons::{icon, icon_dyn, Icon};
 use crate::audio::LoopMode;
+use crate::library::LyricsAlign;
 use super::parts::{progress_fraction, scrub, shown_time, slider};
 use super::store::{format_time, player, seek_to, set_volume, store, toggle_mute};
 use super::theme::*;
@@ -20,8 +21,8 @@ use crate::metadata::MetaInfo;
 const COLUMN: f32 = 326.0;
 /// 歌词列最大宽度。
 const LYRICS: f32 = 520.0;
-/// 当前歌词行停在视口从上往下的这个比例处。
-const ANCHOR: f32 = 0.34;
+/// 当前歌词行停在视口从上往下的这个比例处（垂直居中）。
+const ANCHOR: f32 = 0.5;
 
 /// 打开：淡入并从下方滑入，先快后慢。
 pub(super) const IN_MS: f32 = 380.0;
@@ -36,7 +37,6 @@ const SHEET_SLIDE: f32 = 56.0;
 /// `on_close` 收起。
 pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
     let s = store();
-    let backdrop = move || s.track.with(|t| t.backdrop.clone());
 
     let close = on_close.clone();
     on_key("escape", move |_| close());
@@ -47,22 +47,25 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
 
     let swap = Swap::install();
 
-    // 底：深灰，封面放大模糊，再压一层暗色，保证白字对比。
+    // 底：深灰，封面放大模糊，再压一层暗色，保证白字对比。背景图是预先
+    // 模糊好的 64 px 小图（covers::backdrop），拉伸铺满：解码后只有十几
+    // KB，不在窗口尺寸上实时模糊。上下两层：`under` 是上一张，`top` 是
+    // 当前这张（见 `Swap::backdrop`）。
+    let layer = |path: Signal<Option<SharedString>>, alpha: &AnimatedValue| {
+        view().absolute().inset(px(0.0)).bind_opacity(alpha).child(when(move || path.with(Option::is_some), move || {
+            image(move || path.get().unwrap_or_default())
+                .absolute()
+                .inset(px(-40.0))
+                .resize_mode(ResizeMode::Cover)
+                .opacity(0.9)
+        }))
+    };
     let backdrop = view()
         .absolute()
         .inset(px(0.0))
         .bg(AdaptiveColor::rgb(0x2a2a2c, 0x2a2a2c))
-        .child(
-            // 背景图是预先模糊好的 64 px 小图（covers::backdrop），拉伸铺满：
-            // 解码后只有十几 KB，不在窗口尺寸上实时模糊。
-            view().absolute().inset(px(0.0)).bind_opacity(&swap.backdrop).child(when(move || backdrop().is_some(), move || {
-                image(move || backdrop().unwrap_or_default())
-                    .absolute()
-                    .inset(px(-40.0))
-                    .resize_mode(ResizeMode::Cover)
-                    .opacity(0.9)
-            })),
-        )
+        .child(layer(swap.under, &swap.under_alpha))
+        .child(layer(swap.top, &swap.backdrop))
         .child(view().absolute().inset(px(0.0)).bg(black_a(0.5)));
 
     // 收起按钮在标题栏这一行里垂直居中、靠右：Windows 上紧挨窗口按钮
@@ -115,11 +118,21 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
 
 /// 切歌时的过渡：内容淡入并从切歌方向滑入（下一首从右、上一首从左），
 /// 背景的模糊封面慢一些交叉淡入。系统开了「减弱动态效果」时不动画。
+///
+/// 背景不随换歌立即清掉：引擎在缓冲填起来之后才生成新封面，这段时间
+/// `backdrop` 为 `None`，直接跟着走会露出底色，整页一瞬间变黑。所以等
+/// `covers_ready` 了再换：新图放在上层（`top`）淡入，旧图留在下层
+/// （`under`）垫底；新歌没有封面时旧图淡出。
 struct Swap {
     content: AnimatedValue,
     shift: AnimatedValue,
     lyrics_shift: AnimatedValue,
+    /// 上层背景的不透明度。
     backdrop: AnimatedValue,
+    /// 下层（上一张）背景的不透明度。
+    under_alpha: AnimatedValue,
+    top: Signal<Option<SharedString>>,
+    under: Signal<Option<SharedString>>,
 }
 
 /// 滑入距离（点）。
@@ -138,8 +151,33 @@ impl Swap {
             shift: animated_value(0.0),
             lyrics_shift: animated_value(0.0),
             backdrop: animated_value(1.0),
+            under_alpha: animated_value(1.0),
+            top: signal(untracked(move || s.track.with(|t| t.backdrop.clone()))),
+            under: signal(None),
         };
-        let (content, shift, lyrics_shift, backdrop) = (swap.content, swap.shift, swap.lyrics_shift, swap.backdrop);
+        let (content, shift, lyrics_shift) = (swap.content, swap.shift, swap.lyrics_shift);
+        let (backdrop, under_alpha, top, under) = (swap.backdrop, swap.under_alpha, swap.top, swap.under);
+        effect(move || {
+            let (ready, next) = s.track.with(|t| (t.covers_ready || t.error.is_some(), t.backdrop.clone()));
+            let current = top.get_untracked();
+            if !ready || current == next {
+                return;
+            }
+            let calm = untracked(reduce_motion);
+            under.set(current);
+            top.set(next.clone());
+            if next.is_some() {
+                under_alpha.set(1.0);
+                backdrop.set(if calm { 1.0 } else { 0.0 });
+                if !calm {
+                    let _ = backdrop.timing(1.0, 700.0, Easing::EaseOut);
+                }
+            } else if calm {
+                under_alpha.set(0.0);
+            } else {
+                let _ = under_alpha.timing(0.0, 700.0, Easing::EaseOut);
+            }
+        });
         let key = computed(move || s.track.with(|t| (t.path.clone(), t.index)));
         let previous = RefCell::new(None::<(Option<String>, i64)>);
         effect(move || {
@@ -155,11 +193,9 @@ impl Swap {
             content.set(0.0);
             shift.set(dir * SLIDE);
             lyrics_shift.set(dir * SLIDE * 0.6);
-            backdrop.set(0.35);
             let _ = content.timing(1.0, 320.0, Easing::EaseOut);
             let _ = shift.timing(0.0, 420.0, ease);
             let _ = lyrics_shift.timing(0.0, 480.0, ease);
-            let _ = backdrop.timing(1.0, 700.0, Easing::EaseOut);
         });
         swap
     }
@@ -651,31 +687,55 @@ fn lyrics_scroller() -> View {
         }));
     });
     let line_ys: Rc<RefCell<Vec<f32>>> = Rc::default();
+    // 滚动位置与各行的位置、高度，用来让靠近上下边缘的行淡出（见 `edge_fade`）。
+    let scroll_y = signal(0.0_f32);
+    let rows_box = signal(Vec::<(f32, f32)>::new());
     let target: Rc<RefCell<Option<(f32, std::time::Instant)>>> = Rc::default();
     let resume: Rc<RefCell<Option<Spawned<()>>>> = Rc::default();
     let last_followed = Rc::new(RefCell::new(-1_i64));
+    // 点击某行后等高亮换到这一行再跟随：seek 生效前 `active_line` 还是
+    // 旧行，跟随它会先滚回旧行再滚到目标行。
+    let pending: Rc<RefCell<Option<(i64, std::time::Instant)>>> = Rc::default();
     let prev_time = Rc::new(RefCell::new(-1.0_f64));
     let lines = untracked(move || s.lyrics.with(|l| l.as_ref().map(|l| l.output.clone())))
         .expect("lyrics_scroller is shown with lyrics");
     let timed = lines.timed;
     let count = lines.lines.len();
+    let align = move || s.library.with(|l| l.lyrics_align);
 
+    // 打开全屏（或歌词刚载入）时，第一次定位不带动画，定位前歌词隐藏：
+    // 一出现高亮行就在中间，不会先显示开头再滚过去。
+    let placed = signal(false);
     let scroll_to_line = {
         let line_ys = line_ys.clone();
         let target = target.clone();
-        move |index: i64| {
+        Rc::new(move |index: i64| {
             let ys = line_ys.borrow();
             let Some(&y) = usize::try_from(index).ok().and_then(|i| ys.get(i)) else { return };
             let y = (y - viewport.get_untracked() * ANCHOR).max(0.0);
             *target.borrow_mut() = Some((y, std::time::Instant::now()));
-            scroller.scroll_to(point(px(0.0), px(y)), true);
-        }
+            let first = !placed.get_untracked();
+            scroller.scroll_to(point(px(0.0), px(y)), !first);
+            if first {
+                scroll_y.set(y);
+                // 内容尺寸可能在下一帧才提交，那时再定位一次（超出范围的
+                // 偏移会被夹住），然后才显示。
+                spawn(async move {
+                    next_frame().await;
+                    scroller.scroll_to(point(px(0.0), px(y)), false);
+                    scroll_y.set(y);
+                    placed.set(true);
+                });
+            }
+        })
     };
 
     // 时间推进：行变化或 seek 跳变时滚动跟随。
     {
         let last_followed = last_followed.clone();
         let prev_time = prev_time.clone();
+        let pending = pending.clone();
+        let scroll_to_line = scroll_to_line.clone();
         effect(move || {
             let ready = viewport.get() > 0.0 && laid.get() >= count;
             let time = s.playback.with(|p| p.time);
@@ -683,12 +743,25 @@ fn lyrics_scroller() -> View {
             if !ready {
                 return;
             }
+            // 没有可定位的行（无时间轴，或还没到第一行）：直接显示。
+            if index < 0 && !placed.get_untracked() {
+                placed.set(true);
+            }
             let jumped = {
                 let mut prev = prev_time.borrow_mut();
                 let jumped = *prev >= 0.0 && (time - *prev).abs() > 1.5;
                 *prev = time;
                 jumped
             };
+            {
+                let mut wait = pending.borrow_mut();
+                if let Some((line, at)) = *wait {
+                    if index != line && at.elapsed() < PENDING_WAIT {
+                        return;
+                    }
+                    *wait = None;
+                }
+            }
             if !follow.get() || index < 0 || (index == *last_followed.borrow() && !jumped) {
                 return;
             }
@@ -726,23 +799,28 @@ fn lyrics_scroller() -> View {
         let line_ys = line_ys.clone();
         let resume = resume.clone();
         let last_followed = last_followed.clone();
+        let pending = pending.clone();
+        let scroll_to_line = scroll_to_line.clone();
         let content_view = view()
-            .self_center()
             .max_w(px(LYRICS))
-            .items_center()
+            .style_with(move |st| match align() {
+                LyricsAlign::Left => st.self_start().items_start(),
+                LyricsAlign::Center => st.self_center().items_center(),
+                LyricsAlign::Right => st.self_end().items_end(),
+            })
             .py(px(14.0))
             .px(px(20.0))
             .rounded(px(12.0))
-            .gap(px(6.0))
+            .gap(px(4.0))
             // 高亮只包住文字本身，触发区是整行（外层是 group）。
             .group_hover(|st| st.bg(white_a(0.07)))
             .transition_colors()
             .duration(150.0)
             .child(
                 text(content)
-                    .text_center()
+                    .style_with(move |st| text_align(st, align()))
                     .text_size(px(if metadata { 16.0 } else { LYRIC_SIZE }))
-                    .line_height(px(if metadata { 24.0 } else { LYRIC_SIZE * 1.35 }))
+                    .line_height(px(if metadata { 24.0 } else { LYRIC_SIZE * 1.3 }))
                     .font_weight(if metadata { FontWeight::MEDIUM } else { FontWeight::BOLD })
                     .text_color(move || original_color(timed, distance() == 0.0))
                     .transition_colors()
@@ -750,20 +828,20 @@ fn lyrics_scroller() -> View {
             )
             .child(line.trans_content.clone().map(|trans| {
                 text(trans)
-                    .text_center()
+                    .style_with(move |st| text_align(st, align()))
                     .text_size(px(TRANSLATION_SIZE))
                     .line_height(px(TRANSLATION_SIZE * 1.4))
-                    .font_weight(FontWeight::MEDIUM)
+                    .font_weight(FontWeight::SEMIBOLD)
                     .text_color(white_a(TRANSLATION_ALPHA))
             }));
-        // 时间戳：浮在行的最右侧、垂直居中，只在这一行悬停时出现；不占布局，
-        // 也不挡点击。
+        // 时间戳：浮在行的最右侧（右对齐时在最左侧）、垂直居中，只在这一行
+        // 悬停时出现；不占布局，也不挡点击。
         let stamp = seekable.then(|| {
             view()
                 .absolute()
                 .top(px(0.0))
                 .bottom(px(0.0))
-                .right(px(0.0))
+                .style_with(move |st| if align() == LyricsAlign::Right { st.left(px(0.0)) } else { st.right(px(0.0)) })
                 .justify_center()
                 .pointer_events(PointerEvents::None)
                 .opacity(0.0)
@@ -786,9 +864,15 @@ fn lyrics_scroller() -> View {
                         ),
                 )
         });
+        let fade = move || {
+            let viewport = viewport.get();
+            let y = scroll_y.get();
+            rows_box.with(|b| b.get(index).map_or(1.0, |&(top, h)| edge_fade(top + h / 2.0 - y, viewport)))
+        };
         view()
             .w_full()
             .group()
+            .opacity(fade)
             .role(AccessibilityRole::Button)
             .label(if seekable { format!("跳到 {}", format_time(time)) } else { String::new() })
             // 当前行与前后一句清晰，再远越模糊（见 `lyric_blur`）。颜色
@@ -815,18 +899,30 @@ fn lyrics_scroller() -> View {
                 }
                 ys[index] = frame.origin.y.0;
                 drop(ys);
+                let row = (frame.origin.y.0, frame.size.height.0);
+                if rows_box.with_untracked(|b| b.get(index) != Some(&row)) {
+                    rows_box.update(|b| {
+                        if b.len() <= index {
+                            b.resize(index + 1, (0.0, 0.0));
+                        }
+                        b[index] = row;
+                    });
+                }
                 if index + 1 > laid.get_untracked() {
                     laid.set(index + 1);
                 }
             })
             .on_press(move || {
                 if seekable {
-                    seek_to(time);
-                    follow.set(true);
-                    *last_followed.borrow_mut() = -1;
                     if let Some(task) = resume.borrow_mut().take() {
                         task.cancel();
                     }
+                    // 直接滚到点的这一行；跟随在高亮换过来之前不动。
+                    *pending.borrow_mut() = Some((i, std::time::Instant::now()));
+                    *last_followed.borrow_mut() = i;
+                    seek_to(time);
+                    scroll_to_line(i);
+                    follow.set(true);
                 }
             })
     });
@@ -850,11 +946,13 @@ fn lyrics_scroller() -> View {
         .child(
             scroll()
                 .flex_1()
+                .opacity(move || if placed.get() { 1.0 } else { 0.0 })
                 .scrollbar(false)
                 .element_ref(&scroller)
                 .on_layout(move |frame: &Bounds<Points>| viewport.set(frame.size.height.0))
                 .on_scroll(move |e: &ScrollEvent| {
                     let y = e.offset.y.0;
+                    scroll_y.set(y);
                     // 程序滚动：动画进行中（约 0.7 s 内）或已到目标附近。
                     let ours = target
                         .borrow()
@@ -880,12 +978,43 @@ fn lyric_blur(timed: bool, distance: f32) -> f32 {
     if timed { ((distance - 1.0) * 1.5).clamp(0.0, 8.0) } else { 0.0 }
 }
 
+/// 歌词行在视口里的不透明度：行中心进入顶部 [`EDGE_TOP`] 或底部
+/// [`EDGE_BOTTOM`]（占视口高度的比例）后线性淡出，到边缘为 0。NSH 的
+/// macOS / Windows 后端还不画 `maskImage`，只能按行算。
+fn edge_fade(center: f32, viewport: f32) -> f32 {
+    if viewport <= 0.0 {
+        return 1.0;
+    }
+    let top = center / (viewport * EDGE_TOP);
+    let bottom = (viewport - center) / (viewport * EDGE_BOTTOM);
+    top.min(bottom).clamp(0.0, 1.0)
+}
+
+/// 顶部淡出区（视口高度的比例），远小于 [`ANCHOR`]，高亮行不受影响。
+const EDGE_TOP: f32 = 0.18;
+/// 底部淡出区。
+const EDGE_BOTTOM: f32 = 0.28;
+/// 点击某行后，最多等这么久让高亮换到这一行（之后照常跟随）。
+const PENDING_WAIT: Duration = Duration::from_millis(1500);
+
+fn text_align(st: nsh_core::element::StyleRefinement, align: LyricsAlign) -> nsh_core::element::StyleRefinement {
+    match align {
+        LyricsAlign::Left => st.text_left(),
+        LyricsAlign::Center => st.text_center(),
+        LyricsAlign::Right => st.text_right(),
+    }
+}
+
 /// 歌词原文字号；有译文时译文是它的 2/3。
 const LYRIC_SIZE: f32 = 30.0;
 /// 译文字号。
 const TRANSLATION_SIZE: f32 = LYRIC_SIZE * 2.0 / 3.0;
-/// 译文的颜色（白色透明度），任何时候都不变。
-const TRANSLATION_ALPHA: f32 = 0.6;
+/// 未高亮原文的颜色（白色透明度）。
+const IDLE_ALPHA: f32 = 0.3;
+/// 高亮原文的颜色。
+const ACTIVE_ALPHA: f32 = 0.92;
+/// 译文的颜色，任何时候都不变，位于高亮与未高亮原文之间。
+const TRANSLATION_ALPHA: f32 = 0.45;
 /// 鼠标移入 / 移出歌词区时，模糊去掉 / 恢复的过渡时长。
 const BLUR_FADE_MS: f32 = 300.0;
 /// 歌词区上下的留白：滚动的歌词不进入标题栏（窗口按钮、收起按钮那一行），
@@ -896,14 +1025,14 @@ fn ease_out_cubic(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
 }
 
-/// 原文的颜色：高亮行比译文深（亮），其余行比译文淡。无时间轴的歌词
+/// 原文的颜色：高亮行比译文亮，其余行比译文淡。无时间轴的歌词
 /// 没有高亮，按高亮行显示，便于阅读。
 fn original_color(timed: bool, active: bool) -> AdaptiveColor {
     white_a(original_alpha(timed, active))
 }
 
 fn original_alpha(timed: bool, active: bool) -> f32 {
-    if active || !timed { 0.96 } else { 0.36 }
+    if active || !timed { ACTIVE_ALPHA } else { IDLE_ALPHA }
 }
 
 #[cfg(test)]
@@ -924,7 +1053,16 @@ mod tests {
     #[test]
     fn translation_sits_between_idle_and_active_originals() {
         assert!(original_alpha(true, false) < TRANSLATION_ALPHA, "未高亮：原文比译文淡");
-        assert!(original_alpha(true, true) > TRANSLATION_ALPHA, "高亮：原文比译文深");
+        assert!(original_alpha(true, true) > TRANSLATION_ALPHA, "高亮：原文比译文亮");
+    }
+
+    #[test]
+    fn edges_fade_out() {
+        assert_eq!(edge_fade(0.0, 1000.0), 0.0);
+        assert_eq!(edge_fade(1000.0, 1000.0), 0.0);
+        assert_eq!(edge_fade(ANCHOR * 1000.0, 1000.0), 1.0, "高亮行不淡出");
+        assert!((edge_fade(90.0, 1000.0) - 0.5).abs() < 1e-4);
+        assert!((edge_fade(860.0, 1000.0) - 0.5).abs() < 1e-4);
     }
 
     fn meta() -> MetaInfo {
