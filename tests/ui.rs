@@ -110,6 +110,27 @@ fn full_player_opens_and_closes() {
     app.wait_for_gone("label:收起", Duration::from_secs(2)).unwrap();
 }
 
+/// 搜索框：点框里的清除按钮不失焦，点框外（侧栏）失焦。
+#[test]
+fn search_box_blurs_when_pressing_outside() {
+    use nsh_core::Command;
+    let blurs = |app: &Headless| app.screen().commands().iter().filter(|(_, c)| *c == Command::Blur).count();
+    let mut app = start(1200.0, 800.0);
+    app.type_text("label:搜索", "zz").unwrap();
+    app.wait_for("label:清除搜索").unwrap();
+    let before = blurs(&app);
+    app.press("label:清除搜索").unwrap();
+    app.wait(Duration::from_millis(50)).unwrap();
+    assert_eq!(blurs(&app), before, "点在搜索框里不失焦");
+    app.type_text("label:搜索", "zz").unwrap();
+    app.press("label:歌手").unwrap();
+    app.wait(Duration::from_millis(50)).unwrap();
+    assert_eq!(blurs(&app), before + 1, "点在框外失焦");
+    app.press("label:专辑").unwrap();
+    app.wait(Duration::from_millis(50)).unwrap();
+    assert_eq!(blurs(&app), before + 1, "已失焦后不再发");
+}
+
 #[test]
 fn queue_panel_opens_from_the_player_bar() {
     let mut app = start(1200.0, 800.0);

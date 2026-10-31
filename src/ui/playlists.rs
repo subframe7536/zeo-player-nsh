@@ -20,11 +20,15 @@ use crate::playlists::{Condition, Field, FieldType, Op, Playlist, Rule, Sort};
 /// 菜单弹层的样子（下拉、右键菜单、子菜单共用）。
 macro_rules! popup {
     ($menu:expr, $min:expr) => {
+        popup!($menu, $min, 420.0)
+    };
+    ($menu:expr, $min:expr, $max_h:expr) => {
         $menu.popup_style(|st| {
             st.min_w(px($min))
-                .max_h(px(420.0))
+                .max_h(px($max_h))
                 .p(px(4.0))
                 .rounded(px(10.0))
+                .overflow_hidden()
                 .border_1()
                 .border_color(border())
                 .bg(nsh_base::theme().popover)
@@ -584,6 +588,10 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
         }))
 }
 
+/// 下拉弹层的最大高度：比右键菜单矮，弹窗里的下拉在常见窗口高度下
+/// 上方或下方放得下（放不下下方时翻到上方）。
+const SELECT_POPUP_H: f32 = 300.0;
+
 /// 下拉选择：按钮显示当前值，菜单列出选项（可带分组小标题）。
 #[allow(clippy::type_complexity)]
 fn select(
@@ -608,14 +616,19 @@ fn select(
         .hover(|st| st.bg(hover()))
         .child(text(current).flex_1().number_of_lines(1).text_size(px(13.0)).text_color(fg()))
         .child(icon(Icon::ChevronDown, 12.0, faint));
-    let menu = menu().offset(px(4.0)).trigger(trigger);
-    let mut menu = popup!(menu, width.max(140.0));
+    let menu = menu().offset(px(4.0)).margin(px(8.0)).trigger(trigger);
+    // 选项多（字段有十几个）时在弹层里滚动：弹层的 max_h 只限制它自己，
+    // 不限制直接放进去的子项。
+    let mut items = view();
     for (heading, option, pick) in options {
         if let Some(h) = heading {
-            menu = menu.child(menu_heading(h));
+            items = items.child(menu_heading(h));
         }
-        menu = menu.child(item(option, None, pick));
+        items = items.child(item(option, None, pick));
     }
-    menu.into_element()
+    popup!(menu, width.max(140.0), SELECT_POPUP_H)
+        // 减去弹层的上下内边距与边框。
+        .child(scroll().max_h(px(SELECT_POPUP_H - 10.0)).child(items))
+        .into_element()
 }
 

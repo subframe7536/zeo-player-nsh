@@ -6,7 +6,7 @@ use nsh_core::prelude::*;
 /// 侧栏宽度。
 pub const SIDEBAR: f32 = 232.0;
 /// 自绘标题栏高度（交通灯居中其中）。
-pub const TITLE_BAR: f32 = 52.0;
+pub const TITLE_BAR: f32 = 40.0;
 /// 底部播放条高度（含外边距），列表据此留出底部空间。
 pub const BAR_SPACE: f32 = 104.0;
 

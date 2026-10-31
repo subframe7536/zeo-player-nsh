@@ -54,10 +54,11 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
         )
         .child(view().absolute().inset(px(0.0)).bg(black_a(0.5)));
 
-    // 收起按钮在右上角，让开 Windows 的窗口按钮（它们占标题栏右侧）。
+    // 收起按钮在右上角：macOS 上与交通灯同一行居中；Windows 上让到窗口
+    // 按钮（它们占标题栏右侧）下方。
     let close_button = view()
         .absolute()
-        .top(move || px(if controls_right() > 0.0 { top_inset() + 8.0 } else { 14.0 }))
+        .top(move || px(if controls_right() > 0.0 { top_inset() + 8.0 } else { (top_inset() - 32.0) / 2.0 }))
         .right(px(18.0))
         .size(px(32.0))
         .rounded_full()
