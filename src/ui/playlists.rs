@@ -4,9 +4,10 @@
 use std::rc::Rc;
 
 use nsh_base::{context_menu, menu, menu_item, menu_separator, submenu};
-use nsh_core::element::input;
 use nsh_core::prelude::*;
 
+use super::button::{text_button, Size, Variant};
+use super::form::{dialog_content, dialog_footer, dialog_header, input_field, modal, select_trigger, tab_list, tab_trigger};
 use super::icons::{icon, Icon};
 use super::parts::*;
 use super::store::{self, format_total, play_list, store, Draft};
@@ -333,14 +334,13 @@ pub fn page(id: u64) -> View {
 // --- 编辑弹窗 -----------------------------------------------------------------
 
 /// 新建 / 编辑歌单的弹窗（`store().editor` 有草稿时显示）。
-pub fn editor_dialog() -> View {
+pub fn editor_dialog() -> AnyElement {
     let s = store();
     let draft = signal(s.editor.get_untracked().unwrap_or(Draft { id: None, name: String::new(), rule: None, add: Vec::new() }));
     let close = move || s.editor.set(None);
     let save = move || {
         store::save_draft(draft.get_untracked());
     };
-    on_key("escape", move |_| close());
     let smart = untracked(|| draft.with(|d| d.rule.is_some()));
     let heading = untracked(|| match (draft.with(|d| d.id.is_some()), smart) {
         (false, false) => "新建歌单",
@@ -348,54 +348,25 @@ pub fn editor_dialog() -> View {
         (true, false) => "重命名歌单",
         (true, true) => "编辑智能歌单",
     });
-    let name_input = input()
+    let name_input = input_field(false)
         .w_full()
-        .h(px(36.0))
-        .px(px(12.0))
-        .rounded(px(8.0))
-        .border_1()
-        .border_color(border())
-        .bg(bg())
-        .text_size(px(14.0))
-        .text_color(fg())
         .label("歌单名称")
         .auto_focus(true)
         .default_value(untracked(|| draft.with(|d| d.name.clone())))
         .placeholder("歌单名称")
         .on_change(move |t: &str| draft.update(|d| d.name = t.to_owned()))
         .on_submit(move |_: &str| save());
-    let card = view()
-        .w(px(if smart { 640.0 } else { 400.0 }))
-        .max_h(move || px((window().height.0 - 80.0).max(240.0)))
-        .p(px(24.0))
-        .gap(px(14.0))
-        .rounded(px(16.0))
-        .bg(nsh_base::theme().popover)
-        .border_1()
-        .border_color(border())
-        .shadow_2xl()
-        .on_press(|| {})
-        .child(text(heading).text_size(px(17.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg()))
+    let description = if smart { Some("按条件从曲库自动聚合，曲库变化时跟着更新。") } else { None };
+    let content = dialog_content(if smart { 640.0 } else { 425.0 })
+        .child(dialog_header(heading, description))
         .child(name_input)
         .child(smart.then(|| rule_editor(draft)))
         .child(
-            view()
-                .flex_row()
-                .justify_end()
-                .gap(px(8.0))
-                .mt(px(6.0))
-                .child(outline_button(Icon::Close, "取消", close))
-                .child(pill_button(Icon::Plus, if heading.starts_with("新建") { "创建" } else { "保存" }, save)),
+            dialog_footer()
+                .child(text_button(Variant::Outline, Size::Default, None, "取消", close))
+                .child(text_button(Variant::Default, Size::Default, None, if heading.starts_with("新建") { "创建" } else { "保存" }, save)),
         );
-    view()
-        .absolute()
-        .inset(px(0.0))
-        .z_index(100)
-        .bg(black_a(0.4))
-        .items_center()
-        .justify_center()
-        .on_press(close)
-        .child(card)
+    modal(content, close)
 }
 
 /// 智能规则编辑：全部 / 任一、条件行、添加条件、排序、数量上限、实时匹配数。
@@ -416,68 +387,36 @@ fn rule_editor(draft: Signal<Draft>) -> View {
     });
     let match_all = move || draft.with(|d| d.rule.as_ref().is_none_or(|r| r.match_all));
     let chip = move |label: &'static str, all: bool| {
-        let on = move || match_all() == all;
-        view()
-            .h(px(28.0))
-            .px(px(12.0))
-            .rounded(px(7.0))
-            .items_center()
-            .justify_center()
-            .role(AccessibilityRole::Button)
-            .label(label)
-            .accessibility_state(move || AccessibilityState { selected: on(), ..AccessibilityState::default() })
-            .style_when(on, |st| st.bg(bg()).shadow_sm())
-            .on_press(move || change(Box::new(move |r| r.match_all = all)))
-            .child(text(label).text_size(px(13.0)).text_color(move || if on() { fg() } else { muted_fg() }))
+        tab_trigger(move || match_all() == all, label, move || change(Box::new(move |r| r.match_all = all)))
     };
     let mode = view()
         .flex_row()
         .items_center()
         .gap(px(8.0))
-        .child(text("符合以下").text_size(px(13.0)).text_color(muted_fg()))
-        .child(view().flex_row().p(px(2.0)).gap(px(2.0)).rounded(px(9.0)).bg(muted()).child(chip("全部", true)).child(chip("任一", false)))
-        .child(text("条件").text_size(px(13.0)).text_color(muted_fg()))
+        .child(text("符合以下").text_size(px(14.0)).text_color(muted_fg()))
+        .child(tab_list().child(chip("全部", true)).child(chip("任一", false)))
+        .child(text("条件").text_size(px(14.0)).text_color(muted_fg()))
         .child(view().flex_1())
         .child(
             text(move || format!("匹配 {} 首", matched.get()))
-                .text_size(px(13.0))
+                .text_size(px(14.0))
                 .font_weight(FontWeight::MEDIUM)
                 .tabular_nums()
                 .text_color(primary()),
         );
     // 行数变化（添加 / 删除）时整组重建；改字段、条件、值只更新所在行。
     let rows = dynamic(move || (0..count.get()).map(|i| condition_row(draft, i).into_element()).collect::<Vec<_>>());
-    let add = view()
-        .flex_row()
-        .items_center()
-        .gap(px(6.0))
-        .self_start()
-        .h(px(28.0))
-        .px(px(10.0))
-        .rounded(px(7.0))
-        .role(AccessibilityRole::Button)
-        .label("添加条件")
-        .hover(|st| st.bg(hover()))
-        .active(|st| st.opacity(0.6))
-        .on_press(move || change(Box::new(|r| r.conditions.push(Condition::default()))))
-        .child(icon(Icon::Plus, 13.0, primary))
-        .child(text("添加条件").text_size(px(13.0)).text_color(primary()));
+    let add = view().self_start().child(text_button(Variant::Ghost, Size::Sm, Some(Icon::Plus), "添加条件", move || {
+        change(Box::new(|r| r.conditions.push(Condition::default())))
+    }));
     let sort = select(
         move || rule(&|r| r.sort.label().to_owned()),
         "排序",
         Sort::ALL.iter().map(|&o| (None, o.label(), Box::new(move || change(Box::new(move |r| r.sort = o))) as Box<dyn Fn()>)).collect(),
         170.0,
     );
-    let limit = input()
-        .w(px(72.0))
-        .h(px(30.0))
-        .px(px(10.0))
-        .rounded(px(7.0))
-        .border_1()
-        .border_color(border())
-        .bg(bg())
-        .text_size(px(13.0))
-        .text_color(fg())
+    let limit = input_field(true)
+        .w(px(80.0))
         .label("数量上限")
         .keyboard_type(KeyboardType::Number)
         .default_value(untracked(|| rule(&|r| r.limit.map(|n| n.to_string()).unwrap_or_default())))
@@ -490,14 +429,14 @@ fn rule_editor(draft: Signal<Draft>) -> View {
         .flex_row()
         .items_center()
         .gap(px(8.0))
-        .child(text("排序").text_size(px(13.0)).text_color(muted_fg()))
+        .child(text("排序").text_size(px(14.0)).text_color(muted_fg()))
         .child(sort)
         .child(view().w(px(12.0)))
-        .child(text("最多").text_size(px(13.0)).text_color(muted_fg()))
+        .child(text("最多").text_size(px(14.0)).text_color(muted_fg()))
         .child(limit)
-        .child(text("首").text_size(px(13.0)).text_color(muted_fg()));
+        .child(text("首").text_size(px(14.0)).text_color(muted_fg()));
     view()
-        .gap(px(10.0))
+        .gap(px(12.0))
         .flex_shrink(1.0)
         .min_h(px(0.0))
         .child(mode)
@@ -558,17 +497,9 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
             FieldType::Number => "数值",
             FieldType::Date => "天数",
         };
-        input()
+        input_field(true)
             .flex_1()
             .min_w(px(80.0))
-            .h(px(30.0))
-            .px(px(10.0))
-            .rounded(px(7.0))
-            .border_1()
-            .border_color(border())
-            .bg(bg())
-            .text_size(px(13.0))
-            .text_color(fg())
             .label("值")
             .default_value(untracked(|| get().value))
             .placeholder(placeholder)
@@ -602,7 +533,7 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
                 .text_size(px(12.0))
                 .text_color(move || if invalid() { nsh_base::theme().destructive } else { faint() }),
         )
-        .child(icon_button(|| Icon::Close, 11.0, "删除条件", faint, move || {
+        .child(icon_button(|| Icon::Close, 16.0, "删除条件", muted_fg, move || {
             draft.update(|d| {
                 if let Some(r) = d.rule.as_mut()
                     && index < r.conditions.len()
@@ -625,22 +556,7 @@ fn select(
     options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)>,
     width: f32,
 ) -> AnyElement {
-    let trigger = view()
-        .w(px(width))
-        .h(px(30.0))
-        .flex_row()
-        .items_center()
-        .gap(px(6.0))
-        .px(px(10.0))
-        .rounded(px(7.0))
-        .border_1()
-        .border_color(border())
-        .bg(bg())
-        .role(AccessibilityRole::Button)
-        .label(label)
-        .hover(|st| st.bg(hover()))
-        .child(text(current).flex_1().number_of_lines(1).text_size(px(13.0)).text_color(fg()))
-        .child(icon(Icon::ChevronDown, 12.0, faint));
+    let trigger = select_trigger(current, label, width);
     let menu = menu().offset(px(4.0)).margin(px(8.0)).trigger(trigger);
     // 选项多（字段有十几个）时在弹层里滚动：弹层的 max_h 只限制它自己，
     // 不限制直接放进去的子项。

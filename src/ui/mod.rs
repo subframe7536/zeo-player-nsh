@@ -5,6 +5,7 @@ mod bar;
 mod button;
 #[cfg(target_os = "windows")]
 mod caption;
+mod form;
 mod full;
 mod icons;
 mod parts;
