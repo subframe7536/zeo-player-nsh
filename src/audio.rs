@@ -416,7 +416,7 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
             }
             Err(err) => set_error(&shared, &format!("音频设备读取失败: {err}")),
         },
-        None => set_error(&shared, "没有可用的音频输出设备".into()),
+        None => set_error(&shared, "没有可用的音频输出设备"),
     }
     shared.dev_rate.store(dev_rate, Ordering::Relaxed);
     shared.ring.init(dev_rate as usize * RING_CAPACITY_SECS * dev_channels);
@@ -721,6 +721,8 @@ fn advance(index: i64, len: usize, mode: LoopMode, forward: bool) -> Option<i64>
 }
 
 /// 装载一个曲目（引擎线程内）：读元数据、封面、打开解码器。
+// 参数都是引擎线程循环里的局部状态，打包成结构体只会多一层转手。
+#[allow(clippy::too_many_arguments)]
 fn load_track(
     shared: &Arc<Shared>,
     media: &MediaSession,

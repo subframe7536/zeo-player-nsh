@@ -16,9 +16,12 @@ pub const LARGE: u32 = 720;
 pub const BACKDROP: u32 = 64;
 const WORKERS: usize = 3;
 
+/// 已完成的（曲目路径, 缩略图路径），工作线程写、界面取走。
+type Done = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
 struct Pool {
     tx: Mutex<Sender<String>>,
-    done: Arc<Mutex<Vec<(String, Option<String>)>>>,
+    done: Done,
 }
 
 fn pool() -> &'static Pool {

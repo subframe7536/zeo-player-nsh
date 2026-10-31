@@ -108,10 +108,10 @@ impl Source {
             .map_err(|e| format!("seek 失败: {e}"))?;
         self.decoder.reset();
         // actual_ts 是轨道时间基单位；用 fmt 的时间基换回秒。
-        if let Some(track) = self.format.tracks().iter().find(|t| t.id == self.track_id) {
-            if let Some(tb) = track.time_base {
-                return Ok(tb.calc_time_saturating(seeked.actual_ts).as_secs_f64());
-            }
+        if let Some(track) = self.format.tracks().iter().find(|t| t.id == self.track_id)
+            && let Some(tb) = track.time_base
+        {
+            return Ok(tb.calc_time_saturating(seeked.actual_ts).as_secs_f64());
         }
         Ok(clamped)
     }

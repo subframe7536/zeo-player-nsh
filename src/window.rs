@@ -3,8 +3,10 @@
 //!
 //! - macOS：替换 NSH 窗口代理的 `windowShouldClose:` 实现；显示 / 隐藏用
 //!   `makeKeyAndOrderFront` / `orderOut`；全部在主线程（GCD 主队列）。
-//! - Windows：子类化 NSH 窗口（类名 `NshWindow`）的窗口过程拦截 `WM_CLOSE`；
-//!   托盘在自己的线程上，带消息循环。
+//! - Windows：子类化 NSH 窗口（类名 `NshWindow`）的窗口过程拦截 `WM_CLOSE`，
+//!   接管去掉系统标题栏的 `WM_NCCALCSIZE` 与顶边缩放的 `WM_NCHITTEST`（窗口
+//!   按钮由应用画，NSH 的标题栏样式切到 Default 后就不画它自己的了），
+//!   窗口销毁后直接结束进程（见 `exit_now`）；托盘在自己的线程上，带消息循环。
 //!
 //! 窗口里点关闭时，[`CloseAction`] 决定做什么；`Ask` 时不关闭，只把
 //! [`take_close_request`] 置位，由界面弹出选择。
@@ -168,6 +170,10 @@ pub fn hwnd() -> Option<u64> {
     platform::HWND_VALUE.get().copied()
 }
 
+/// Windows 的窗口按钮由应用画（`ui::caption`），这里是它们的操作与状态。
+#[cfg(target_os = "windows")]
+pub use platform::{caption_ready, close, is_full_screen, is_maximized, minimize, toggle_maximize};
+
 // --- 托盘菜单（两个平台共用） ---------------------------------------------------
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -230,6 +236,12 @@ mod tray {
             Ok(icon) => TRAY.with(|t| *t.borrow_mut() = Some(Tray { _icon: icon, now, toggle, prev, next })),
             Err(err) => eprintln!("zeo-player: 托盘图标创建失败：{err}"),
         }
+    }
+
+    /// 移除托盘图标（`TrayIcon` 析构时从通知区删除）。
+    #[cfg(target_os = "windows")]
+    pub fn remove() {
+        TRAY.with(|t| drop(t.borrow_mut().take()));
     }
 
     pub fn apply(state: &TrayState) {
@@ -366,33 +378,197 @@ mod platform {
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
 
-    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetCurrentProcessId, SetProcessWorkingSetSize};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+    use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_VISIBLE_FRAME_BORDER_THICKNESS};
+    use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, GetCurrentProcessId, SetProcessWorkingSetSize, TerminateProcess,
+    };
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, DispatchMessageW, EnumWindows, GetClassNameW, GetWindow, GetWindowThreadProcessId,
-        PeekMessageW, PostMessageW, SetForegroundWindow, SetWindowLongPtrW, ShowWindowAsync,
-        TranslateMessage, GWLP_WNDPROC, GW_OWNER, MSG, PM_REMOVE, SW_HIDE, SW_SHOW, WM_CLOSE, WNDPROC,
+        CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GetClassNameW, GetClientRect, GetWindow,
+        GetWindowLongPtrW, GetWindowThreadProcessId, IsZoomed, PeekMessageW, PostMessageW, SetForegroundWindow,
+        SetWindowLongPtrW, ShowWindowAsync, TranslateMessage, GWLP_WNDPROC, GWL_STYLE, GW_OWNER, HTTOP, HTTOPLEFT,
+        HTTOPRIGHT, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER,
+        SM_CYFRAME, SW_HIDE, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST,
+        WM_SYSCOMMAND, WNDPROC, WS_CAPTION, WS_THICKFRAME,
     };
 
     use super::TrayState;
 
     pub static HWND_VALUE: OnceLock<u64> = OnceLock::new();
     static OLD_PROC: AtomicIsize = AtomicIsize::new(0);
-    static TRAY_TX: OnceLock<Mutex<Sender<TrayState>>> = OnceLock::new();
+    static TRAY_TX: OnceLock<Mutex<Sender<TrayMsg>>> = OnceLock::new();
 
     fn hwnd() -> Option<HWND> {
         HWND_VALUE.get().map(|h| *h as usize as HWND)
     }
 
     unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
-        if msg == WM_CLOSE && !super::on_close_clicked() {
-            return 0;
+        let mut l = l;
+        match msg {
+            WM_CLOSE if !super::on_close_clicked() => return 0,
+            // 标题栏由应用自己画（NSH 的标题栏样式为 Default，不再处理这些）。
+            WM_NCCALCSIZE if w != 0 && has_style(hwnd, WS_CAPTION) => {
+                // SAFETY: w 非 0 时 l 指向本消息的 NCCALCSIZE_PARAMS。
+                return unsafe { nc_calc_size(hwnd, w, l) };
+            }
+            WM_NCHITTEST => {
+                if let Some(code) = top_edge(hwnd, l) {
+                    return code as LRESULT;
+                }
+            }
+            // 不让系统在应用顶部重画旧式标题栏（`lparam` -1）。
+            WM_NCACTIVATE => l = -1,
+            _ => {}
         }
         // SAFETY: 原窗口过程，在子类化时保存。
-        unsafe {
+        let result = unsafe {
             let old: WNDPROC = std::mem::transmute::<isize, WNDPROC>(OLD_PROC.load(Ordering::Relaxed));
             CallWindowProcW(old, hwnd, msg, w, l)
+        };
+        if msg == WM_DESTROY {
+            exit_now();
         }
+        result
+    }
+
+    fn has_style(hwnd: HWND, style: u32) -> bool {
+        // SAFETY: 读本进程窗口的样式。
+        let current = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32;
+        current & style == style
+    }
+
+    fn zoomed(hwnd: HWND) -> bool {
+        // SAFETY: 普通查询。
+        unsafe { IsZoomed(hwnd) != 0 }
+    }
+
+    /// 缩放边框的厚度（像素）；最大化窗口也正好超出显示器这么多。
+    fn frame_thickness(hwnd: HWND) -> i32 {
+        // SAFETY: 普通查询。
+        unsafe {
+            let dpi = GetDpiForWindow(hwnd);
+            GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
+        }
+    }
+
+    /// Windows 11 沿窗口顶边画的那条可见边框（像素；没有时为 0）。
+    fn top_border(hwnd: HWND) -> i32 {
+        let mut thickness: u32 = 0;
+        // SAFETY: 该属性的值是一个 u32。
+        let hr = unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_VISIBLE_FRAME_BORDER_THICKNESS as _,
+                &mut thickness as *mut u32 as *mut _,
+                std::mem::size_of::<u32>() as u32,
+            )
+        };
+        if hr >= 0 { thickness.min(8) as i32 } else { 0 }
+    }
+
+    /// `WM_NCCALCSIZE`：去掉系统标题栏，客户区铺到窗口顶边；两侧与底部的
+    /// 缩放边框照旧（在 Windows 10 / 11 上不可见）。与 NSH 隐藏标题栏时
+    /// 的算法相同。
+    unsafe fn nc_calc_size(hwnd: HWND, w: WPARAM, l: LPARAM) -> LRESULT {
+        unsafe {
+            let params = &mut *(l as *mut NCCALCSIZE_PARAMS);
+            let top = params.rgrc[0].top;
+            DefWindowProcW(hwnd, WM_NCCALCSIZE, w, l);
+            // 最大化时窗口超出显示器一个边框厚度；否则让出 Windows 11 顶边
+            // 那条边框，应用的标题栏完整可见。
+            params.rgrc[0].top = top + if zoomed(hwnd) { frame_thickness(hwnd) } else { top_border(hwnd) };
+        }
+        0
+    }
+
+    /// `WM_NCHITTEST`：客户区顶边一个边框厚度内可以拖动改变窗口高度。
+    fn top_edge(hwnd: HWND, l: LPARAM) -> Option<u32> {
+        if !has_style(hwnd, WS_CAPTION | WS_THICKFRAME) || zoomed(hwnd) {
+            return None;
+        }
+        let mut p = POINT { x: (l & 0xFFFF) as i16 as i32, y: ((l >> 16) & 0xFFFF) as i16 as i32 };
+        let mut client = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        // SAFETY: 本地结构上的普通调用。
+        unsafe {
+            ScreenToClient(hwnd, &mut p);
+            GetClientRect(hwnd, &mut client);
+        }
+        let border = frame_thickness(hwnd);
+        if p.y < 0 || p.y >= border {
+            return None;
+        }
+        Some(if p.x < border * 2 {
+            HTTOPLEFT
+        } else if p.x >= client.right - border * 2 {
+            HTTOPRIGHT
+        } else {
+            HTTOP
+        })
+    }
+
+    /// 已找到并子类化窗口：可以由应用画窗口按钮了。
+    pub fn caption_ready() -> bool {
+        HWND_VALUE.get().is_some()
+    }
+
+    pub fn is_maximized() -> bool {
+        hwnd().is_some_and(zoomed)
+    }
+
+    /// NSH 的全屏去掉了窗口边框与标题栏样式。
+    pub fn is_full_screen() -> bool {
+        hwnd().is_some_and(|h| !has_style(h, WS_CAPTION))
+    }
+
+    /// 异步发系统命令：在点击处理里同步改窗口大小会重入 NSH 的事件分发。
+    fn sys_command(command: u32) {
+        if let Some(h) = hwnd() {
+            // SAFETY: 投递到本进程窗口的消息队列。
+            unsafe { PostMessageW(h, WM_SYSCOMMAND, command as WPARAM, 0) };
+        }
+    }
+
+    pub fn minimize() {
+        sys_command(SC_MINIMIZE);
+    }
+
+    pub fn toggle_maximize() {
+        sys_command(if is_maximized() { SC_RESTORE } else { SC_MAXIMIZE });
+    }
+
+    /// 与点系统关闭按钮相同（经过 `WM_CLOSE` 拦截：询问 / 托盘 / 退出）。
+    pub fn close() {
+        if let Some(h) = hwnd() {
+            // SAFETY: 同上。
+            unsafe { PostMessageW(h, WM_CLOSE, 0, 0) };
+        }
+    }
+
+    /// 主窗口已销毁：移除托盘图标后直接结束进程。
+    ///
+    /// NSH 0.3.0 在 UI 线程退出时由线程局部析构释放 D3D / D2D 设备。Windows
+    /// 在持有加载器锁时运行这些析构，部分显卡驱动（Intel `igd10umt64xe`）
+    /// 释放设备时要等自己的工作线程退出，而那个线程退出又要加载器锁，进程
+    /// 就停在那里：窗口没了，进程不退。这里不走那条路径。应用数据都在改动时
+    /// 写盘，退出时没有要收尾的东西。
+    fn exit_now() {
+        if let Some(tx) = TRAY_TX.get() {
+            let (done_tx, done_rx) = channel();
+            if tx.lock().unwrap().send(TrayMsg::Remove(done_tx)).is_ok() {
+                let _ = done_rx.recv_timeout(Duration::from_millis(500));
+            }
+        }
+        // SAFETY: 结束本进程；不运行线程局部析构与 DLL 卸载回调。
+        unsafe { TerminateProcess(GetCurrentProcess(), 0) };
+    }
+
+    /// 发给托盘线程的消息。
+    enum TrayMsg {
+        State(TrayState),
+        /// 移除托盘图标，完成后回复。
+        Remove(Sender<()>),
     }
 
     unsafe extern "system" fn find(hwnd: HWND, out: LPARAM) -> i32 {
@@ -440,7 +616,7 @@ mod platform {
             })
             .ok();
         // 托盘：自己的线程，带消息循环（托盘图标的隐藏窗口在这里收消息）。
-        let (tx, rx) = channel::<TrayState>();
+        let (tx, rx) = channel::<TrayMsg>();
         let _ = TRAY_TX.set(Mutex::new(tx));
         std::thread::Builder::new()
             .name("zeo-player-tray".into())
@@ -455,8 +631,15 @@ mod platform {
                             DispatchMessageW(&msg);
                         }
                     }
-                    while let Ok(state) = rx.try_recv() {
-                        super::tray::apply(&state);
+                    while let Ok(msg) = rx.try_recv() {
+                        match msg {
+                            TrayMsg::State(state) => super::tray::apply(&state),
+                            TrayMsg::Remove(done) => {
+                                super::tray::remove();
+                                let _ = done.send(());
+                                return;
+                            }
+                        }
                     }
                     std::thread::sleep(Duration::from_millis(30));
                 }
@@ -492,7 +675,7 @@ mod platform {
 
     pub fn update(state: TrayState) {
         if let Some(tx) = TRAY_TX.get() {
-            let _ = tx.lock().unwrap().send(state);
+            let _ = tx.lock().unwrap().send(TrayMsg::State(state));
         }
     }
 

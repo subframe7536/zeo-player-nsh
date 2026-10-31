@@ -76,7 +76,11 @@ pub fn top_inset() -> f32 {
     bar.top.0.max(TITLE_BAR)
 }
 
-/// 右上角被系统窗口按钮占去的宽度（Windows 约 138 pt；macOS 为 0）。
+/// 右上角被窗口按钮占去的宽度（Windows 约 138 pt；macOS 为 0）。Windows 上
+/// 按钮由应用画（`caption`），接管前由 NSH 画、宽度由它报告。
 pub fn controls_right() -> f32 {
-    nsh_core::element::desktop::title_bar().right.0
+    let system = nsh_core::element::desktop::title_bar().right.0;
+    #[cfg(target_os = "windows")]
+    let system = system.max(super::caption::width());
+    system
 }

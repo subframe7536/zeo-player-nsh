@@ -136,18 +136,18 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
     };
 
     if let Some(tag) = tag {
-        if let Some(title) = first(tag, ItemKey::TrackTitle) {
-            if !title.trim().is_empty() {
-                info.title = title;
-            }
+        if let Some(title) = first(tag, ItemKey::TrackTitle)
+            && !title.trim().is_empty()
+        {
+            info.title = title;
         }
         if let Some(artist) = joined(tag, &[ItemKey::TrackArtist, ItemKey::TrackArtists]) {
             info.artist = artist;
         }
-        if let Some(album) = first(tag, ItemKey::AlbumTitle) {
-            if !album.trim().is_empty() {
-                info.album = album;
-            }
+        if let Some(album) = first(tag, ItemKey::AlbumTitle)
+            && !album.trim().is_empty()
+        {
+            info.album = album;
         }
         if let Some(album_artist) = joined(tag, &[ItemKey::AlbumArtist, ItemKey::AlbumArtists]) {
             info.album_artist = album_artist;
@@ -235,10 +235,10 @@ impl MetaCache {
     pub fn get(&self, path: &Path) -> Result<Arc<MetaInfo>, String> {
         let key = path.to_string_lossy().into_owned();
         let modified = std::fs::metadata(path).map(|m| file_stamp(&m)).unwrap_or(0);
-        if let Some(entry) = self.entries.lock().unwrap().get(&key) {
-            if entry.modified == modified {
-                return Ok(entry.value.clone());
-            }
+        if let Some(entry) = self.entries.lock().unwrap().get(&key)
+            && entry.modified == modified
+        {
+            return Ok(entry.value.clone());
         }
         let meta = Arc::new(read_meta(path)?);
         self.entries.lock().unwrap().insert(key, CacheEntry { modified, value: meta.clone() });

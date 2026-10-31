@@ -158,10 +158,10 @@ fn parse_time_tag(inner: &str) -> Option<f64> {
     if int.len() != 2 || !int.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    if let Some(frac) = frac {
-        if frac.is_empty() || frac.len() > 3 || !frac.bytes().all(|b| b.is_ascii_digit()) {
-            return None;
-        }
+    if let Some(frac) = frac
+        && (frac.is_empty() || frac.len() > 3 || !frac.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
     }
     let minutes: f64 = mins.parse().ok()?;
     let seconds: f64 = int.parse().ok()?;

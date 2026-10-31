@@ -16,6 +16,8 @@ pub struct Player {
 
 impl Player {
     /// 新建播放器（启动解码/输出线程与系统媒体会话）。
+    // 不实现 Default：新建会启动线程与系统媒体会话，不该隐式发生。
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Player { engine: EngineHandle::start() }
     }
@@ -105,6 +107,7 @@ impl Player {
 }
 
 /// 本地曲库（多根目录、索引、流派拆分）。
+#[derive(Default)]
 pub struct Library;
 
 impl Library {

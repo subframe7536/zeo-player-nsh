@@ -2,6 +2,8 @@
 //! 带淡入的覆盖层。
 
 mod bar;
+#[cfg(target_os = "windows")]
+mod caption;
 mod full;
 mod icons;
 mod parts;
@@ -48,27 +50,47 @@ const LIBRARY: [(Nav, &str, Icon); 4] = [
 pub fn App() -> impl IntoElement {
     let s = store::install();
     set_title_bar(TitleBarStyle::Hidden, Some(px(TITLE_BAR)));
+    #[cfg(target_os = "windows")]
+    caption::install();
     on_key("space", |_| store::player().toggle());
 
     let full_open = signal(false);
+    // 正在收起（淡出动画中）；收起途中再打开会取消它。
+    let full_closing = signal(false);
     let fade = animated_value(0.0);
     let open = {
-        let fade = fade.clone();
         Rc::new(move || {
-            if full_open.get_untracked() {
+            if full_open.get_untracked() && !full_closing.get_untracked() {
                 return;
             }
+            full_closing.set(false);
             full_open.set(true);
-            let _ = fade.timing(1.0, 240.0, Easing::EaseOut);
+            if untracked(reduce_motion) {
+                fade.set(1.0);
+            } else {
+                let _ = fade.timing(1.0, full::IN_MS, full::IN_EASE);
+            }
         }) as Rc<dyn Fn()>
     };
     let close = {
-        let fade = fade.clone();
         Rc::new(move || {
-            let end = fade.timing(0.0, 180.0, Easing::EaseIn);
-            spawn(async move {
-                end.await;
+            if !full_open.get_untracked() || full_closing.get_untracked() {
+                return;
+            }
+            full_closing.set(true);
+            if untracked(reduce_motion) {
+                fade.set(0.0);
+                full_closing.set(false);
                 full_open.set(false);
+                return;
+            }
+            let end = fade.timing(0.0, full::OUT_MS, full::OUT_EASE);
+            spawn(async move {
+                // 收起途中又打开了（动画被替换，返回 false）：保持打开。
+                if end.await && full_closing.get_untracked() {
+                    full_closing.set(false);
+                    full_open.set(false);
+                }
             });
         }) as Rc<dyn Fn()>
     };
@@ -85,14 +107,14 @@ pub fn App() -> impl IntoElement {
     // 整个窗口（包括标题栏），只有系统的窗口按钮还在它上面。
     let shell = move || {
         let content = page(nav);
-        let (open, close, fade) = (open.clone(), close.clone(), fade.clone());
+        let (open, close) = (open.clone(), close.clone());
         view()
             .flex_1()
             .child(
                 view()
                     .flex_1()
                     .flex_row()
-                    .child(sidebar())
+                    .child(sidebar(search))
                     .child(
                         view()
                             .flex_1()
@@ -103,11 +125,11 @@ pub fn App() -> impl IntoElement {
                             .child(bar::player_bar(open, queue_open)),
                     ),
             )
-            .child(title_bar(search))
-            .child(when(move || full_open.get(), move || full::full_player(fade.clone(), close.clone())))
+            .child(title_bar())
+            .child(when(move || full_open.get(), move || full::full_player(fade, close.clone())))
     };
 
-    view()
+    let root = view()
         .flex_1()
         .bg(bg())
         .text_color(fg())
@@ -118,7 +140,11 @@ pub fn App() -> impl IntoElement {
         .on_touch(move |e: &TouchEvent| search.outside_touch(e))
         .child(when(move || !s.hidden.get(), shell))
         .child(when(move || s.close_prompt.get(), close_prompt))
-        .child(when(move || s.editor.with(Option::is_some), playlists::editor_dialog))
+        .child(when(move || s.editor.with(Option::is_some), playlists::editor_dialog));
+    // Windows 的窗口按钮在最上层（盖过全屏播放与弹窗，和系统按钮一样）。
+    #[cfg(target_os = "windows")]
+    let root = root.child(caption::buttons(move || full_open.get()));
+    root
 }
 
 /// 搜索框的焦点：点在框外时让它失焦。
@@ -154,12 +180,9 @@ impl SearchFocus {
 /// 搜索框的高度。
 const SEARCH_H: f32 = 28.0;
 
-/// 标题栏：透明，浮在侧栏与内容区顶部。中间是应用图标与名称，右侧搜索框；
-/// 两端让出系统按钮（macOS 交通灯在左，Windows 标题栏按钮在右），其余
-/// 区域拖动窗口。
-fn title_bar(focus: SearchFocus) -> View {
-    let s = store::store();
-    let query_empty = move || s.search.with(|q| q.is_empty());
+/// 标题栏：透明，浮在侧栏与内容区顶部，中间是应用图标与名称；两端让出
+/// 系统按钮（macOS 交通灯在左，Windows 标题栏按钮在右），其余区域拖动窗口。
+fn title_bar() -> View {
     view()
         .absolute()
         .top(px(0.0))
@@ -168,10 +191,10 @@ fn title_bar(focus: SearchFocus) -> View {
         .h(move || px(top_inset()))
         .flex_row()
         .items_center()
+        .justify_center()
         .window_drag(true)
         .pl(move || px(nsh_core::element::desktop::title_bar().left.0 + 8.0))
         .pr(move || px(controls_right() + 12.0))
-        .child(view().flex_1())
         .child(
             view()
                 .flex_row()
@@ -181,52 +204,52 @@ fn title_bar(focus: SearchFocus) -> View {
                 .child(icons::logo(18.0))
                 .child(text("Zeo Player").flex_shrink_0().text_size(px(14.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg())),
         )
+}
+
+/// 侧栏顶部的搜索框。
+fn search_box(focus: SearchFocus) -> View {
+    let s = store::store();
+    let query_empty = move || s.search.with(|q| q.is_empty());
+    // 外框画边框与底色，里面一行：搜索图标、输入框（透明）、清除按钮。
+    // 原生输入框画在应用内容之上，图标不能叠在它下面。
+    view()
+        .h(px(SEARCH_H))
+        .flex_row()
+        .items_center()
+        .pl(px(10.0))
+        .pr(px(1.0))
+        .rounded(px(SEARCH_H / 2.0))
+        .border_1()
+        .border_color(border())
+        .bg(bg())
+        .on_touch(move |e: &TouchEvent| {
+            if e.phase == TouchPhase::Start {
+                focus.inside.set(true);
+            }
+        })
+        // 点在图标上也聚焦输入框。
+        .on_press(move || focus.input.focus())
+        .child(icon(Icon::Search, 13.0, faint).flex_shrink_0())
         .child(
-            view().flex_1().flex_row().items_center().justify_end().child(
-                // 外框画边框与底色，里面一行：搜索图标、输入框（透明）、清除按钮。
-                // 原生输入框画在应用内容之上，图标不能叠在它下面。
-                view()
-                    .w(px(200.0))
-                    .h(px(SEARCH_H))
-                    .flex_row()
-                    .items_center()
-                    .pl(px(10.0))
-                    .pr(px(1.0))
-                    .rounded(px(SEARCH_H / 2.0))
-                    .border_1()
-                    .border_color(border())
-                    .bg(bg())
-                    .window_drag(false)
-                    .on_touch(move |e: &TouchEvent| {
-                        if e.phase == TouchPhase::Start {
-                            focus.inside.set(true);
-                        }
-                    })
-                    // 点在图标上也聚焦输入框。
-                    .on_press(move || focus.input.focus())
-                    .child(icon(Icon::Search, 13.0, faint).flex_shrink_0())
-                    .child(
-                        input()
-                            .element_ref(&focus.input)
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .h(px(SEARCH_H - 2.0))
-                            .px(px(6.0))
-                            .text_size(px(13.0))
-                            .text_color(fg())
-                            .value(move || s.search.get())
-                            .placeholder("搜索")
-                            .label("搜索")
-                            .on_focus(move || focus.focused.set(true))
-                            .on_blur(move || focus.focused.set(false))
-                            .on_change(move |t: &str| s.search.set(t.to_owned())),
-                    )
-                    .child(when(move || !query_empty(), move || {
-                        parts::icon_button(|| Icon::Close, 10.0, "清除搜索", faint, || store::store().search.set(String::new()))
-                            .flex_shrink_0()
-                    })),
-            ),
+            input()
+                .element_ref(&focus.input)
+                .flex_1()
+                .min_w(px(0.0))
+                .h(px(SEARCH_H - 2.0))
+                .px(px(6.0))
+                .text_size(px(13.0))
+                .text_color(fg())
+                .value(move || s.search.get())
+                .placeholder("搜索")
+                .label("搜索")
+                .on_focus(move || focus.focused.set(true))
+                .on_blur(move || focus.focused.set(false))
+                .on_change(move |t: &str| s.search.set(t.to_owned())),
         )
+        .child(when(move || !query_empty(), move || {
+            parts::icon_button(|| Icon::Close, 10.0, "清除搜索", faint, || store::store().search.set(String::new()))
+                .flex_shrink_0()
+        }))
 }
 
 fn page(nav: Signal<Nav>) -> AnyElement {
@@ -328,7 +351,7 @@ pub(crate) fn section_label(label: &'static str) -> Text {
         .pb(px(6.0))
 }
 
-fn sidebar() -> View {
+fn sidebar(search: SearchFocus) -> View {
     let s = store::store();
     view()
         .w(px(SIDEBAR))
@@ -337,7 +360,8 @@ fn sidebar() -> View {
         .border_r_1()
         .border_r_color(sidebar_border())
         // 顶部让给标题栏（侧栏底色一直铺到窗口顶边，交通灯落在上面）。
-        .child(view().h(move || px(top_inset() - 8.0)).flex_shrink_0())
+        .child(view().h(move || px(top_inset())).flex_shrink_0())
+        .child(view().px(px(10.0)).child(search_box(search)))
         .child(
             view()
                 .px(px(10.0))

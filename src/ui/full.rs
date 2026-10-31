@@ -22,7 +22,17 @@ const LYRICS: f32 = 520.0;
 /// 当前歌词行停在视口从上往下的这个比例处。
 const ANCHOR: f32 = 0.34;
 
-/// 全屏播放页。`fade` 为 0→1 的开合进度；`on_close` 收起。
+/// 打开：淡入并从下方滑入，先快后慢。
+pub(super) const IN_MS: f32 = 380.0;
+pub(super) const IN_EASE: Easing = Easing::Bezier(0.22, 1.0, 0.36, 1.0);
+/// 收起：淡出并向下滑出，先慢后快，比打开短。
+pub(super) const OUT_MS: f32 = 240.0;
+pub(super) const OUT_EASE: Easing = Easing::Bezier(0.4, 0.0, 1.0, 1.0);
+/// 开合时滑动的距离（点）。
+const SHEET_SLIDE: f32 = 56.0;
+
+/// 全屏播放页。`fade` 为 0→1 的开合进度（同时驱动透明度与上下滑动）；
+/// `on_close` 收起。
 pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
     let s = store();
     let backdrop = move || s.track.with(|t| t.backdrop.clone());
@@ -78,7 +88,7 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
         .z_index(50)
         .overflow_hidden()
         .bind_opacity(&fade)
-        .bind_scale(&fade.interpolate(&[0.0, 1.0], &[0.98, 1.0]))
+        .bind_translate_y(&fade.interpolate(&[0.0, 1.0], &[SHEET_SLIDE, 0.0]))
         .child(backdrop)
         .child(
             view()
@@ -119,8 +129,7 @@ impl Swap {
             lyrics_shift: animated_value(0.0),
             backdrop: animated_value(1.0),
         };
-        let (content, shift, lyrics_shift, backdrop) =
-            (swap.content.clone(), swap.shift.clone(), swap.lyrics_shift.clone(), swap.backdrop.clone());
+        let (content, shift, lyrics_shift, backdrop) = (swap.content, swap.shift, swap.lyrics_shift, swap.backdrop);
         let key = computed(move || s.track.with(|t| (t.path.clone(), t.index)));
         let previous = RefCell::new(None::<(Option<String>, i64)>);
         effect(move || {
@@ -347,7 +356,7 @@ fn more_menu() -> AnyElement {
     let path = move || s.track.with_untracked(|t| t.path.clone());
     let item = |label: &'static str, glyph: Icon, on_select: Box<dyn Fn()>| {
         menu_item()
-            .on_select(move || on_select())
+            .on_select(on_select)
             .flex_row()
             .items_center()
             .gap(px(8.0))

@@ -47,6 +47,16 @@ pub enum Icon {
     Smart,
     Trash,
     Edit,
+    /// Windows 窗口按钮（`ui::caption`）：字形占 24 格里的 4.5–19.5，按
+    /// 16 pt 显示时为 10 pt 见方、线宽 1 pt，与系统按钮一致。
+    #[cfg(target_os = "windows")]
+    WinMinimize,
+    #[cfg(target_os = "windows")]
+    WinMaximize,
+    #[cfg(target_os = "windows")]
+    WinRestore,
+    #[cfg(target_os = "windows")]
+    WinClose,
 }
 
 impl Icon {
@@ -89,6 +99,14 @@ impl Icon {
             Icon::Smart => r#"<path d="M11 3.5l1.8 4.7 4.7 1.8-4.7 1.8L11 16.5l-1.8-4.7L4.5 10l4.7-1.8z"/><path d="M18 14.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>"#,
             Icon::Trash => r#"<path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2a1 1 0 0 0 1 .9h7.2a1 1 0 0 0 1-.9L17.5 7M10 11v5.5M14 11v5.5"/>"#,
             Icon::Edit => r#"<path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M14.5 7.5l2 2"/>"#,
+            #[cfg(target_os = "windows")]
+            Icon::WinMinimize => r#"<path d="M4.5 12h15" stroke-width="1.5" stroke-linecap="butt"/>"#,
+            #[cfg(target_os = "windows")]
+            Icon::WinMaximize => r#"<rect x="5.25" y="5.25" width="13.5" height="13.5" rx="1.5" stroke-width="1.5"/>"#,
+            #[cfg(target_os = "windows")]
+            Icon::WinRestore => r#"<rect x="5.25" y="8.25" width="10.5" height="10.5" rx="1.5" stroke-width="1.5"/><path d="M8.25 5.25h9a1.5 1.5 0 0 1 1.5 1.5v9" stroke-width="1.5"/>"#,
+            #[cfg(target_os = "windows")]
+            Icon::WinClose => r#"<path d="M5.25 5.25l13.5 13.5M18.75 5.25l-13.5 13.5" stroke-width="1.5"/>"#,
         }
     }
 }
