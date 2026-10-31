@@ -1,6 +1,6 @@
 //! 界面测试：无头引擎运行根组件 `App`（`cargo test` / `nsh test` 都会跑）。
 //!
-//! 曲库用独立的数据目录；有 `/tmp/zeo-player-test-music` 语料（`scripts/make-test-music.sh`）
+//! 曲库用独立的数据目录；有 `.nsh/tmp/zeo-player-test-music` 语料（`scripts/make-test-music.sh`）
 //! 时把它设为根文件夹，没有时只跑不依赖曲目的部分。
 
 use std::sync::Once;
@@ -12,7 +12,7 @@ use nsh_core::platform::Os;
 use nsh_engine::{EngineConfig, Root};
 use nsh_testing::Headless;
 
-const CORPUS: &str = "/tmp/zeo-player-test-music";
+const CORPUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/.nsh/tmp/zeo-player-test-music");
 
 /// 隔离的数据 / 缓存目录（整个测试进程一次；曲库存储是全局的）。
 fn isolate() -> bool {

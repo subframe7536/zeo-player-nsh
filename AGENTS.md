@@ -28,7 +28,8 @@ nsh run .          # run the app with rebuild on change
 ```
 
 - Run `nsh check .` and `nsh test .` before reporting a change as done.
-- Playback e2e tests and track-dependent UI tests need `/tmp/zeo-player-test-music` (`sh scripts/make-test-music.sh`, requires ffmpeg). Without it they skip silently, so generate it when touching audio, lyrics, waveform, or the player UI.
+- On Windows, the tests need libclang (QuickJS bindings in the headless test runner): install LLVM and set `$env:LIBCLANG_PATH` to its `bin` directory (the one with `libclang.dll`, e.g. `C:\Program Files\LLVM\bin`) before `nsh test .`.
+- Playback e2e tests and track-dependent UI tests need `.nsh/tmp/zeo-player-test-music` in the repo (`sh scripts/make-test-music.sh`, requires ffmpeg). Without it they skip silently, so generate it when touching audio, lyrics, waveform, or the player UI.
 - `#[ignore]` tests use the real library / filesystem and share global state. Run them one at a time (commands in the README).
 - Cross-check Windows from a Mac with `cargo xwin check --target x86_64-pc-windows-msvc` (setup in the README) when touching platform code.
 - Memory benchmark: `ZEO_PLAYER_BENCH=1 nsh run .` and sample with `footprint <pid>`.

@@ -1,8 +1,9 @@
 #!/bin/sh
-# Builds the corpus src/e2e.rs plays: /tmp/zeo-player-test-music (needs ffmpeg).
+# Builds the corpus src/e2e.rs and tests/ui.rs play:
+# .nsh/tmp/zeo-player-test-music in the repo (needs ffmpeg).
 # 6 files (mp3 / flac / wav, one in a subfolder), tagged, with an external .lrc.
 set -eu
-dir="${1:-/tmp/zeo-player-test-music}"
+dir="${1:-$(dirname "$0")/../.nsh/tmp/zeo-player-test-music}"
 rm -rf "$dir"; mkdir -p "$dir/sub"
 gen() { ffmpeg -loglevel error -y -f lavfi -i "$1" -t "$2" "$@"; }
 tone="sine=frequency=440:sample_rate=44100"

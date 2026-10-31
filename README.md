@@ -116,7 +116,7 @@ cargo test --release -- --ignored watcher_rescans         # 文件夹监视：�
 cargo test --release -- --ignored real_track_waveform --nocapture
 ```
 
-`src/e2e.rs` 的播放端到端测试和 `tests/ui.rs` 里依赖曲目的用例需要 `/tmp/zeo-player-test-music` 测试语料（`sh scripts/make-test-music.sh` 用 ffmpeg 生成），没有时跳过。
+`src/e2e.rs` 的播放端到端测试和 `tests/ui.rs` 里依赖曲目的用例需要仓库内 `.nsh/tmp/zeo-player-test-music` 测试语料（`sh scripts/make-test-music.sh` 用 ffmpeg 生成），没有时跳过。
 
 ## 平台差异
 
