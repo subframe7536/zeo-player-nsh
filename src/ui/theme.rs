@@ -31,9 +31,6 @@ pub fn card() -> AdaptiveColor {
 pub fn primary() -> AdaptiveColor {
     theme().primary
 }
-pub fn primary_fg() -> AdaptiveColor {
-    theme().primary_foreground
-}
 pub fn sidebar() -> AdaptiveColor {
     theme().sidebar
 }

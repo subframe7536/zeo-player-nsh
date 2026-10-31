@@ -2,6 +2,7 @@
 //! 带淡入的覆盖层。
 
 mod bar;
+mod button;
 #[cfg(target_os = "windows")]
 mod caption;
 mod full;

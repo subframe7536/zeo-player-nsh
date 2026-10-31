@@ -4,6 +4,9 @@ use std::rc::Rc;
 
 use nsh_core::prelude::*;
 
+use nsh_base::ButtonElement;
+
+use super::button::{text_button, Size, Variant};
 use super::icons::{icon, icon_dyn, Icon};
 use super::store::{format_time, store};
 use super::theme::*;
@@ -46,69 +49,37 @@ fn cover_frame(
         }))
 }
 
-/// 方形图标按钮（工具栏、播放条）。
+/// 图标按钮（ghost，悬停才有底色）。`size` 是图标边长，按钮按它选
+/// shadcn 的尺寸：≤ 12 为 `icon-xs`（24），≤ 16 为 `icon-sm`（32），更大为
+/// `icon`（36）。
 pub fn icon_button(
     name: impl Fn() -> Icon + 'static,
     size: f32,
     label: &'static str,
     tint: impl Fn() -> AdaptiveColor + 'static,
     on_press: impl Fn() + 'static,
-) -> View {
-    view()
-        .size(px(size + 16.0))
-        .items_center()
-        .justify_center()
-        .rounded(px(8.0))
-        .role(AccessibilityRole::Button)
-        .label(label)
-        .hover(|s| s.bg(hover()))
-        .active(|s| s.opacity(0.6))
-        .on_press(on_press)
+) -> ButtonElement {
+    let shape = if size <= 12.0 {
+        Size::IconXs
+    } else if size <= 16.0 {
+        Size::IconSm
+    } else {
+        Size::Icon
+    };
+    super::button::shell(Variant::Ghost, shape)
+        .accessibility_label(label)
+        .on_press(move |_: &()| on_press())
         .child(icon_dyn(name, size, tint))
 }
 
-/// 主操作按钮（胶囊）：「播放」。
-pub fn pill_button(name: Icon, label: &'static str, on_press: impl Fn() + 'static) -> View {
-    view()
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .h(px(36.0))
-        .px(px(18.0))
-        .rounded_full()
-        .bg(primary())
-        .role(AccessibilityRole::Button)
-        .label(label)
-        .hover(|s| s.opacity(0.92))
-        .active(|s| s.opacity(0.75))
-        .on_press(on_press)
-        .child(icon(name, 14.0, primary_fg))
-        .child(
-            text(label)
-                .text_size(px(14.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(primary_fg()),
-        )
+/// 主操作按钮（shadcn `default`）：「播放」。
+pub fn pill_button(name: Icon, label: &'static str, on_press: impl Fn() + 'static) -> ButtonElement {
+    text_button(Variant::Default, Size::Default, Some(name), label, on_press)
 }
 
-/// 次要按钮（描边）。
-pub fn outline_button(name: Icon, label: &'static str, on_press: impl Fn() + 'static) -> View {
-    view()
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .h(px(36.0))
-        .px(px(16.0))
-        .rounded_full()
-        .border_1()
-        .border_color(border())
-        .role(AccessibilityRole::Button)
-        .label(label)
-        .hover(|s| s.bg(hover()))
-        .active(|s| s.opacity(0.7))
-        .on_press(on_press)
-        .child(icon(name, 14.0, fg))
-        .child(text(label).text_size(px(14.0)).font_weight(FontWeight::MEDIUM).text_color(fg()))
+/// 次要按钮（shadcn `outline`）。
+pub fn outline_button(name: Icon, label: &'static str, on_press: impl Fn() + 'static) -> ButtonElement {
+    text_button(Variant::Outline, Size::Default, Some(name), label, on_press)
 }
 
 /// 页头：可选返回、大标题、副标题、右侧操作；整条可拖动窗口。
@@ -118,25 +89,17 @@ pub fn page_header(
     back: Option<Rc<dyn Fn()>>,
     actions: Option<AnyElement>,
 ) -> View {
+    // shadcn ghost / sm，左侧留给图标的内边距收窄，文字与标题左对齐。
     let back_button = back.map(|back| {
-        view()
-            .flex_row()
-            .items_center()
-            .gap(px(2.0))
-            .self_start()
-            .h(px(28.0))
-            .pl(px(4.0))
-            .pr(px(10.0))
-            .ml(px(-8.0))
-            .rounded(px(8.0))
-            .role(AccessibilityRole::Button)
-            .label("返回")
-            .window_drag(false)
-            .hover(|s| s.bg(hover()))
-            .active(|s| s.opacity(0.6))
-            .on_press(move || back())
-            .child(icon(Icon::ChevronLeft, 16.0, muted_fg))
-            .child(text("返回").text_size(px(13.0)).text_color(muted_fg()))
+        view().self_start().ml(px(-8.0)).window_drag(false).child(
+            super::button::shell(Variant::Ghost, Size::Sm)
+                .pl(px(6.0))
+                .gap(px(2.0))
+                .accessibility_label("返回")
+                .on_press(move |_: &()| back())
+                .child(icon(Icon::ChevronLeft, 16.0, muted_fg))
+                .child(text("返回").text_size(px(13.0)).font_weight(FontWeight::MEDIUM).text_color(muted_fg())),
+        )
     });
     view()
         .flex_row()

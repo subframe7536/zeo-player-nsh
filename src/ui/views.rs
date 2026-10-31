@@ -513,10 +513,9 @@ pub fn Folders() -> impl IntoElement {
         }))
 }
 
-fn rescan_button() -> View {
+fn rescan_button() -> nsh_base::ButtonElement {
     let s = store();
-    icon_button(|| Icon::Refresh, 16.0, "重新扫描", muted_fg, scan)
-        .style_when(move || s.library.with(|l| l.scanning), |st| st.opacity(0.4))
+    icon_button(|| Icon::Refresh, 16.0, "重新扫描", muted_fg, scan).disabled(move || s.library.with(|l| l.scanning))
 }
 
 fn folder_cell(row: Memo<Option<FolderRow>>, cwd: Signal<Option<String>>) -> View {

@@ -946,7 +946,7 @@ fn lyrics_scroller() -> View {
         .child(
             scroll()
                 .flex_1()
-                .opacity(move || if placed.get() { 1.0 } else { 0.0 })
+                .opacity(move || if placed.get() { 1.0_f32 } else { 0.0 })
                 .scrollbar(false)
                 .element_ref(&scroller)
                 .on_layout(move |frame: &Bounds<Points>| viewport.set(frame.size.height.0))
