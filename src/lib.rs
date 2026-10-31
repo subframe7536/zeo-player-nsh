@@ -7,6 +7,7 @@ use nsh_core::prelude::*;
 mod audio;
 mod codec;
 mod covers;
+mod db;
 #[cfg(test)]
 mod e2e;
 pub mod engine;

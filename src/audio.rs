@@ -142,6 +142,8 @@ impl LoopMode {
 
 pub enum EngineCmd {
     Load { path: PathBuf, queue: Vec<String> },
+    /// 装载但不播放，停在 `time` 秒（启动时恢复上次的曲目）。
+    Cue { path: PathBuf, queue: Vec<String>, time: f64 },
     /// 跳到当前队列的第 `n` 首。
     Jump(i64),
     Play,
@@ -439,6 +441,7 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
             let playing = shared.playing.load(Ordering::Relaxed);
             let interrupts = match &cmd {
                 EngineCmd::Load { .. }
+                | EngineCmd::Cue { .. }
                 | EngineCmd::Seek(_)
                 | EngineCmd::SeekBy(_)
                 | EngineCmd::Next
@@ -589,6 +592,25 @@ fn handle_cmd(
                 .unwrap_or(0);
             load_track(shared, media, loaded, path, queue, index, dev_rate, dev_channels);
             shared.playing.store(true, Ordering::Relaxed);
+            publish_media(shared, media, true);
+        }
+        EngineCmd::Cue { path, queue, time } => {
+            *base_queue = Arc::new(queue);
+            let queue = ordered_queue(base_queue, shared.loop_mode());
+            let index = queue
+                .iter()
+                .position(|p| p.as_str() == path.to_string_lossy().as_ref())
+                .map(|i| i as i64)
+                .unwrap_or(0);
+            shared.playing.store(false, Ordering::Relaxed);
+            load_track(shared, media, loaded, path, queue, index, dev_rate, dev_channels);
+            if time > 0.0
+                && let Some(l) = loaded.as_mut()
+                && let Ok(actual) = l.source.seek(time)
+            {
+                reset_ring(shared, actual, dev_rate);
+                l.reset_buffers();
+            }
             publish_media(shared, media, true);
         }
         EngineCmd::Play => {

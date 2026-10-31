@@ -2,9 +2,10 @@
 //! `Meta`（歌词与波形）。纯 Rust 接口，UI（`crate::ui`）与测试直接调用。
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::audio::{EngineCmd, EngineHandle, Snapshot};
+use crate::db::LastPlayed;
 use crate::library::{library_store, TrackEntry};
 use crate::lyrics::{parse_lyric, LyricOptions, LyricsOutput};
 use crate::metadata::MetaCache;
@@ -12,6 +13,16 @@ use crate::metadata::MetaCache;
 /// 播放器引擎句柄。
 pub struct Player {
     engine: EngineHandle,
+    /// 上次写进数据库的播放状态（[`Player::remember`]）。
+    memory: Mutex<Memory>,
+}
+
+/// 已保存的播放状态。
+#[derive(Default)]
+struct Memory {
+    last: Option<LastPlayed>,
+    playing: bool,
+    queue: Option<Arc<Vec<String>>>,
 }
 
 impl Player {
@@ -19,7 +30,7 @@ impl Player {
     // 不实现 Default：新建会启动线程与系统媒体会话，不该隐式发生。
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Player { engine: EngineHandle::start() }
+        Player { engine: EngineHandle::start(), memory: Mutex::new(Memory::default()) }
     }
 
     /// 进程内唯一的播放器（UI 用）。
@@ -31,6 +42,62 @@ impl Player {
     /// 打开并播放 `path`；`queue` 为所在列表（上一首/下一首）。
     pub fn open(&self, path: String, queue: Vec<String>) {
         self.engine.send(EngineCmd::Load { path: PathBuf::from(path), queue });
+    }
+
+    /// 装载 `path` 但不播放，停在 `time` 秒。
+    pub fn cue(&self, path: String, queue: Vec<String>, time: f64) {
+        self.engine.send(EngineCmd::Cue { path: PathBuf::from(path), queue, time });
+    }
+
+    /// 恢复上次播放的曲目（暂停在上次的位置）：还没有曲目、文件还在时才做。
+    /// 返回是否恢复了。
+    pub fn restore_last(&self) -> bool {
+        if self.state().path.is_some() {
+            return false;
+        }
+        let Some((last, mut queue)) = crate::db::last_played() else { return false };
+        if !Path::new(&last.path).is_file() {
+            return false;
+        }
+        if !queue.contains(&last.path) {
+            queue = vec![last.path.clone()];
+        }
+        self.cue(last.path, queue, last.time.max(0.0));
+        true
+    }
+
+    /// 记下播放状态（曲目、位置、队列），下次启动由 [`Self::restore_last`]
+    /// 恢复。界面轮询时传入快照；换曲、播放 / 暂停、位置变了 2 秒以上或
+    /// 队列变了才写（数据库写线程）。退出时不另外保存，最多丢 2 秒进度。
+    pub fn remember(&self, snap: &Snapshot) {
+        let Some(path) = snap.path.clone() else { return };
+        if snap.is_loading {
+            return;
+        }
+        let last = LastPlayed { path, time: snap.current_time };
+        let mut memory = self.memory.lock().unwrap();
+        let moved = memory.playing != snap.is_playing
+            || memory.last.as_ref().is_none_or(|old| old.path != last.path || (old.time - last.time).abs() >= 2.0);
+        let queue = (!memory.queue.as_ref().is_some_and(|q| Arc::ptr_eq(q, &snap.queue))).then(|| snap.queue.clone());
+        if !moved && queue.is_none() {
+            return;
+        }
+        if moved {
+            memory.last = Some(last.clone());
+            memory.playing = snap.is_playing;
+        }
+        if let Some(queue) = &queue {
+            memory.queue = Some(queue.clone());
+        }
+        drop(memory);
+        crate::db::later(move || {
+            if let Some(queue) = queue {
+                crate::db::save_queue(&queue);
+            }
+            if moved {
+                crate::db::save_last_played(&last);
+            }
+        });
     }
 
     pub fn play(&self) {

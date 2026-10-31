@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::metadata::MetaCache;
+use crate::metadata::{CacheEntry, MetaCache};
 
 /// 基线音频扩展名（opus/ogg 暂缓，恢复时加回）。
 pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav"];
@@ -169,10 +169,18 @@ pub fn library_store() -> &'static LibraryStore {
         let dir = data_dir();
         let _ = std::fs::create_dir_all(&dir);
         let config = load_config(&dir);
+        // 先用数据库里上次的元数据建索引，界面马上有曲库；随后的扫描只重读变了的文件。
+        let mut tracks: Vec<TrackEntry> = MetaCache::global()
+            .entries()
+            .into_iter()
+            .filter(|(path, _)| config.roots.iter().any(|root| Path::new(path).starts_with(root)))
+            .map(|(path, entry)| track_entry(path, &entry, &config.genre_separators))
+            .collect();
+        sort_tracks(&mut tracks);
         LibraryStore {
             dir,
             config: std::sync::Mutex::new(config),
-            tracks: std::sync::RwLock::new(Arc::new(Vec::new())),
+            tracks: std::sync::RwLock::new(Arc::new(tracks)),
             scanning: std::sync::atomic::AtomicBool::new(false),
             done: std::sync::atomic::AtomicUsize::new(0),
             total: std::sync::atomic::AtomicUsize::new(0),
@@ -358,6 +366,8 @@ impl LibraryStore {
             collect_audio_files(Path::new(root), &mut files);
         }
         self.total.store(files.len(), Ordering::Relaxed);
+        let cache = MetaCache::global();
+        cache.begin_batch();
         let mut entries: Vec<TrackEntry> = Vec::with_capacity(files.len());
         for (i, path) in files.iter().enumerate() {
             if let Some(name) = path.file_name() {
@@ -368,14 +378,10 @@ impl LibraryStore {
             }
             self.done.store(i + 1, Ordering::Relaxed);
         }
-        entries.sort_by(|a, b| {
-            a.artist
-                .cmp(&b.artist)
-                .then(a.album.cmp(&b.album))
-                .then(a.disk.cmp(&b.disk))
-                .then(a.track.cmp(&b.track))
-                .then(a.title.cmp(&b.title))
-        });
+        cache.end_batch();
+        // 不在任何根目录下的条目（文件删了、根目录移除了）从缓存和数据库里去掉。
+        cache.retain(&entries.iter().map(|t| t.path.clone()).collect());
+        sort_tracks(&mut entries);
         let count = entries.len();
         *self.tracks.write().unwrap() = Arc::new(entries);
         self.current.lock().unwrap().clear();
@@ -408,17 +414,16 @@ fn collect_audio_files(root: &Path, out: &mut Vec<PathBuf>) {
 
 /// 读一个文件的索引条目；读不出标签/属性的文件跳过。
 fn read_entry(path: &Path, separators: &[String]) -> Option<TrackEntry> {
-    let file_meta = std::fs::metadata(path).ok()?;
-    let modified = file_meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let meta = MetaCache::global().get(path).ok()?;
-    Some(TrackEntry {
-        path: path.to_string_lossy().into_owned(),
-        file_name: path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+    let entry = MetaCache::global().entry(path).ok()?;
+    Some(track_entry(path.to_string_lossy().into_owned(), &entry, separators))
+}
+
+/// 缓存条目 → 索引条目。
+fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> TrackEntry {
+    let meta = &entry.value;
+    TrackEntry {
+        file_name: Path::new(&path).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+        path,
         title: meta.title.clone(),
         artist: meta.artist.clone(),
         album: meta.album.clone(),
@@ -435,10 +440,22 @@ fn read_entry(path: &Path, separators: &[String]) -> Option<TrackEntry> {
         sample_rate: meta.sample_rate,
         channels: meta.channels,
         has_art: meta.has_art,
-        size_bytes: file_meta.len(),
-        modified,
-        stamp: crate::metadata::file_stamp(&file_meta),
-    })
+        size_bytes: entry.size,
+        modified: entry.modified,
+        stamp: entry.stamp,
+    }
+}
+
+/// 索引顺序：歌手、专辑、碟号、音轨号、标题。
+fn sort_tracks(entries: &mut [TrackEntry]) {
+    entries.sort_by(|a, b| {
+        a.artist
+            .cmp(&b.artist)
+            .then(a.album.cmp(&b.album))
+            .then(a.disk.cmp(&b.disk))
+            .then(a.track.cmp(&b.track))
+            .then(a.title.cmp(&b.title))
+    });
 }
 
 /// 流派切分：任一分隔符处切开 → trim 每段 → 去空段、去重。

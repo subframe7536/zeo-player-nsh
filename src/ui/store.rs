@@ -224,6 +224,7 @@ pub fn install() -> Store {
             });
             s.track.set(now_playing(&snap));
             s.queue.set(Same(snap.queue.clone()));
+            player().remember(&snap);
             drain_covers();
             // 窗口与托盘。
             if crate::window::take_close_request() {
@@ -350,6 +351,8 @@ pub fn install() -> Store {
     crate::window::set_close_action(library_store().close_action());
     player().set_fade_ms(library_store().fade_ms());
     player().set_loop_mode(library_store().loop_mode());
+    // 在设好循环模式之后：随机模式下恢复的队列按它重新洗牌。
+    player().restore_last();
     crate::window::start();
     if !library_store().roots().is_empty() {
         scan();

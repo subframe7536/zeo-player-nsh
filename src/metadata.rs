@@ -2,7 +2,9 @@
 //! AudioMetadata 字段（title 缺省用文件名去扩展名、artist 缺省
 //! Unknown Artist、album 缺省 Unknown Album；多 artist 用 `; ` 拼接）。
 
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use lofty::file::{AudioFile, TaggedFileExt};
@@ -207,41 +209,109 @@ pub fn file_stamp(meta: &std::fs::Metadata) -> u64 {
         .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
-// --- 元数据缓存（按 path + 文件指纹） ---------------------------------------
+// --- 元数据缓存（按 path + 文件指纹，持久化到 SQLite） -----------------------
 
 #[derive(Clone)]
 pub struct CacheEntry {
+    /// 文件指纹（[`file_stamp`]）。
+    pub stamp: u64,
+    pub size: u64,
+    /// 修改时间（Unix 秒）。
     pub modified: u64,
     pub value: Arc<MetaInfo>,
 }
 
+/// 新读出、还没写进数据库的条目超过这个数就写一次（扫描中）。
+const FLUSH_AT: usize = 256;
+
 pub struct MetaCache {
-    entries: Mutex<std::collections::HashMap<String, CacheEntry>>,
+    entries: Mutex<HashMap<String, CacheEntry>>,
+    /// 新读出、还没写进数据库的条目。
+    pending: Mutex<Vec<(String, CacheEntry)>>,
+    /// 扫描中：攒一批再写（见 [`Self::begin_batch`]）。
+    batching: AtomicBool,
 }
 
 impl MetaCache {
+    /// 进程内唯一的缓存；第一次用时从数据库读出上次保存的全部元数据。
     pub fn global() -> &'static MetaCache {
         static CACHE: OnceLock<MetaCache> = OnceLock::new();
-        CACHE.get_or_init(|| MetaCache { entries: Mutex::new(std::collections::HashMap::new()) })
+        CACHE.get_or_init(|| MetaCache {
+            entries: Mutex::new(crate::db::load_meta().into_iter().collect()),
+            pending: Mutex::new(Vec::new()),
+            batching: AtomicBool::new(false),
+        })
     }
 
+    /// 全部条目（启动时据此先显示上次的曲库）。
+    pub fn entries(&self) -> Vec<(String, CacheEntry)> {
+        self.entries.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
 
-    /// 丢掉全部缓存（重建曲库）。
+    /// 丢掉全部缓存，数据库里的也删掉（重建曲库）。
     pub fn clear(&self) {
         self.entries.lock().unwrap().clear();
+        self.pending.lock().unwrap().clear();
+        crate::db::clear_meta();
+    }
+
+    /// 只留下 `keep` 里的路径（扫描后去掉已不存在的文件）。
+    pub fn retain(&self, keep: &HashSet<String>) {
+        self.flush();
+        self.entries.lock().unwrap().retain(|path, _| keep.contains(path));
+        crate::db::retain_meta(keep);
+    }
+
+    /// 开始批量读取：新条目攒够 [`FLUSH_AT`] 条才写一次数据库。
+    pub fn begin_batch(&self) {
+        self.batching.store(true, Ordering::Relaxed);
+    }
+
+    /// 结束批量读取，写入剩下的条目。
+    pub fn end_batch(&self) {
+        self.batching.store(false, Ordering::Relaxed);
+        self.flush();
+    }
+
+    fn flush(&self) {
+        let rows = std::mem::take(&mut *self.pending.lock().unwrap());
+        crate::db::save_meta(&rows);
     }
 
     /// 读取（带缓存）：文件未变时直接返回缓存。
     pub fn get(&self, path: &Path) -> Result<Arc<MetaInfo>, String> {
+        self.entry(path).map(|e| e.value)
+    }
+
+    /// 同 [`Self::get`]，连同文件指纹、大小与修改时间。
+    pub fn entry(&self, path: &Path) -> Result<CacheEntry, String> {
         let key = path.to_string_lossy().into_owned();
-        let modified = std::fs::metadata(path).map(|m| file_stamp(&m)).unwrap_or(0);
+        let file = std::fs::metadata(path).ok();
+        let stamp = file.as_ref().map_or(0, file_stamp);
         if let Some(entry) = self.entries.lock().unwrap().get(&key)
-            && entry.modified == modified
+            && entry.stamp == stamp
         {
-            return Ok(entry.value.clone());
+            return Ok(entry.clone());
         }
-        let meta = Arc::new(read_meta(path)?);
-        self.entries.lock().unwrap().insert(key, CacheEntry { modified, value: meta.clone() });
-        Ok(meta)
+        let entry = CacheEntry {
+            stamp,
+            size: file.as_ref().map_or(0, |m| m.len()),
+            modified: file
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs()),
+            value: Arc::new(read_meta(path)?),
+        };
+        self.entries.lock().unwrap().insert(key.clone(), entry.clone());
+        let flush = {
+            let mut pending = self.pending.lock().unwrap();
+            pending.push((key, entry.clone()));
+            !self.batching.load(Ordering::Relaxed) || pending.len() >= FLUSH_AT
+        };
+        if flush {
+            self.flush();
+        }
+        Ok(entry)
     }
 }
