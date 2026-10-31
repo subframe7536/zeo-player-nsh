@@ -1524,27 +1524,13 @@ fn genres_card() -> View {
     .child(preview)
 }
 
-/// 字体：系统字体或任一已装 / 导入的字体家族，整个界面立即换用。
+/// 字体：系统字体或任一已安装的字体家族，整个界面立即换用。
 /// 字体列表懒加载：点「更改字体…」才读取；收起或离开设置页时整块销毁
 /// （列表数据、读取任务、各行的字体预览一起释放）。
 fn font_card() -> View {
     let s = store();
-    let message = signal(String::new());
-    let version = signal(0_u32); // 导入或删除后重新读取列表
     let expanded = signal(false);
     let current = move || s.library.with(|l| l.font.clone());
-
-    let import = move || {
-        spawn(async move {
-            if let Some((text, first)) = super::store::import_fonts().await {
-                version.update(|v| *v += 1);
-                if let Some(family) = first {
-                    super::store::set_font(Some(family));
-                }
-                message.set(text);
-            }
-        });
-    };
 
     let system = view()
         .flex_row()
@@ -1578,31 +1564,16 @@ fn font_card() -> View {
 
     let toggle = move || view().self_start().child(outline_button(Icon::ChevronDown, "更改字体…", move || expanded.set(true)));
 
-    // 导入字体目前只有 macOS 支持（Windows 待 NSH 提供运行时注册字体的接口）。
-    let can_import = cfg!(target_os = "macos");
-    card_section(
-        "字体",
-        if can_import {
-            "整个界面（包括歌词）换用所选字体，立即生效。可以导入 .ttf / .otf / .ttc 文件，只在 Zeo Player 里可用，不会装进系统。"
-        } else {
-            "整个界面（包括歌词）换用所选字体，立即生效。"
-        },
-        can_import.then(|| pill_button(Icon::Plus, "导入字体…", import).into_element()),
-    )
-    .child(system)
-    .child(when(move || expanded.get(), move || font_browser(version, message, expanded)).otherwise(toggle))
-    .child(note(message))
+    card_section("字体", "整个界面（包括歌词）换用所选字体，立即生效。", None)
+        .child(system)
+        .child(when(move || expanded.get(), move || font_browser(expanded)).otherwise(toggle))
 }
 
-/// 展开后的字体列表：在后台读取系统字体（fontdb 扫描字体目录），读完再显示。
-fn font_browser(version: Signal<u32>, message: Signal<String>, expanded: Signal<bool>) -> View {
+/// 展开后的字体列表：在后台读取系统已安装的字体，读完再显示。
+fn font_browser(expanded: Signal<bool>) -> View {
     let s = store();
     let query = signal(String::new());
     let current = move || s.library.with(|l| l.font.clone());
-    let imported = computed(move || {
-        version.get();
-        Rc::new(crate::fonts::imported_families())
-    });
     // None：还在读取。任务属于这一块，块销毁时一起取消。
     let installed = signal(None::<Same<Vec<String>>>);
     spawn(async move {
@@ -1612,25 +1583,23 @@ fn font_browser(version: Signal<u32>, message: Signal<String>, expanded: Signal<
     });
     let loading = move || installed.with(Option::is_none);
 
-    // 列表：导入的在前，再是系统字体；按搜索词过滤。
+    // 按搜索词过滤。
     let rows = computed(move || {
         let q = query.get().trim().to_lowercase();
-        let imported = imported.get();
-        let mut out: Vec<(String, bool)> = imported.iter().map(|f| (f.clone(), true)).collect();
-        installed.with(|list| {
-            if let Some(list) = list {
-                out.extend(list.iter().filter(|f| !imported.contains(f)).map(|f| (f.clone(), false)));
-            }
+        let out: Vec<String> = installed.with(|list| {
+            list.iter()
+                .flat_map(|list| list.iter())
+                .filter(|f| q.is_empty() || f.to_lowercase().contains(&q))
+                .cloned()
+                .collect()
         });
-        out.retain(|(f, _)| q.is_empty() || f.to_lowercase().contains(&q));
         Rc::new(out)
     });
     let count = computed(move || rows.with(|r| r.len()));
 
     let list = virtual_list(count, move |at| {
-        let row = computed(move || rows.with(|r| r.get(at.index()).cloned()));
-        let family = move || row.with(|r| r.as_ref().map(|r| r.0.clone()).unwrap_or_default());
-        let is_imported = move || row.with(|r| r.as_ref().is_some_and(|r| r.1));
+        let family = computed(move || rows.with(|r| r.get(at.index()).cloned().unwrap_or_default()));
+        let family = move || family.get();
         let selected = move || current().as_deref() == Some(family().as_str());
         view()
             .h(px(44.0))
@@ -1654,18 +1623,6 @@ fn font_browser(version: Signal<u32>, message: Signal<String>, expanded: Signal<
                     .text_size(px(15.0))
                     .text_color(fg()),
             )
-            .child(when(is_imported, || text("已导入").text_size(px(11.0)).text_color(faint())))
-            .child(when(is_imported, move || {
-                icon_button(|| Icon::Close, 12.0, "删除导入的字体", muted_fg, move || {
-                    let name = family();
-                    crate::fonts::remove_imported(&name);
-                    if current().as_deref() == Some(name.as_str()) {
-                        super::store::set_font(None);
-                    }
-                    version.update(|v| *v += 1);
-                    message.set(format!("已删除 {name}（重启后不再可用）"));
-                })
-            }))
             .child(when(selected, || icon(Icon::Play, 10.0, primary)))
     })
     .estimated_item_size(px(44.0))

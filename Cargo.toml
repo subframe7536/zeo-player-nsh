@@ -7,39 +7,46 @@ publish = false
 [workspace]
 
 [dependencies]
-# 与 nsh CLI 同版本（nsh --version），见 https://nsh.dev/docs/installation
+# NSH：与 nsh CLI 同版本（nsh --version），dev-dependencies 里的 nsh-engine / nsh-testing 一起改。
+# 见 https://nsh.dev/docs/installation
 nsh-core = "0.3.0"
 nsh-base = "0.3.0"
-lofty = "0.25"
+
+# 音频：解码、输出、重采样、系统媒体会话。
 symphonia = { version = "0.6", features = ["mp3", "flac", "wav"] }
 cpal = "0.18"
 rubato = "5"
 playwire = "2"
+
+# 曲库：标签、封面缩略图、扫描与文件夹监视。
+lofty = "0.25"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
 walkdir = "2"
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
+dunce = "1"
+
+# 持久化：数据 / 缓存目录与 JSON。
+dirs = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-dirs = "7"
-notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
-fontdb = "0.24.0"
-dunce = "1.0.5"
-font-enumeration = "0.9.0"
+
+# 已安装字体列表（macOS CoreText、Windows DirectWrite、Linux fontconfig）。
+font-enumeration = "0.9"
 
 # 系统文件夹选择器（NSOpenPanel / IFileDialog）；托盘图标与菜单。
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 rfd = { version = "0.17", default-features = false }
 tray-icon = "0.26"
 
-# macOS 用 CoreText 注册导入的字体（只对本进程）。
+# Windows：子类化窗口拦截 WM_CLOSE、托盘时收缩工作集、音频线程优先级。
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 
+# macOS：替换窗口代理的 windowShouldClose:，在主线程上调度。
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSResponder"] }
 dispatch2 = "0.3"
-objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFontManager"] }
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFURL", "CFError"] }
 
 # 界面测试（tests/ui.rs）：无头引擎运行根组件，不带 QuickJS。
 [dev-dependencies]

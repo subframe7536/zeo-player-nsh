@@ -163,8 +163,6 @@ pub fn player() -> &'static Player {
 
 /// 建立状态并启动轮询；在根组件里调用一次。
 pub fn install() -> Store {
-    // 导入的字体先注册，首帧文字就能用上。
-    crate::fonts::register_imported();
     let snap = player().state();
     let lib = library_store();
     let playback = signal(Playback {
@@ -364,41 +362,6 @@ pub fn set_font(font: Option<String>) {
 /// 根视图的字体家族。
 pub fn font_family() -> SharedString {
     store().library.with(|l| l.font.clone()).map_or_else(|| SharedString::from("system-ui"), SharedString::from)
-}
-
-/// 弹出系统文件选择器导入字体文件；返回（结果说明，第一个导入的家族名）。
-pub async fn import_fonts() -> Option<(String, Option<String>)> {
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    {
-        let picked = blocking(|| {
-            rfd::FileDialog::new()
-                .set_title("导入字体")
-                .add_filter("字体", crate::fonts::FONT_EXTENSIONS)
-                .pick_files()
-        })
-        .await
-        .ok()
-        .flatten()?;
-        let results = blocking(move || picked.iter().map(|p| crate::fonts::import(p)).collect::<Vec<_>>())
-            .await
-            .ok()?;
-        let mut lines = Vec::new();
-        let mut first = None;
-        for result in results {
-            match result {
-                Ok(families) => {
-                    first = first.or_else(|| families.first().cloned());
-                    lines.push(format!("已导入 {}", families.join("、")));
-                }
-                Err(error) => lines.push(error),
-            }
-        }
-        Some((lines.join("\n"), first))
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        Some(("此平台暂不支持导入字体".to_owned(), None))
-    }
 }
 
 /// 淡入淡出时长（立即生效并保存）。
