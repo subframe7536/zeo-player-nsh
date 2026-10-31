@@ -180,9 +180,14 @@ impl SearchFocus {
 /// 搜索框的高度。
 const SEARCH_H: f32 = 28.0;
 
-/// 标题栏：透明，浮在侧栏与内容区顶部，中间是应用图标与名称；两端让出
-/// 系统按钮（macOS 交通灯在左，Windows 标题栏按钮在右），其余区域拖动窗口。
+/// 标题栏：透明，浮在侧栏与内容区顶部，图标与名称相对整个窗口居中；
+/// 两侧留出同样宽的边距（取 macOS 交通灯与 Windows 窗口按钮里较宽的一侧），
+/// 窄窗口时也不会压到它们。其余区域拖动窗口。
 fn title_bar() -> View {
+    let inset = move || {
+        let bar = nsh_core::element::desktop::title_bar();
+        px(bar.left.0.max(controls_right()) + 12.0)
+    };
     view()
         .absolute()
         .top(px(0.0))
@@ -193,8 +198,7 @@ fn title_bar() -> View {
         .items_center()
         .justify_center()
         .window_drag(true)
-        .pl(move || px(nsh_core::element::desktop::title_bar().left.0 + 8.0))
-        .pr(move || px(controls_right() + 12.0))
+        .px(inset)
         .child(
             view()
                 .flex_row()

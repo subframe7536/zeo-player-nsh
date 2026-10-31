@@ -1,4 +1,6 @@
-//! 线条图标（24 × 24 SVG，data: URI）。颜色写进 SVG，按（图标, 尺寸, 颜色）
+//! 线条图标（24 × 24 SVG，data: URI）：基础图标用 Lucide（见 `Icon::body`），
+//! 播放 / 暂停键是自己画的形变图标（`play_pause`），Windows 窗口按钮按系统
+//! 按钮的尺寸画。颜色写进 SVG，按（图标, 尺寸, 颜色）
 //! 缓存；绑定读当前外观，切换深浅色时换图。SVG 声明的宽高就是显示尺寸：
 //! 光栅化按自然尺寸出图再缩放会糊边、粗细不匀（Windows 上尤其明显）。
 
@@ -11,9 +13,6 @@ use nsh_core::prelude::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
     Play,
-    Pause,
-    Prev,
-    Next,
     Volume,
     Mute,
     Folder,
@@ -31,8 +30,6 @@ pub enum Icon {
     Person,
     Refresh,
     Wave,
-    PlayLine,
-    PauseLine,
     PrevLine,
     NextLine,
     More,
@@ -47,6 +44,9 @@ pub enum Icon {
     Smart,
     Trash,
     Edit,
+    Heart,
+    /// 实心的心形（已喜欢）。
+    HeartFilled,
     /// Windows 窗口按钮（`ui::caption`）：字形占 24 格里的 4.5–19.5，按
     /// 16 pt 显示时为 10 pt 见方、线宽 1 pt，与系统按钮一致。
     #[cfg(target_os = "windows")]
@@ -60,45 +60,75 @@ pub enum Icon {
 }
 
 impl Icon {
+    /// 图标的 SVG 内容。基础图标取自 Lucide（lucide-static 1.66.0，ISC
+    /// 许可，<https://lucide.dev>），按原样使用：24 格、描边 2、圆头圆角。
+    /// 括号里是 Lucide 的图标名。
     fn body(self) -> &'static str {
         match self {
-            Icon::Play => r#"<path d="M8 5.2v13.6a1 1 0 0 0 1.5.86l11-6.8a1 1 0 0 0 0-1.72l-11-6.8A1 1 0 0 0 8 5.2z" fill="currentColor" stroke="none"/>"#,
-            Icon::Pause => r#"<rect x="6" y="4.5" width="4" height="15" rx="1.2" fill="currentColor" stroke="none"/><rect x="14" y="4.5" width="4" height="15" rx="1.2" fill="currentColor" stroke="none"/>"#,
-            Icon::Prev => r#"<path d="M18.5 5.6v12.8a.8.8 0 0 1-1.25.66L8.6 12.66a.8.8 0 0 1 0-1.32l8.65-6.4a.8.8 0 0 1 1.25.66z" fill="currentColor" stroke="none"/><rect x="5" y="5" width="2.4" height="14" rx="1.2" fill="currentColor" stroke="none"/>"#,
-            Icon::Next => r#"<path d="M5.5 5.6v12.8a.8.8 0 0 0 1.25.66l8.65-6.4a.8.8 0 0 0 0-1.32L6.75 4.94a.8.8 0 0 0-1.25.66z" fill="currentColor" stroke="none"/><rect x="16.6" y="5" width="2.4" height="14" rx="1.2" fill="currentColor" stroke="none"/>"#,
-            Icon::Volume => r#"<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5z" fill="currentColor" stroke="none"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11"/>"#,
-            Icon::Mute => r#"<path d="M4 9.5v5h3.5L12 18V6L7.5 9.5z" fill="currentColor" stroke="none"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>"#,
-            Icon::Folder => r#"<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.5h8A1.5 1.5 0 0 1 20.5 9.5V17a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17z"/>"#,
-            Icon::Mic => r#"<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/>"#,
-            Icon::Disc => r#"<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/>"#,
-            Icon::Tag => r#"<path d="M3.5 11V4.5A1 1 0 0 1 4.5 3.5H11l9.5 9.5-7 7z"/><circle cx="7.8" cy="7.8" r="1.3" fill="currentColor" stroke="none"/>"#,
-            Icon::Settings => r#"<path d="M4 7h10M18 7h2M4 12h4M12 12h8M4 17h13"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="19" cy="17" r="2"/>"#,
-            Icon::ChevronDown => r#"<path d="M6 9.5l6 6 6-6"/>"#,
-            Icon::ChevronRight => r#"<path d="M9.5 6l6 6-6 6"/>"#,
-            Icon::ChevronLeft => r#"<path d="M14.5 6l-6 6 6 6"/>"#,
-            Icon::Close => r#"<path d="M6 6l12 12M18 6L6 18"/>"#,
-            Icon::Expand => r#"<path d="M15 4h5v5M9 20H4v-5M20 4l-6.5 6.5M4 20l6.5-6.5"/>"#,
-            Icon::Note => r#"<path d="M9 17.5V5l10-2v11.5"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="14.5" r="2.5"/>"#,
-            Icon::Person => r#"<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>"#,
-            Icon::Plus => r#"<path d="M12 5v14M5 12h14"/>"#,
-            Icon::Refresh => r#"<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>"#,
-            Icon::PlayLine => r#"<path d="M7.5 5.3v13.4a.9.9 0 0 0 1.37.77l10.7-6.7a.9.9 0 0 0 0-1.54L8.87 4.53A.9.9 0 0 0 7.5 5.3z"/>"#,
-            Icon::PauseLine => r#"<path d="M8.5 5v14M15.5 5v14"/>"#,
-            Icon::PrevLine => r#"<path d="M6 5.5v13M18 6.2v11.6a.7.7 0 0 1-1.1.57L9.4 12.57a.7.7 0 0 1 0-1.14l7.5-5.8a.7.7 0 0 1 1.1.57z"/>"#,
-            Icon::NextLine => r#"<path d="M18 5.5v13M6 6.2v11.6a.7.7 0 0 0 1.1.57l7.5-5.8a.7.7 0 0 0 0-1.14L7.1 5.63A.7.7 0 0 0 6 6.2z"/>"#,
-            Icon::More => r#"<circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none"/>"#,
-            Icon::Reveal => r#"<path d="M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4l2 2.5h8A1.5 1.5 0 0 1 20.5 9.5V17a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 17z"/><path d="M12 11v5M9.5 13.5 12 11l2.5 2.5"/>"#,
-            Icon::Queue => r#"<path d="M4 6.5h12M4 11.5h12M4 16.5h7"/><path d="M15.5 14.5v5l4-2.5z" fill="currentColor" stroke="none"/>"#,
-            Icon::Copy => r#"<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>"#,
-            Icon::Wave => r#"<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>"#,
-            Icon::Search => r#"<circle cx="11" cy="11" r="7"/><path d="M20.5 20.5 16.6 16.6"/>"#,
+            // play
+            Icon::Play => r#"<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>"#,
+            // volume-2
+            Icon::Volume => r#"<path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/>"#,
+            // volume-x
+            Icon::Mute => r#"<path d="M11 4.702a.7.7 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.7.7 0 0 0 11 19.298z"/><path d="m16.5 14.5 5-5"/><path d="m16.5 9.5 5 5"/>"#,
+            // folder
+            Icon::Folder => r#"<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>"#,
+            // mic
+            Icon::Mic => r#"<path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/>"#,
+            // disc-3
+            Icon::Disc => r#"<circle cx="12" cy="12" r="10"/><path d="M6 12c0-1.7.7-3.2 1.8-4.2"/><circle cx="12" cy="12" r="2"/><path d="M18 12c0 1.7-.7 3.2-1.8 4.2"/>"#,
+            // tag
+            Icon::Tag => r#"<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>"#,
+            // settings
+            Icon::Settings => r#"<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/>"#,
+            // chevron-down / chevron-right / chevron-left
+            Icon::ChevronDown => r#"<path d="m6 9 6 6 6-6"/>"#,
+            Icon::ChevronRight => r#"<path d="m9 18 6-6-6-6"/>"#,
+            Icon::ChevronLeft => r#"<path d="m15 18-6-6 6-6"/>"#,
+            // x
+            Icon::Close => r#"<path d="M18 6 6 18"/><path d="m6 6 12 12"/>"#,
+            // maximize-2
+            Icon::Expand => r#"<path d="M15 3h6v6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/><path d="M9 21H3v-6"/>"#,
+            // music
+            Icon::Note => r#"<path d="M21 16V3a1 1 0 0 0-1.28-.96l-10 2.917a1 1 0 0 0-.72.96V19"/><circle cx="18" cy="16" r="3"/><circle cx="6" cy="19" r="3"/>"#,
+            // user
+            Icon::Person => r#"<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>"#,
+            // plus
+            Icon::Plus => r#"<path d="M5 12h14"/><path d="M12 5v14"/>"#,
+            // refresh-cw
+            Icon::Refresh => r#"<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>"#,
+            // skip-back
+            Icon::PrevLine => r#"<path d="M17.971 4.285A2 2 0 0 1 21 6v12a2 2 0 0 1-3.029 1.715l-9.997-5.998a2 2 0 0 1-.003-3.432z"/><path d="M3 20V4"/>"#,
+            // skip-forward
+            Icon::NextLine => r#"<path d="M21 4v16"/><path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z"/>"#,
+            // ellipsis
+            Icon::More => r#"<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>"#,
+            // folder-up
+            Icon::Reveal => r#"<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10v6"/><path d="m9 13 3-3 3 3"/>"#,
+            // list-end
+            Icon::Queue => r#"<path d="M16 5H3"/><path d="M16 12H3"/><path d="M9 19H3"/><path d="m16 16-3 3 3 3"/><path d="M21 5v12a2 2 0 0 1-2 2h-6"/>"#,
+            // copy
+            Icon::Copy => r#"<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>"#,
+            // audio-lines
+            Icon::Wave => r#"<path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/>"#,
+            // search
+            Icon::Search => r#"<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>"#,
+            // repeat / repeat-1 / shuffle
             Icon::Repeat => r#"<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>"#,
             Icon::RepeatOne => r#"<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/><path d="M11 10h1v4"/>"#,
             Icon::Shuffle => r#"<path d="m18 14 4 4-4 4"/><path d="m18 2 4 4-4 4"/><path d="M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22"/><path d="M2 6h1.972a4 4 0 0 1 3.6 2.2"/><path d="M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45"/>"#,
-            Icon::Playlist => r#"<path d="M4 6h12M4 11h12M4 16h7"/><path d="M18 18V9.5l3-.8"/><circle cx="16.2" cy="18" r="1.9"/>"#,
-            Icon::Smart => r#"<path d="M11 3.5l1.8 4.7 4.7 1.8-4.7 1.8L11 16.5l-1.8-4.7L4.5 10l4.7-1.8z"/><path d="M18 14.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>"#,
-            Icon::Trash => r#"<path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l.9 12.2a1 1 0 0 0 1 .9h7.2a1 1 0 0 0 1-.9L17.5 7M10 11v5.5M14 11v5.5"/>"#,
-            Icon::Edit => r#"<path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M14.5 7.5l2 2"/>"#,
+            // list-music
+            Icon::Playlist => r#"<path d="M16 5H3"/><path d="M11 12H3"/><path d="M11 19H3"/><path d="M21 16V5"/><circle cx="18" cy="16" r="3"/>"#,
+            // sparkles
+            Icon::Smart => r#"<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"/><path d="M20 2v4"/><path d="M22 4h-4"/><circle cx="4" cy="20" r="2"/>"#,
+            // trash-2
+            Icon::Trash => r#"<path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>"#,
+            // pencil
+            Icon::Edit => r#"<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>"#,
+            // heart（实心版同一路径加填充）
+            Icon::Heart => r#"<path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/>"#,
+            Icon::HeartFilled => r#"<path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5" fill="currentColor"/>"#,
+            // Windows 窗口按钮：不是 Lucide，按系统按钮的尺寸画（见上）。
             #[cfg(target_os = "windows")]
             Icon::WinMinimize => r#"<path d="M4.5 12h15" stroke-width="1.5" stroke-linecap="butt"/>"#,
             #[cfg(target_os = "windows")]
@@ -145,7 +175,7 @@ pub fn icon_uri(icon: Icon, size: f32, color: Hsla) -> SharedString {
             .entry((icon, size.to_bits(), key))
             .or_insert_with(|| {
                 let svg = format!(
-                    r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="{size}" height="{size}" fill="none" stroke="{css}" color="{css}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
+                    r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="{size}" height="{size}" fill="none" stroke="{css}" color="{css}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
                     icon.body()
                 );
                 format!("data:image/svg+xml,{}", percent_encode(&svg)).into()
@@ -197,4 +227,73 @@ fn logo_svg(size: f32) -> SharedString {
 /// 应用图标（标题栏）：`size` 点的 logo。
 pub fn logo(size: f32) -> Image {
     image(logo_svg(size)).size(px(size)).pointer_events(PointerEvents::None)
+}
+
+/// 播放 / 暂停图标之间的形变：两块四边形，播放时拼成一个三角形（左块
+/// 是三角形的左半，右块是右半，接缝两侧同色），暂停时各自变成一根竖条。
+/// 填充加 [`MORPH_STROKE`] 宽的圆角描边，圆角半径是描边宽的一半。顶点
+/// 坐标在 24 × 24 格里，是参考图形（播放三角 (7, 4.3)–(18.7, 12)–(7, 19.7)、
+/// 暂停竖条 6–9 / 15–18 × 6–18，描边 2）向内收了半个多出的描边宽：
+/// 三角形绕内心缩小，竖条四边各收 0.75，加粗描边后外轮廓与参考相同。
+const PLAY_SHAPES: [[(f32, f32); 4]; 2] = [
+    [(7.75, 5.69), (12.91, 9.09), (12.91, 14.91), (7.75, 18.31)],
+    [(12.91, 9.09), (17.34, 12.0), (17.34, 12.0), (12.91, 14.91)],
+];
+const PAUSE_SHAPES: [[(f32, f32); 4]; 2] = [
+    [(6.75, 6.75), (8.25, 6.75), (8.25, 17.25), (6.75, 17.25)],
+    [(15.75, 6.75), (17.25, 6.75), (17.25, 17.25), (15.75, 17.25)],
+];
+/// 描边宽（24 格里）：圆角半径为它的一半。
+const MORPH_STROKE: f32 = 3.5;
+/// 形变时长与缓动（easeOutQuart 的近似）。
+const MORPH_MS: f32 = 320.0;
+const MORPH_EASE: Easing = Easing::Bezier(0.25, 1.0, 0.5, 1.0);
+
+/// 播放 / 暂停键的图标：`playing` 为真时显示暂停，切换时顶点逐个移动
+/// 过去。顶点绑定在动画值上，由平台在绘制时读取，形变不重跑界面代码。
+/// 系统开了「减弱动态效果」时直接切换。
+pub fn play_pause(
+    size: f32,
+    playing: impl Fn() -> bool + 'static,
+    tint: impl Fn() -> AdaptiveColor + 'static,
+) -> CanvasView {
+    let target = |on: bool| if on { 1.0 } else { 0.0 };
+    let morph = animated_value(target(untracked(&playing)));
+    effect(move || {
+        let to = target(playing());
+        if untracked(reduce_motion) {
+            morph.set(to);
+        } else {
+            let _ = morph.timing(to, MORPH_MS, MORPH_EASE);
+        }
+    });
+    let lerp = move |a: f32, b: f32| morph.interpolate(&[0.0, 1.0], &[a, b]);
+    let points: [[(AnimatedNode, AnimatedNode); 4]; 2] = std::array::from_fn(|s| {
+        std::array::from_fn(|i| {
+            let (play, pause) = (PLAY_SHAPES[s][i], PAUSE_SHAPES[s][i]);
+            (lerp(play.0, pause.0), lerp(play.1, pause.1))
+        })
+    });
+    let scale = size / 24.0;
+    canvas(move || {
+        let c = color(tint());
+        let mut p = Painter::new()
+            .scale(scale, scale)
+            .fill_color(c)
+            .stroke_color(c)
+            .line_width(MORPH_STROKE)
+            .line_join(nsh_core::canvas::LineJoin::Round)
+            .begin_path();
+        for [a, b, c, d] in &points {
+            p = p
+                .move_to(&a.0, &a.1)
+                .line_to(&b.0, &b.1)
+                .line_to(&c.0, &c.1)
+                .line_to(&d.0, &d.1)
+                .close_path();
+        }
+        p.fill().stroke()
+    })
+    .size(px(size))
+    .pointer_events(PointerEvents::None)
 }

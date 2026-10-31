@@ -109,7 +109,8 @@ pub fn add_to_submenu(paths: impl Fn() -> Vec<String> + Clone + 'static) -> AnyE
             for p in manual {
                 let paths = paths.clone();
                 let id = p.id;
-                out.push(item(p.name, Some(Icon::Playlist), move || store::add_to_playlist(id, paths())));
+                let glyph = if p.favorite { Icon::Heart } else { Icon::Playlist };
+                out.push(item(p.name, Some(glyph), move || store::add_to_playlist(id, paths())));
             }
             out
         }))
@@ -180,8 +181,10 @@ pub fn sidebar_section() -> View {
             scroll().flex_1().child(
                 view().px(px(10.0)).pb(px(8.0)).gap(px(2.0)).child(dynamic(move || {
                     let lists = s.playlists.get();
-                    if lists.is_empty() {
-                        return vec![
+                    // 「我喜欢」固定在最前（`ensure_favorites`），其余按创建顺序。
+                    let mut rows: Vec<AnyElement> = lists.iter().map(sidebar_row).collect();
+                    if lists.iter().all(|p| p.favorite) {
+                        rows.push(
                             text("点 + 新建歌单，或在曲目上点右键添加。")
                                 .text_size(px(12.0))
                                 .line_height(px(18.0))
@@ -189,17 +192,25 @@ pub fn sidebar_section() -> View {
                                 .px(px(10.0))
                                 .py(px(4.0))
                                 .into_element(),
-                        ];
+                        );
                     }
-                    lists.iter().map(|p| sidebar_row(p.id, p.name.clone(), p.is_smart())).collect()
+                    rows
                 })),
             ),
         )
 }
 
-fn sidebar_row(id: u64, name: String, smart: bool) -> AnyElement {
+fn sidebar_row(p: &Playlist) -> AnyElement {
+    let (id, name, smart, favorite) = (p.id, p.name.clone(), p.is_smart(), p.favorite);
     let nav = global::<Nav>();
     let active = move || nav.get() == Nav::Playlist(id);
+    let glyph = if favorite {
+        Icon::Heart
+    } else if smart {
+        Icon::Smart
+    } else {
+        Icon::Playlist
+    };
     let row = view()
         .h(px(32.0))
         .flex_row()
@@ -218,7 +229,7 @@ fn sidebar_row(id: u64, name: String, smart: bool) -> AnyElement {
             store().search.set(String::new());
             nav.set(Nav::Playlist(id));
         })
-        .child(icon(if smart { Icon::Smart } else { Icon::Playlist }, 16.0, move || {
+        .child(icon(glyph, 16.0, move || {
             if active() { primary() } else { sidebar_fg() }
         }))
         .child(
@@ -228,6 +239,10 @@ fn sidebar_row(id: u64, name: String, smart: bool) -> AnyElement {
                 .text_size(px(14.0))
                 .text_color(move || if active() { fg() } else { sidebar_fg() }),
         );
+    // 「我喜欢」不能改名或删除：没有右键菜单。
+    if favorite {
+        return row.into_element();
+    }
     let menu = context_menu().trigger(row);
     popup!(menu, 180.0)
         .child(item(if smart { "编辑条件…" } else { "重命名…" }, Some(Icon::Edit), move || store::edit_playlist(id)))
@@ -268,6 +283,7 @@ pub fn page(id: u64) -> View {
         Rc::new(list.with(|p| p.as_ref().map(|p| p.tracks(&tracks)).unwrap_or_default()))
     });
     let smart = move || list.with(|p| p.as_ref().is_some_and(Playlist::is_smart));
+    let favorite = move || list.with(|p| p.as_ref().is_some_and(|p| p.favorite));
     let title = move || list.with(|p| p.as_ref().map(|p| p.name.clone()).unwrap_or_default());
     let subtitle = move || {
         let kind = if smart() { "智能歌单" } else { "歌单" };
@@ -276,6 +292,7 @@ pub fn page(id: u64) -> View {
             if v.is_empty() { kind.to_owned() } else { format!("{kind} · {} 首 · {}", v.len(), format_total(total)) }
         })
     };
+    // 「我喜欢」只有「播放」，不能改名或删除。
     let actions = view()
         .flex_row()
         .items_center()
@@ -283,11 +300,17 @@ pub fn page(id: u64) -> View {
         .child(when(move || items.with(|v| !v.is_empty()), move || {
             pill_button(Icon::Play, "播放", move || items.with_untracked(|v| play_list(v, 0)))
         }))
-        .child(
-            when(smart, move || outline_button(Icon::Edit, "编辑条件", move || store::edit_playlist(id)))
-                .otherwise(move || outline_button(Icon::Edit, "重命名", move || store::edit_playlist(id))),
-        )
-        .child(icon_button(|| Icon::Trash, 16.0, "删除歌单", muted_fg, move || confirm_delete(id)));
+        .child(when(move || !favorite(), move || {
+            view()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    when(smart, move || outline_button(Icon::Edit, "编辑条件", move || store::edit_playlist(id)))
+                        .otherwise(move || outline_button(Icon::Edit, "重命名", move || store::edit_playlist(id))),
+                )
+                .child(icon_button(|| Icon::Trash, 16.0, "删除歌单", muted_fg, move || confirm_delete(id)))
+        }));
     let header = view()
         .child(page_header(title, subtitle, None, Some(actions.into_element())))
         .child(track_columns(Columns::ALL));
@@ -295,6 +318,8 @@ pub fn page(id: u64) -> View {
         if smart() {
             empty_state(Icon::Smart, "没有符合条件的曲目", "调整条件后，符合的曲目会自动出现在这里。")
                 .child(view().mt(px(12.0)).child(outline_button(Icon::Edit, "编辑条件", move || store::edit_playlist(id))))
+        } else if favorite() {
+            empty_state(Icon::Heart, "还没有喜欢的曲目", "点播放条上的心形按钮，喜欢的曲目会出现在这里。")
         } else {
             empty_state(Icon::Playlist, "歌单是空的", "在任意曲目上点右键，选「添加到歌单」。")
         }

@@ -200,7 +200,11 @@ pub fn install() -> Store {
         hidden: signal(false),
         close_prompt: signal(false),
         search: signal(String::new()),
-        playlists: signal(Same(Arc::new(crate::playlists::load()))),
+        playlists: signal(Same(Arc::new({
+            let mut lists = crate::playlists::load();
+            crate::playlists::ensure_favorites(&mut lists);
+            lists
+        }))),
         editor: signal(None),
     };
     STORE.with(|cell| cell.set(Some(s)));
@@ -450,9 +454,9 @@ pub fn new_playlist(smart: bool, add: Vec<String>) {
     store().editor.set(Some(Draft { id: None, name: name.to_owned(), rule: smart.then(Rule::default), add }));
 }
 
-/// 打开编辑弹窗。
+/// 打开编辑弹窗（「我喜欢」不能改名）。
 pub fn edit_playlist(id: u64) {
-    if let Some(p) = playlist(id) {
+    if let Some(p) = playlist(id).filter(|p| !p.favorite) {
         let rule = match p.kind {
             Kind::Smart { rule } => Some(rule),
             Kind::Manual { .. } => None,
@@ -483,7 +487,7 @@ pub fn save_draft(draft: Draft) -> u64 {
                 Some(rule) => Kind::Smart { rule },
                 None => Kind::Manual { tracks: dedup(draft.add) },
             };
-            lists.push(Playlist { id, name, kind });
+            lists.push(Playlist { id, name, kind, favorite: false });
         }
     });
     store().editor.set(None);
@@ -499,8 +503,11 @@ fn dedup(paths: Vec<String>) -> Vec<String> {
     paths.into_iter().filter(|p| seen.insert(p.clone())).collect()
 }
 
-/// 删除歌单（正看着它时回到文件夹页）。
+/// 删除歌单（正看着它时回到文件夹页）。「我喜欢」不能删除。
 pub fn delete_playlist(id: u64) {
+    if playlist(id).is_none_or(|p| p.favorite) {
+        return;
+    }
     change_playlists(|lists| lists.retain(|p| p.id != id));
     let nav = global::<super::Nav>();
     if nav.get_untracked() == super::Nav::Playlist(id) {
@@ -540,6 +547,38 @@ pub fn remove_from_playlist(id: u64, path: &str) {
             tracks.retain(|p| p != path);
         }
     });
+}
+
+/// `path` 在「我喜欢」里。读取即订阅。
+pub fn is_liked(path: &str) -> bool {
+    store().playlists.with(|l| {
+        l.iter().any(|p| p.favorite && matches!(&p.kind, Kind::Manual { tracks } if tracks.iter().any(|t| t == path)))
+    })
+}
+
+/// 喜欢 / 取消喜欢 `path`：加到「我喜欢」最前面，或从中移除。
+pub fn toggle_like(path: &str) {
+    change_playlists(|lists| {
+        if let Some(Playlist { kind: Kind::Manual { tracks }, .. }) = lists.iter_mut().find(|p| p.favorite) {
+            if let Some(at) = tracks.iter().position(|t| t == path) {
+                tracks.remove(at);
+            } else {
+                tracks.insert(0, path.to_owned());
+            }
+        }
+    });
+}
+
+/// 当前曲目在「我喜欢」里。读取即订阅。
+pub fn current_liked() -> bool {
+    store().track.with(|t| t.path.clone()).is_some_and(|p| is_liked(&p))
+}
+
+/// 喜欢 / 取消喜欢当前曲目（没有曲目时什么也不做）。
+pub fn toggle_like_current() {
+    if let Some(path) = store().track.with_untracked(|t| t.path.clone()) {
+        toggle_like(&path);
+    }
 }
 
 // --- 命令 ---------------------------------------------------------------------

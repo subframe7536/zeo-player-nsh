@@ -15,7 +15,14 @@ pub struct Playlist {
     pub name: String,
     #[serde(flatten)]
     pub kind: Kind,
+    /// 固定的「我喜欢」歌单（手动歌单，不能改名或删除）。旧文件里没有
+    /// 这个字段；旧版本读到它会当作普通手动歌单。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub favorite: bool,
 }
+
+/// 「我喜欢」歌单的名称。
+pub const FAVORITES_NAME: &str = "我喜欢";
 
 /// 歌单的种类。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -466,6 +473,26 @@ pub fn next_id(playlists: &[Playlist]) -> u64 {
     playlists.iter().map(|p| p.id).max().unwrap_or(0) + 1
 }
 
+/// 保证有且只有一个「我喜欢」歌单，并排在最前（没有时新建一个空的）。
+pub fn ensure_favorites(playlists: &mut Vec<Playlist>) {
+    let mut found = false;
+    for p in playlists.iter_mut() {
+        // 只认第一个；其余的（手改文件才会有）降为普通歌单。
+        p.favorite = p.favorite && !found && !p.is_smart();
+        found |= p.favorite;
+    }
+    if let Some(at) = playlists.iter().position(|p| p.favorite) {
+        let favorites = playlists.remove(at);
+        playlists.insert(0, favorites);
+    } else {
+        let id = next_id(playlists);
+        playlists.insert(
+            0,
+            Playlist { id, name: FAVORITES_NAME.to_owned(), kind: Kind::Manual { tracks: Vec::new() }, favorite: true },
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,6 +582,7 @@ mod tests {
             id: 1,
             name: "x".into(),
             kind: Kind::Manual { tracks: vec!["/m/rock/c.mp3".into(), "/gone.mp3".into(), "/m/rock/a.flac".into()] },
+            favorite: false,
         };
         assert_eq!(names(&list.tracks(&lib)), ["c", "a"]);
     }
@@ -564,7 +592,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("zeo-player-playlists-{}", std::process::id()));
         let path = dir.join("playlists.json");
         let lists = vec![
-            Playlist { id: 1, name: "手动".into(), kind: Kind::Manual { tracks: vec!["/a.mp3".into()] } },
+            Playlist { id: 1, name: "手动".into(), kind: Kind::Manual { tracks: vec!["/a.mp3".into()] }, favorite: false },
             Playlist {
                 id: 2,
                 name: "智能".into(),
@@ -576,6 +604,7 @@ mod tests {
                         limit: Some(25),
                     },
                 },
+                favorite: false,
             },
         ];
         save_to(&path, &lists).unwrap();
@@ -583,5 +612,28 @@ mod tests {
         assert_eq!(next_id(&lists), 3);
         assert!(load_from(&dir.join("missing.json")).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn favorites_are_created_once_and_kept_first() {
+        let manual = |id: u64, favorite: bool| Playlist {
+            id,
+            name: format!("p{id}"),
+            kind: Kind::Manual { tracks: Vec::new() },
+            favorite,
+        };
+        // 旧文件：没有「我喜欢」，新建一个，id 不与现有的冲突。
+        let mut lists = vec![manual(1, false), manual(4, false)];
+        ensure_favorites(&mut lists);
+        assert!(lists[0].favorite && lists[0].name == FAVORITES_NAME && lists[0].id == 5);
+        assert_eq!(lists.iter().filter(|p| p.favorite).count(), 1);
+        // 已有的移到最前；多出来的降为普通歌单。
+        let mut lists = vec![manual(1, false), manual(2, true), manual(3, true)];
+        ensure_favorites(&mut lists);
+        assert_eq!(lists.iter().map(|p| (p.id, p.favorite)).collect::<Vec<_>>(), [(2, true), (1, false), (3, false)]);
+        // 旧文件里没有 favorite 字段也能读；普通歌单不写这个字段。
+        let old: Playlist = serde_json::from_str(r#"{"id":1,"name":"x","kind":"manual","tracks":[]}"#).unwrap();
+        assert!(!old.favorite);
+        assert!(!serde_json::to_string(&old).unwrap().contains("favorite"));
     }
 }

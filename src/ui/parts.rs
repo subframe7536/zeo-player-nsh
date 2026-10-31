@@ -411,50 +411,61 @@ pub fn scrub(
         .on_responder_release(move |e: &ResponderEvent| on_release(fraction(e.location.x.0)))
 }
 
-/// 细进度条（`fraction` 0..1），轨道与填充颜色。
-pub fn thin_bar(
-    fraction: impl Fn() -> f64 + 'static,
-    track: AdaptiveColor,
-    fill: AdaptiveColor,
-) -> View {
-    bar(fraction, track, fill, false)
-}
+/// 滑块的高度（可点击区域）、轨道粗细与 thumb 直径。
+const SLIDER_H: f32 = 18.0;
+const TRACK_H: f32 = 4.0;
+const THUMB: f32 = 12.0;
 
-/// 细进度条，鼠标靠近时变粗（`transition_transform` 过渡）：音量条用。
-pub fn growing_bar(
-    fraction: impl Fn() -> f64 + 'static,
+/// 滑块：细轨道 + 填充，鼠标移入（或拖动中）时在当前位置显示圆形 thumb，
+/// 轨道本身不缩放。横向拖动取比例（0..1）：按下/移动调 `on_move`，抬起调
+/// `on_release`。
+///
+/// nsh-base 0.3.0 没有 slider 组件，这里自己组合（见 README「待上游」）。
+pub fn slider(
+    fraction: impl Fn() -> f64 + Copy + 'static,
     track: AdaptiveColor,
     fill: AdaptiveColor,
+    thumb: AdaptiveColor,
+    on_move: impl Fn(f64) + 'static,
+    on_release: impl Fn(f64) + 'static,
 ) -> View {
-    bar(fraction, track, fill, true)
-}
-
-fn bar(
-    fraction: impl Fn() -> f64 + 'static,
-    track: AdaptiveColor,
-    fill: AdaptiveColor,
-    grow: bool,
-) -> View {
+    let dragging = signal(false);
+    let at = move || relative(fraction().clamp(0.0, 1.0) as f32);
     let pill = view()
-        .h(px(4.0))
+        .h(px(TRACK_H))
         .w_full()
         .rounded_full()
         .bg(track)
         .overflow_hidden()
         .pointer_events(PointerEvents::None)
-        .child(
-            view()
-                .h_full()
-                .rounded_full()
-                .bg(fill)
-                .w(move || relative(fraction().clamp(0.0, 1.0) as f32)),
-        );
-    let pill = if grow {
-        pill.group_hover(|s| s.scale_y(1.75)).transition_transform().duration(140.0)
-    } else {
-        pill
-    };
-    view().h(px(18.0)).justify_center().group().child(pill)
+        .child(view().h_full().rounded_full().bg(fill).w(at));
+    let knob = view()
+        .absolute()
+        .top(px((SLIDER_H - THUMB) / 2.0))
+        .left(at)
+        .ml(px(-THUMB / 2.0))
+        .size(px(THUMB))
+        .rounded_full()
+        .bg(thumb)
+        .shadow_sm()
+        .pointer_events(PointerEvents::None)
+        .opacity(0.0)
+        .group_hover(|st| st.opacity(1.0))
+        .style_when(move || dragging.get(), |st| st.opacity(1.0))
+        .transition_opacity()
+        .duration(120.0);
+    let area = view().h(px(SLIDER_H)).justify_center().group().child(pill).child(knob);
+    scrub(
+        area,
+        move |f| {
+            dragging.set(true);
+            on_move(f);
+        },
+        move |f| {
+            dragging.set(false);
+            on_release(f);
+        },
+    )
 }
 
 /// 当前播放进度（拖动时为预览）。

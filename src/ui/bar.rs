@@ -5,7 +5,7 @@ use std::rc::Rc;
 use nsh_core::prelude::*;
 
 use super::icons::Icon;
-use super::parts::{cover, growing_bar, icon_button, progress_fraction, scrub, shown_time, thin_bar};
+use super::parts::{cover, icon_button, progress_fraction, shown_time, slider};
 use super::store::{format_time, player, seek_to, set_volume, store, toggle_mute};
 use super::theme::*;
 use crate::audio::LoopMode;
@@ -57,45 +57,50 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 ),
         );
 
+    // 与全屏页的控制一致：线框的上一首 / 下一首，播放键没有底色、图标在
+    // 播放与暂停之间形变（`icons::play_pause`）。
     let play = view()
-        .size(px(36.0))
+        .size(px(40.0))
         .rounded_full()
-        .bg(fg())
         .items_center()
         .justify_center()
         .role(AccessibilityRole::Button)
         .label("播放/暂停")
-        .hover(|st| st.scale(1.05))
-        .active(|st| st.scale(0.95).opacity(0.85))
+        .hover(|st| st.bg(hover()))
+        .active(|st| st.scale(0.92))
         .transition_transform()
         .duration(120.0)
         .on_press(|| player().toggle())
-        .child(super::icons::icon_dyn(
-            move || if s.playback.with(|p| p.playing) { Icon::Pause } else { Icon::Play },
-            16.0,
-            bg,
-        ));
+        .child(super::icons::play_pause(28.0, move || s.playback.with(|p| p.playing), fg));
 
     let mode_icon = move || match s.playback.with(|p| p.loop_mode) {
         LoopMode::List => Icon::Repeat,
         LoopMode::Single => Icon::RepeatOne,
         LoopMode::Random => Icon::Shuffle,
     };
+    // 播放键最大，上一首 / 下一首次之，两侧的循环模式与喜欢最小。
     let controls = view()
         .flex_row()
         .items_center()
         .justify_center()
-        .gap(px(12.0))
+        .gap(px(10.0))
         .child(icon_button(
             mode_icon,
-            15.0,
+            14.0,
             "循环模式（顺序 / 单曲 / 随机）",
             move || if s.playback.with(|p| p.loop_mode) == LoopMode::List { muted_fg() } else { primary() },
             super::store::cycle_loop_mode,
         ))
-        .child(icon_button(|| Icon::Prev, 16.0, "上一首", fg, || player().previous()))
+        .child(icon_button(|| Icon::PrevLine, 15.0, "上一首", fg, || player().previous()))
         .child(play)
-        .child(icon_button(|| Icon::Next, 16.0, "下一首", fg, || player().next()));
+        .child(icon_button(|| Icon::NextLine, 15.0, "下一首", fg, || player().next()))
+        .child(icon_button(
+            || if super::store::current_liked() { Icon::HeartFilled } else { Icon::Heart },
+            14.0,
+            "喜欢",
+            like_red,
+            super::store::toggle_like_current,
+        ));
 
     let duration = move || s.playback.with(|p| p.duration);
     let progress = view()
@@ -112,17 +117,23 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 .tabular_nums()
                 .text_color(muted_fg()),
         )
-        .child(scrub(
-            view().flex_1().child(thin_bar(progress_fraction, muted(), fg())),
-            move |f| s.seek_preview.set(Some(f * duration())),
-            move |f| {
-                if has_track() {
-                    seek_to(f * duration())
-                } else {
-                    s.seek_preview.set(None)
-                }
-            },
-        ))
+        .child(
+            slider(
+                progress_fraction,
+                muted(),
+                fg(),
+                fg(),
+                move |f| s.seek_preview.set(Some(f * duration())),
+                move |f| {
+                    if has_track() {
+                        seek_to(f * duration())
+                    } else {
+                        s.seek_preview.set(None)
+                    }
+                },
+            )
+            .flex_1(),
+        )
         .child(
             text(move || format_time(duration()))
                 .w(px(40.0))
@@ -153,11 +164,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
             muted_fg,
             toggle_mute,
         ))
-        .child(scrub(
-            view().w(px(96.0)).child(growing_bar(volume, muted(), muted_fg())),
-            set_volume,
-            set_volume,
-        ))
+        .child(slider(volume, muted(), muted_fg(), fg(), set_volume, set_volume).w(px(96.0)))
         .child(
             icon_button(|| Icon::Queue, 16.0, "播放队列", move || if queue_open.get() { primary() } else { muted_fg() }, move || {
                 queue_open.update(|o| *o = !*o)

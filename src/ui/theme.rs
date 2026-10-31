@@ -59,6 +59,11 @@ pub fn hover() -> AdaptiveColor {
     theme().color("hover").unwrap_or(theme().accent)
 }
 
+/// 「喜欢」的红色（心形的描边与填充）。
+pub fn like_red() -> AdaptiveColor {
+    AdaptiveColor::rgb(0xe5484d, 0xf2555a)
+}
+
 /// 全屏页上的白色（`alpha` 透明度）。
 pub fn white_a(alpha: f32) -> AdaptiveColor {
     AdaptiveColor::rgb(0xffffff, 0xffffff).opacity(alpha)

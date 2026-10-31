@@ -10,7 +10,8 @@ use nsh_base::{menu, menu_item, menu_separator};
 use nsh_core::prelude::*;
 
 use super::icons::{icon, icon_dyn, Icon};
-use super::parts::{progress_fraction, scrub, shown_time};
+use crate::audio::LoopMode;
+use super::parts::{progress_fraction, scrub, shown_time, slider};
 use super::store::{format_time, player, seek_to, set_volume, store, toggle_mute};
 use super::theme::*;
 use crate::metadata::MetaInfo;
@@ -64,12 +65,12 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
         )
         .child(view().absolute().inset(px(0.0)).bg(black_a(0.5)));
 
-    // 收起按钮在右上角：macOS 上与交通灯同一行居中；Windows 上让到窗口
-    // 按钮（它们占标题栏右侧）下方。
+    // 收起按钮在标题栏这一行里垂直居中、靠右：Windows 上紧挨窗口按钮
+    // 左边，macOS 上（右侧没有系统按钮）就在窗口右边缘。
     let close_button = view()
         .absolute()
-        .top(move || px(if controls_right() > 0.0 { top_inset() + 8.0 } else { (top_inset() - 32.0) / 2.0 }))
-        .right(px(18.0))
+        .top(move || px((top_inset() - 32.0) / 2.0))
+        .right(move || px(controls_right() + 8.0))
         .size(px(32.0))
         .rounded_full()
         .items_center()
@@ -95,7 +96,16 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
                 .flex_1()
                 .flex_row()
                 .child(view().flex_1().items_center().justify_center().px(px(32.0)).child(left_column(&swap)))
-                .child(view().flex_1().items_center().pl(px(16.0)).pr(px(28.0)).child(lyrics_column(&swap))),
+                .child(
+                    view()
+                        .flex_1()
+                        .items_center()
+                        .pl(px(16.0))
+                        .pr(px(28.0))
+                        .pt(move || px(top_inset()))
+                        .pb(px(LYRICS_BOTTOM))
+                        .child(lyrics_column(&swap)),
+                ),
         )
         .child(view().absolute().top(px(0.0)).left(px(0.0)).right(px(0.0)).h(move || px(top_inset())).window_drag(true))
         .child(close_button)
@@ -284,6 +294,8 @@ fn left_column(swap: &Swap) -> View {
         })
     });
 
+    // 与播放条一致：两侧是循环模式与喜欢（最小），中间是上一首 / 播放 /
+    // 下一首，播放键最大。
     let skip = |glyph: Icon, label: &'static str, press: fn()| {
         view()
             .size(px(44.0))
@@ -295,7 +307,20 @@ fn left_column(swap: &Swap) -> View {
             .hover(|st| st.bg(white_a(0.08)))
             .active(|st| st.opacity(0.5))
             .on_press(press)
-            .child(icon(glyph, 20.0, || white_a(0.85)))
+            .child(icon(glyph, 18.0, || white_a(0.85)))
+    };
+    let side = |glyph: Box<dyn Fn() -> Icon>, label: &'static str, tint: Box<dyn Fn() -> AdaptiveColor>, press: fn()| {
+        view()
+            .size(px(36.0))
+            .rounded_full()
+            .items_center()
+            .justify_center()
+            .role(AccessibilityRole::Button)
+            .label(label)
+            .hover(|st| st.bg(white_a(0.08)))
+            .active(|st| st.opacity(0.5))
+            .on_press(press)
+            .child(icon_dyn(glyph, 16.0, tint))
     };
     let play = view()
         .size(px(56.0))
@@ -309,19 +334,32 @@ fn left_column(swap: &Swap) -> View {
         .transition_transform()
         .duration(120.0)
         .on_press(|| player().toggle())
-        .child(icon_dyn(
-            move || if s.playback.with(|p| p.playing) { Icon::PauseLine } else { Icon::PlayLine },
-            28.0,
-            || white_a(0.95),
-        ));
+        .child(super::icons::play_pause(34.0, move || s.playback.with(|p| p.playing), || white_a(0.95)));
+    let mode_icon = move || match s.playback.with(|p| p.loop_mode) {
+        LoopMode::List => Icon::Repeat,
+        LoopMode::Single => Icon::RepeatOne,
+        LoopMode::Random => Icon::Shuffle,
+    };
     let controls = view()
         .flex_row()
         .items_center()
         .justify_center()
-        .gap(px(26.0))
+        .gap(px(18.0))
+        .child(side(
+            Box::new(mode_icon),
+            "循环模式（顺序 / 单曲 / 随机）",
+            Box::new(move || white_a(if s.playback.with(|p| p.loop_mode) == LoopMode::List { 0.55 } else { 0.95 })),
+            super::store::cycle_loop_mode,
+        ))
         .child(skip(Icon::PrevLine, "上一首", || player().previous()))
         .child(play)
-        .child(skip(Icon::NextLine, "下一首", || player().next()));
+        .child(skip(Icon::NextLine, "下一首", || player().next()))
+        .child(side(
+            Box::new(|| if super::store::current_liked() { Icon::HeartFilled } else { Icon::Heart }),
+            "喜欢",
+            Box::new(like_red),
+            super::store::toggle_like_current,
+        ));
 
     view()
         .w(px(COLUMN))
@@ -544,20 +582,7 @@ fn volume_row() -> View {
                 .on_press(toggle_mute)
                 .child(icon_dyn(move || if volume() <= 0.0 { Icon::Mute } else { Icon::Volume }, 15.0, || white_a(0.7))),
         )
-        .child(scrub(
-            view().flex_1().h(px(18.0)).justify_center().child(
-                view()
-                    .h(px(3.0))
-                    .w_full()
-                    .rounded_full()
-                    .bg(white_a(0.2))
-                    .overflow_hidden()
-                    .pointer_events(PointerEvents::None)
-                    .child(view().h_full().rounded_full().bg(white_a(0.9)).w(move || relative(volume() as f32))),
-            ),
-            set_volume,
-            set_volume,
-        ))
+        .child(slider(volume, white_a(0.2), white_a(0.9), white_a(1.0), set_volume, set_volume).flex_1())
         .child(
             text(move || format!("{}", (volume() * 100.0).round()))
                 .w(px(26.0))
@@ -599,8 +624,32 @@ fn lyrics_scroller() -> View {
     let viewport = signal(0.0_f32);
     let laid = signal(0_usize);
     let follow = signal(true);
-    // 指针在歌词区域内：所有行去掉模糊（看清再点）。
-    let hovering = signal(false);
+    // 指针在歌词区域内：所有行去掉模糊（看清再点）。`clear` 是去模糊的
+    // 程度（0 按距离模糊，1 全部清晰），移入移出时逐帧过渡：NSH 的样式
+    // 过渡不包括滤镜，只能自己推进。
+    let clear = signal(0.0_f32);
+    let clear_task: Rc<RefCell<Option<Spawned<()>>>> = Rc::default();
+    let fade_blur = Rc::new(move |to: f32| {
+        if let Some(task) = clear_task.borrow_mut().take() {
+            task.cancel();
+        }
+        if untracked(reduce_motion) {
+            clear.set(to);
+            return;
+        }
+        let from = clear.get_untracked();
+        let start = std::time::Instant::now();
+        *clear_task.borrow_mut() = Some(spawn(async move {
+            loop {
+                next_frame().await;
+                let t = (start.elapsed().as_secs_f32() * 1000.0 / BLUR_FADE_MS).min(1.0);
+                clear.set(from + (to - from) * ease_out_cubic(t));
+                if t >= 1.0 {
+                    break;
+                }
+            }
+        }));
+    });
     let line_ys: Rc<RefCell<Vec<f32>>> = Rc::default();
     let target: Rc<RefCell<Option<(f32, std::time::Instant)>>> = Rc::default();
     let resume: Rc<RefCell<Option<Spawned<()>>>> = Rc::default();
@@ -692,18 +741,20 @@ fn lyrics_scroller() -> View {
             .child(
                 text(content)
                     .text_center()
-                    .text_size(px(if metadata { 14.0 } else { 20.0 }))
-                    .line_height(px(if metadata { 22.0 } else { 30.0 }))
+                    .text_size(px(if metadata { 16.0 } else { LYRIC_SIZE }))
+                    .line_height(px(if metadata { 24.0 } else { LYRIC_SIZE * 1.35 }))
                     .font_weight(if metadata { FontWeight::MEDIUM } else { FontWeight::BOLD })
-                    .text_color(white_a(if metadata { 0.7 } else { 0.95 })),
+                    .text_color(move || original_color(timed, distance() == 0.0))
+                    .transition_colors()
+                    .duration(300.0),
             )
             .child(line.trans_content.clone().map(|trans| {
                 text(trans)
                     .text_center()
-                    .text_size(px(15.0))
-                    .line_height(px(22.0))
+                    .text_size(px(TRANSLATION_SIZE))
+                    .line_height(px(TRANSLATION_SIZE * 1.4))
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(white_a(0.72))
+                    .text_color(white_a(TRANSLATION_ALPHA))
             }));
         // 时间戳：浮在行的最右侧、垂直居中，只在这一行悬停时出现；不占布局，
         // 也不挡点击。
@@ -740,28 +791,20 @@ fn lyrics_scroller() -> View {
             .group()
             .role(AccessibilityRole::Button)
             .label(if seekable { format!("跳到 {}", format_time(time)) } else { String::new() })
-            // 当前行清晰明亮；越远越暗、越模糊（最多 4 pt）。时间戳在
-            // 这层之外，不跟着变暗变糊。
+            // 当前行与前后一句清晰，再远越模糊（见 `lyric_blur`）。颜色
+            // 在文字上：原文随高亮变化，译文始终不变。时间戳在这层之外，
+            // 不跟着模糊。
             .child(
                 view()
                     .w_full()
                     .style_with(move |st| {
-                        let d = distance();
-                        let opacity = if !timed {
-                            0.85
-                        } else if d == 0.0 {
-                            1.0
-                        } else {
-                            (0.42 - d * 0.035).max(0.16)
-                        };
-                        // 鼠标在歌词区时不模糊；否则按与高亮行的距离模糊。
-                        let blur = if hovering.get() { 0.0 } else { lyric_blur(timed, d) };
-                        st.opacity(opacity).blur(px(blur))
+                        // 鼠标在歌词区时不模糊（移入移出有过渡）；否则按与
+                        // 高亮行的距离模糊。
+                        let blur = lyric_blur(timed, distance()) * (1.0 - clear.get());
+                        st.blur(px(blur))
                     })
                     .transition_all()
                     .duration(300.0)
-                    // 悬停的这一行也变亮，便于看清再点。
-                    .group_hover(|st| st.opacity(1.0))
                     .child(content_view),
             )
             .child(stamp)
@@ -790,18 +833,19 @@ fn lyrics_scroller() -> View {
 
     let user_scroll = interrupt.clone();
     let drag = interrupt.clone();
+    let (blur_in, blur_out) = (fade_blur.clone(), fade_blur);
     view()
         .flex_1()
         .w_full()
-        .on_hover_in(move || hovering.set(true))
-        .on_hover_out(move || hovering.set(false))
+        .on_hover_in(move || blur_in(1.0))
+        .on_hover_out(move || blur_out(0.0))
         .child((!timed).then(|| {
             text("歌词无时间信息")
                 .text_center()
                 .text_size(px(11.0))
                 .letter_spacing(px(0.6))
                 .text_color(white_a(0.4))
-                .pt(px(TITLE_BAR))
+                .pb(px(8.0))
         }))
         .child(
             scroll()
@@ -830,10 +874,36 @@ fn lyrics_scroller() -> View {
         )
 }
 
-/// 歌词行的模糊半径（点）：高亮行清晰，距离每多一行加 0.6，最多 4
-/// （ap-spec 的 `blur(min(8, distance × 1.2))` 减半）。无时间轴的歌词不模糊。
+/// 歌词行的模糊半径（点）：高亮行和前后一句清晰，再远每多一行加 1.5，
+/// 最多 8（与 ap-spec 的上限相同）。无时间轴的歌词不模糊。
 fn lyric_blur(timed: bool, distance: f32) -> f32 {
-    if timed { (distance * 0.6).min(4.0) } else { 0.0 }
+    if timed { ((distance - 1.0) * 1.5).clamp(0.0, 8.0) } else { 0.0 }
+}
+
+/// 歌词原文字号；有译文时译文是它的 2/3。
+const LYRIC_SIZE: f32 = 30.0;
+/// 译文字号。
+const TRANSLATION_SIZE: f32 = LYRIC_SIZE * 2.0 / 3.0;
+/// 译文的颜色（白色透明度），任何时候都不变。
+const TRANSLATION_ALPHA: f32 = 0.6;
+/// 鼠标移入 / 移出歌词区时，模糊去掉 / 恢复的过渡时长。
+const BLUR_FADE_MS: f32 = 300.0;
+/// 歌词区上下的留白：滚动的歌词不进入标题栏（窗口按钮、收起按钮那一行），
+/// 也不贴着窗口底边。
+const LYRICS_BOTTOM: f32 = 32.0;
+
+fn ease_out_cubic(t: f32) -> f32 {
+    1.0 - (1.0 - t).powi(3)
+}
+
+/// 原文的颜色：高亮行比译文深（亮），其余行比译文淡。无时间轴的歌词
+/// 没有高亮，按高亮行显示，便于阅读。
+fn original_color(timed: bool, active: bool) -> AdaptiveColor {
+    white_a(original_alpha(timed, active))
+}
+
+fn original_alpha(timed: bool, active: bool) -> f32 {
+    if active || !timed { 0.96 } else { 0.36 }
 }
 
 #[cfg(test)]
@@ -841,13 +911,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn blur_grows_with_distance_from_the_active_line() {
+    fn blur_spares_the_neighbours_and_grows_after() {
         assert_eq!(lyric_blur(true, 0.0), 0.0);
-        let steps: Vec<f32> = (1..=8).map(|d| lyric_blur(true, d as f32)).collect();
-        assert!(steps.windows(2).all(|w| w[0] < w[1] || w[1] == 4.0), "{steps:?}");
-        assert!((lyric_blur(true, 1.0) - 0.6).abs() < 1e-6);
-        assert_eq!(lyric_blur(true, 20.0), 4.0);
+        assert_eq!(lyric_blur(true, 1.0), 0.0, "前后一句不模糊");
+        let steps: Vec<f32> = (2..=10).map(|d| lyric_blur(true, d as f32)).collect();
+        assert!(steps[0] > 0.0);
+        assert!(steps.windows(2).all(|w| w[0] < w[1] || w[1] == 8.0), "{steps:?}");
+        assert_eq!(lyric_blur(true, 20.0), 8.0);
         assert_eq!(lyric_blur(false, 5.0), 0.0);
+    }
+
+    #[test]
+    fn translation_sits_between_idle_and_active_originals() {
+        assert!(original_alpha(true, false) < TRANSLATION_ALPHA, "未高亮：原文比译文淡");
+        assert!(original_alpha(true, true) > TRANSLATION_ALPHA, "高亮：原文比译文深");
     }
 
     fn meta() -> MetaInfo {
