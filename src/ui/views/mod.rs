@@ -8,6 +8,7 @@ mod settings;
 
 use std::rc::Rc;
 
+use nsh_base::{menu_item, menu_separator};
 use nsh_core::prelude::*;
 
 use super::components::button::pill_button;
@@ -16,11 +17,79 @@ use super::components::page::{empty_state, page_header};
 use super::components::tracks::{Columns, ROW, track_columns, track_row};
 use super::store::{play_list, store};
 use super::theme::*;
-use crate::config::TrackEntry;
+use crate::config::{TrackEntry, library_store};
 
 pub(super) use self::browse::{albums, artists, genres};
 pub(super) use self::folders::folders;
 pub(super) use self::settings::dialog as settings_dialog;
+
+// --- 菜单部件 -----------------------------------------------------------------
+
+/// 菜单弹层的样子（下拉、右键菜单、子菜单共用）。
+macro_rules! popup {
+    ($menu:expr, $min:expr) => {
+        popup!($menu, $min, 420.0)
+    };
+    ($menu:expr, $min:expr, $max_h:expr) => {
+        $menu.popup_style(|st| {
+            st.min_w(px($min))
+                .max_h(px($max_h))
+                .p(px(4.0))
+                .rounded(px(10.0))
+                .overflow_hidden()
+                .border_1()
+                .border_color(border())
+                .bg(nsh_base::theme().popover)
+                .shadow_lg()
+        })
+    };
+}
+pub(crate) use popup;
+
+/// 菜单项的一行：图标（可无）+ 文字。
+fn row_content(glyph: Option<Icon>, label: impl Fn() -> String + 'static) -> View {
+    view()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(10.0))
+        .py(px(6.0))
+        .rounded(px(6.0))
+        .hover(|st| st.bg(hover()))
+        .active(|st| st.bg(hover()))
+        .child(glyph.map(|g| icon(g, 15.0, muted_fg)))
+        .child(
+            text(label)
+                .flex_1()
+                .number_of_lines(1)
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .text_color(fg()),
+        )
+}
+
+/// 一个菜单项。
+pub(crate) fn item(
+    label: impl Into<String>,
+    glyph: Option<Icon>,
+    on_select: impl Fn() + 'static,
+) -> AnyElement {
+    let label: String = label.into();
+    let shown = label.clone();
+    menu_item()
+        .accessibility_label(SharedString::from(label))
+        .on_select(on_select)
+        .child(row_content(glyph, move || shown.clone()))
+        .into_element()
+}
+
+pub(crate) fn separator() -> AnyElement {
+    menu_separator()
+        .h(px(1.0))
+        .my(px(4.0))
+        .bg(border())
+        .into_element()
+}
 
 fn compare(a: &str, b: &str) -> std::cmp::Ordering {
     a.to_lowercase().cmp(&b.to_lowercase())
@@ -102,7 +171,7 @@ fn list_of_tracks(
             move || play()
         })
         .mx(px(20.0));
-        playlists::track_menu(row, track, from, move || play())
+        playlists::track_menu(row, track, from, move || play(), None)
     })
     .estimated_item_size(px(ROW))
     .header(header)
@@ -260,4 +329,117 @@ pub(crate) fn last_segment(path: &str) -> &str {
     path.rsplit(['/', '\\'])
         .find(|s| !s.is_empty())
         .unwrap_or(path)
+}
+
+// --- 拖放进曲库 ---------------------------------------------------------------
+
+/// `file://` URL → 路径（百分号解码）。Windows 的 `file:///C:/Music` 去掉
+/// 盘符前的 `/`，并换成 `\\`。
+pub(super) fn url_to_path(uri: &str) -> String {
+    let path = decode_url_path(uri);
+    let bytes = path.as_bytes();
+    if bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
+        return path[1..].replace('/', "\\");
+    }
+    path
+}
+
+fn decode_url_path(uri: &str) -> String {
+    let rest = uri.strip_prefix("file://").unwrap_or(uri);
+    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2]))
+        {
+            out.push((hi * 16 + lo) as u8);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// `add_dropped` 的返回值。
+pub(super) struct DroppedPath {
+    /// 给用户看的一行结果。
+    pub note: String,
+    /// 拖入内容所在（或新加）的目录——文件夹页据此定位。
+    pub dir: Option<String>,
+    /// 是否真的新加了根目录（调用方据此决定要不要重扫）。
+    pub added: bool,
+}
+
+/// `dir` 是否已在某个曲库根目录下（含根本身）。
+fn under_root(dir: &str, roots: &[String]) -> bool {
+    roots.iter().any(|r| {
+        let root = r.trim_end_matches(SEP);
+        dir == root || dir.starts_with(&format!("{root}{SEP}"))
+    })
+}
+
+/// 拖进来的本地路径进曲库：目录已在某个根目录下就只定位过去（不重复加
+/// 嵌套的根），否则加为新根；文件取所在目录，规则一样。不重扫——调用
+/// 方处理完所有路径后统一 [`super::store::scan`]。
+pub(super) fn add_dropped(path: &str) -> DroppedPath {
+    let trimmed = path.trim().trim_end_matches(['/', '\\']);
+    let canonical = match dunce::canonicalize(trimmed) {
+        Ok(c) => c,
+        Err(error) => {
+            return DroppedPath {
+                note: format!("无法访问 {trimmed}: {error}"),
+                dir: None,
+                added: false,
+            };
+        }
+    };
+    let lib = library_store();
+    let dir = if canonical.is_dir() {
+        canonical
+    } else {
+        match canonical.parent() {
+            Some(p) => p.to_path_buf(),
+            None => {
+                return DroppedPath {
+                    note: format!("{trimmed} 不是目录"),
+                    dir: None,
+                    added: false,
+                };
+            }
+        }
+    };
+    let dir = dir.to_string_lossy().into_owned();
+    if under_root(&dir, &lib.roots()) {
+        return DroppedPath {
+            note: format!("已在曲库中 {dir}"),
+            dir: Some(dir),
+            added: false,
+        };
+    }
+    // 磁盘根目录（`C:\`）不加：拖根目录下的文件进来不该扫整块盘。
+    if std::path::Path::new(&dir).parent().is_none() {
+        return DroppedPath {
+            note: format!("{dir} 是磁盘根目录，不加入曲库"),
+            dir: None,
+            added: false,
+        };
+    }
+    match lib.add_root(&dir) {
+        Ok(_) => DroppedPath {
+            note: format!("已添加 {dir}"),
+            dir: Some(dir),
+            added: true,
+        },
+        Err(error) => DroppedPath {
+            note: error,
+            dir: None,
+            added: false,
+        },
+    }
 }

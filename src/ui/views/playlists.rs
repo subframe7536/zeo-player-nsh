@@ -4,10 +4,11 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use nsh_base::{context_menu, menu, menu_item, menu_separator, submenu};
+use nsh_base::{context_menu, menu, submenu};
 use nsh_core::prelude::*;
 
 use super::super::Nav;
+use super::{item, popup, separator};
 use super::super::components::button::{
     Size, Variant, icon_button, outline_button, pill_button, text_button,
 };
@@ -24,71 +25,6 @@ use crate::config::{TrackEntry, unix_now};
 use crate::playlists::{Condition, Field, FieldType, Op, Playlist, Rule, Sort};
 
 // --- 菜单部件 -----------------------------------------------------------------
-
-/// 菜单弹层的样子（下拉、右键菜单、子菜单共用）。
-macro_rules! popup {
-    ($menu:expr, $min:expr) => {
-        popup!($menu, $min, 420.0)
-    };
-    ($menu:expr, $min:expr, $max_h:expr) => {
-        $menu.popup_style(|st| {
-            st.min_w(px($min))
-                .max_h(px($max_h))
-                .p(px(4.0))
-                .rounded(px(10.0))
-                .overflow_hidden()
-                .border_1()
-                .border_color(border())
-                .bg(nsh_base::theme().popover)
-                .shadow_lg()
-        })
-    };
-}
-
-/// 菜单项的一行：图标（可无）+ 文字。
-fn row_content(glyph: Option<Icon>, label: impl Fn() -> String + 'static) -> View {
-    view()
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .px(px(10.0))
-        .py(px(6.0))
-        .rounded(px(6.0))
-        .hover(|st| st.bg(hover()))
-        .active(|st| st.bg(hover()))
-        .child(glyph.map(|g| icon(g, 15.0, muted_fg)))
-        .child(
-            text(label)
-                .flex_1()
-                .number_of_lines(1)
-                .text_size(px(13.0))
-                .line_height(px(13.0))
-                .text_color(fg()),
-        )
-}
-
-/// 一个菜单项。
-pub fn item(
-    label: impl Into<String>,
-    glyph: Option<Icon>,
-    on_select: impl Fn() + 'static,
-) -> AnyElement {
-    let label: String = label.into();
-    let shown = label.clone();
-    menu_item()
-        .accessibility_label(SharedString::from(label))
-        .on_select(on_select)
-        .child(row_content(glyph, move || shown.clone()))
-        .into_element()
-}
-
-fn separator() -> AnyElement {
-    menu_separator()
-        .h(px(1.0))
-        .my(px(4.0))
-        .bg(border())
-        .into_element()
-}
 
 /// 菜单里的分组小标题（不可选）。
 fn menu_heading(label: &'static str) -> AnyElement {
@@ -158,16 +94,22 @@ pub fn add_to_submenu(paths: impl Fn() -> Vec<String> + Clone + 'static) -> AnyE
 }
 
 /// 曲目的右键菜单（包着 `row`）：播放、添加到歌单、从歌单移除（`from`：
-/// 当前所在的手动歌单）、在访达中显示、删除记录 / 删除文件。
+/// 当前所在的手动歌单）、在访达中显示、重命名文件（`rename`，文件夹页
+/// 给）、删除记录 / 删除文件。
 pub fn track_menu(
     row: impl IntoElement,
     track: Memo<Option<TrackEntry>>,
     from: Option<u64>,
     play: impl Fn() + 'static,
+    rename: Option<Rc<dyn Fn(&str)>>,
 ) -> AnyElement {
     let path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
     let paths = move || path().into_iter().collect::<Vec<_>>();
-    let menu = context_menu().trigger(row);
+    let gate = store::menu_control();
+    let menu = context_menu()
+        .trigger(row)
+        .open(gate.open())
+        .on_open_change(gate.menu_change());
     popup!(menu, 220.0)
         .child(item("播放", Some(Icon::Play), play))
         .child(separator())
@@ -190,6 +132,13 @@ pub fn track_menu(
                 }
             },
         ))
+        .child(rename.map(|rename| {
+            item("重命名文件…", Some(Icon::Edit), move || {
+                if let Some(p) = path() {
+                    rename(&p);
+                }
+            })
+        }))
         .child(separator())
         .child(item("从曲库中删除", Some(Icon::Close), move || {
             // 等菜单关掉再删：删掉会拆掉这一行（连同它的菜单）。
@@ -209,7 +158,12 @@ pub fn track_menu(
 
 /// 「新建歌单」菜单（表头的「+」与图标栏的加号行共用弹层内容）。
 fn add_playlist_menu(trigger: View) -> AnyElement {
-    let add = menu().offset(px(4.0)).trigger(trigger);
+    let gate = store::menu_control();
+    let add = menu()
+        .offset(px(4.0))
+        .trigger(trigger)
+        .open(gate.open())
+        .on_open_change(gate.menu_change());
     popup!(add, 200.0)
         .child(item("新建歌单", Some(Icon::Playlist), || {
             store::new_playlist(false, Vec::new())
@@ -343,7 +297,11 @@ fn sidebar_row(p: &Playlist, rail: impl Fn() -> bool + Copy + 'static) -> AnyEle
     if favorite {
         return row.into_element();
     }
-    let menu = context_menu().trigger(row);
+    let gate = store::menu_control();
+    let menu = context_menu()
+        .trigger(row)
+        .open(gate.open())
+        .on_open_change(gate.menu_change());
     popup!(menu, 180.0)
         .child(item(
             if smart {
@@ -855,7 +813,13 @@ fn select(
     width: f32,
 ) -> AnyElement {
     let trigger = select_trigger(current, || None, label, width, "");
-    let menu = menu().offset(px(4.0)).margin(px(8.0)).trigger(trigger);
+    let gate = store::menu_control();
+    let menu = menu()
+        .offset(px(4.0))
+        .margin(px(8.0))
+        .trigger(trigger)
+        .open(gate.open())
+        .on_open_change(gate.menu_change());
     // 选项多（字段有十几个）时在弹层里滚动：弹层的 max_h 只限制它自己，
     // 不限制直接放进去的子项。
     let mut items = view();
@@ -878,7 +842,13 @@ fn tag_select(
 ) -> AnyElement {
     let s = store();
     let trigger = select_trigger(current, || None, "值", 0.0, "选择标签");
-    let menu = menu().offset(px(4.0)).margin(px(8.0)).trigger(trigger);
+    let gate = store::menu_control();
+    let menu = menu()
+        .offset(px(4.0))
+        .margin(px(8.0))
+        .trigger(trigger)
+        .open(gate.open())
+        .on_open_change(gate.menu_change());
     let items = dynamic(move || {
         let tracks = s.tracks.get();
         // 键用小写：匹配不分大小写，只差大小写的标签算同一个。

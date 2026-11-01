@@ -33,6 +33,9 @@ pub fn sidebar_width() -> f32 {
 pub const TITLE_BAR: f32 = 40.0;
 /// 底部播放条高度（含外边距），列表据此留出底部空间。
 pub const BAR_SPACE: f32 = 104.0;
+/// 「文件夹」页左侧目录树的宽度（`components::tracks` 的列宽阈值据此
+/// 收紧）。
+pub const FOLDERS_TREE: f32 = 240.0;
 
 /// 主体界面底色：同侧栏一样的饱和加值，但提亮度成粉彩（更亮的有色底）。
 pub fn bg() -> AdaptiveColor {

@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use nsh_base::{PopoverEvent, button, popover};
+use nsh_base::{button, popover};
 use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
@@ -295,6 +295,10 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
 /// nsh-base 的 button 会吃掉按压，popover 收不到）。
 fn volume_popover(open: Signal<bool>) -> AnyElement {
     let s = store();
+    // 与所有弹出层互斥（菜单、另一个 popover）：令牌被夺走时本地 `open`
+    // 复位，触发器高亮随之熄灭。
+    let gate = super::super::store::menu_control();
+    effect(gate.evicted(open));
     let volume = move || s.playback.with(|p| p.volume);
     let glyph = move || {
         if volume() <= 0.0 {
@@ -319,12 +323,8 @@ fn volume_popover(open: Signal<bool>) -> AnyElement {
             if open.get() { primary() } else { muted_fg() }
         }));
     popover()
-        .open(move || Some(open.get()))
-        .on_open_change(move |e: &PopoverEvent| {
-            if let PopoverEvent::OpenChange(next, _) = e {
-                open.set(*next);
-            }
-        })
+        .open(gate.open_with(open))
+        .on_open_change(gate.popover_change(open))
         .placement(Placement::Top)
         .align(Align::Center)
         .offset(px(12.0))

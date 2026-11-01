@@ -40,9 +40,14 @@ pub const W_FORMAT: f32 = 48.0;
 pub const W_TIME: f32 = 56.0;
 pub const W_LIKE: f32 = 32.0;
 
-/// 内容区宽度（窗口减侧栏；窄窗口侧栏收成图标栏）。读取即订阅窗口大小。
+/// 内容区宽度（窗口减侧栏；窄窗口侧栏收成图标栏）。文件夹页左侧还有一
+/// 棵目录树，正在显示它时把它也减去。读取即订阅窗口大小与导航。
 fn content_width() -> f32 {
-    window().width.0 - sidebar_width()
+    let s = store();
+    let folders = global::<super::super::Nav>().get() == super::super::Nav::Folders
+        && !s.search_open.get()
+        && s.search.with(|q| q.trim().is_empty());
+    window().width.0 - sidebar_width() - if folders { super::super::theme::FOLDERS_TREE } else { 0.0 }
 }
 
 /// 窄窗口里依次收起：专辑列（< 760 pt）、大小列（< 600 pt）、序号列（< 420 pt）。

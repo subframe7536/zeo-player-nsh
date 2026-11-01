@@ -13,65 +13,8 @@ use super::super::components::button::{
 use super::super::components::icons::{Icon, icon, icon_dyn};
 use super::super::store::{Same, format_total, scan, set_theme_color, store};
 use super::super::theme::*;
-use super::{SEP, last_segment, total_duration};
+use super::{SEP, add_dropped, last_segment, total_duration, url_to_path};
 use crate::config::{ThemeColor, library_store};
-
-/// file:// URL → 路径（百分号解码）。Windows 的 `file:///C:/Music` 去掉
-/// 盘符前的 `/`，并换成 `\\`。
-fn url_to_path(uri: &str) -> String {
-    let path = decode_url_path(uri);
-    let bytes = path.as_bytes();
-    if bytes.len() >= 3 && bytes[0] == b'/' && bytes[1].is_ascii_alphabetic() && bytes[2] == b':' {
-        return path[1..].replace('/', "\\");
-    }
-    path
-}
-
-fn decode_url_path(uri: &str) -> String {
-    let rest = uri.strip_prefix("file://").unwrap_or(uri);
-    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
-    let bytes = rest.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let hex = |b: u8| (b as char).to_digit(16);
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2]))
-        {
-            out.push((hi * 16 + lo) as u8);
-            i += 3;
-            continue;
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// 添加为根目录：目录直接加；文件取所在目录。
-fn add_as_root(path: &str) -> String {
-    let trimmed = path.trim().trim_end_matches(['/', '\\']);
-    let lib = library_store();
-    match lib.add_root(trimmed) {
-        Ok(_) => {
-            scan();
-            format!("已添加 {trimmed}")
-        }
-        Err(error) => {
-            let parent = std::path::Path::new(trimmed)
-                .parent()
-                .map(|p| p.to_string_lossy().into_owned());
-            match parent.map(|p| lib.add_root(&p).map(|_| p)) {
-                Some(Ok(p)) => {
-                    scan();
-                    format!("已添加 {p}")
-                }
-                _ => error,
-            }
-        }
-    }
-}
 
 /// 设置里的一节：标题、说明、右上角操作，然后是内容（无卡片包装，
 /// 节与节之间靠页面间距分开）。
@@ -276,7 +219,19 @@ fn folders_section() -> View {
     .on_file_drag_leave(move || dragging.set(false))
     .on_file_drop(move |event: &FileDropEvent| {
         dragging.set(false);
-        let results: Vec<String> = event.uris.iter().map(|uri| add_as_root(&url_to_path(uri))).collect();
+        let mut added = false;
+        let results: Vec<String> = event
+            .uris
+            .iter()
+            .map(|uri| {
+                let dropped = add_dropped(&url_to_path(uri));
+                added |= dropped.added;
+                dropped.note
+            })
+            .collect();
+        if added {
+            scan();
+        }
         message.set(results.join("\n"));
     })
     .child(view().gap(px(8.0)).child(rows))
@@ -949,9 +904,12 @@ fn appearance_select() -> AnyElement {
         110.0,
         "",
     );
+    let gate = super::super::store::menu_control();
     let mut menu = menu()
         .offset(px(4.0))
         .margin(px(8.0))
+        .open(gate.open())
+        .on_open_change(gate.menu_change())
         .popup_style(|st| {
             st.min_w(px(140.0))
                 .p(px(4.0))
@@ -964,7 +922,7 @@ fn appearance_select() -> AnyElement {
         })
         .trigger(trigger);
     for &(mode, glyph, label) in OPTIONS {
-        menu = menu.child(super::playlists::item(label, Some(glyph), move || {
+        menu = menu.child(super::item(label, Some(glyph), move || {
             super::super::store::set_appearance(mode)
         }));
     }

@@ -313,8 +313,11 @@ fn more_menu() -> AnyElement {
                     .text_color(fg()),
             )
     };
+    let gate = super::super::store::menu_control();
     menu()
         .offset(px(4.0))
+        .open(gate.open())
+        .on_open_change(gate.menu_change())
         .popup_style(|st| {
             st.min_w(px(200.0))
                 .p(px(4.0))

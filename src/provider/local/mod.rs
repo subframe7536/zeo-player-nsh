@@ -184,8 +184,36 @@ pub fn delete_file(path: &Path, permanent: bool) -> std::io::Result<()> {
     if permanent {
         std::fs::remove_file(path)
     } else {
-        trash::delete(path).map_err(|e| std::io::Error::other(e.to_string()))
+        trash_one(path)
     }
+}
+
+/// 把文件夹（含其中全部内容）移到回收站；`permanent` 时直接删除（不可
+/// 恢复）。在调用方的工作线程上运行（回收站 API 可能慢）。
+pub fn delete_dir(path: &Path, permanent: bool) -> std::io::Result<()> {
+    if permanent {
+        std::fs::remove_dir_all(path)
+    } else {
+        trash_one(path)
+    }
+}
+
+/// 回收站删除一项：macOS 用 `NSFileManager.trashItemAtURL`——不走
+/// `trash` 默认的 osascript / Finder 脚本（要辅助功能权限、起子进程、
+/// 有提示音）。代价是 Finder 的「放回原处」在部分系统上没有。
+#[cfg(target_os = "macos")]
+fn trash_one(path: &Path) -> std::io::Result<()> {
+    use trash::macos::{DeleteMethod, TrashContextExtMacos};
+    let mut ctx = trash::TrashContext::new();
+    ctx.set_delete_method(DeleteMethod::NsFileManager);
+    ctx.delete(path)
+        .map_err(|e| std::io::Error::other(e.to_string()))
+}
+
+/// 回收站删除一项（Windows）：`trash` 默认就走 `IFileOperation`，原生 API。
+#[cfg(not(target_os = "macos"))]
+fn trash_one(path: &Path) -> std::io::Result<()> {
+    trash::delete(path).map_err(|e| std::io::Error::other(e.to_string()))
 }
 
 #[cfg(test)]

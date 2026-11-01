@@ -574,6 +574,120 @@ impl LibraryStore {
         *self.tracks.write().unwrap() = Arc::new(kept);
     }
 
+    /// 移除 `path` 下（含自身）的全部索引与元数据记录（文件夹已删，
+    /// 或根目录被摘掉）：索引、标签缓存、数据库、待写队列一起清；歌
+    /// 单条目与根目录配置由调用方按语义处理。
+    pub fn remove_under(&self, path: &str) {
+        let sep = std::path::MAIN_SEPARATOR;
+        let trimmed = path.trim_end_matches(sep);
+        let under = format!("{trimmed}{sep}");
+        let current = self.tracks();
+        if current
+            .iter()
+            .any(|t| t.path == trimmed || t.path.starts_with(&under))
+        {
+            let kept: Vec<TrackEntry> = current
+                .iter()
+                .filter(|t| t.path != trimmed && !t.path.starts_with(&under))
+                .cloned()
+                .collect();
+            *self.tracks.write().unwrap() = Arc::new(kept);
+        }
+        MetaCache::global().remove_under(trimmed);
+    }
+
+    /// `src`（文件或文件夹）移 / 改名到 `dest`：索引里命中它或以
+    /// `src/` 为前缀的曲目路径换前缀，根目录配置、标签缓存与数据库
+    /// 跟着换键（内容没变，指纹只按新路径重算——不重读标签）。
+    /// 在调用方的线程上同步执行（一条曲目一次 stat）。
+    pub fn move_path(&self, src: &str, dest: &str) {
+        let sep = std::path::MAIN_SEPARATOR;
+        let (src, dest) = (
+            src.trim_end_matches(sep).to_owned(),
+            dest.trim_end_matches(sep).to_owned(),
+        );
+        if src == dest {
+            return;
+        }
+        let under = format!("{src}{sep}");
+        // 曲库根本身（或装着根的上级目录）被移走：根配置换前缀、
+        // 保存并让监视器重新对齐。
+        let moved_root = {
+            let mut config = self.config.lock().unwrap();
+            let mut touched = false;
+            for root in config.roots.iter_mut() {
+                let trimmed = root.trim_end_matches(sep).to_owned();
+                if trimmed == src {
+                    *root = dest.clone();
+                    touched = true;
+                } else if let Some(rest) = trimmed.strip_prefix(&under) {
+                    *root = format!("{dest}{sep}{rest}");
+                    touched = true;
+                }
+            }
+            if touched {
+                self.save_config(&config);
+            }
+            touched
+        };
+        if moved_root {
+            crate::provider::local::watcher::sync();
+        }
+        // 索引：每条命中路径换新前缀，指纹 / 修改时间按新路径重算
+        // （rename 改了 ctime，不重算会让下次扫描误判内容变了）。
+        let current = self.tracks();
+        let mut rows: Vec<(String, String, u64, u64)> = Vec::new();
+        let updated: Vec<TrackEntry> = current
+            .iter()
+            .map(|t| {
+                let rest = if t.path == src {
+                    Some("")
+                } else {
+                    t.path.strip_prefix(&under)
+                };
+                let Some(rest) = rest else {
+                    return t.clone();
+                };
+                let path = if rest.is_empty() {
+                    dest.clone()
+                } else {
+                    format!("{dest}{sep}{rest}")
+                };
+                let (stamp, modified) = std::fs::metadata(&path)
+                    .map(|m| {
+                        (
+                            crate::metadata::file_stamp(&m),
+                            m.modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map_or(t.modified, |d| d.as_secs()),
+                        )
+                    })
+                    .unwrap_or((t.stamp, t.modified));
+                rows.push((t.path.clone(), path.clone(), stamp, modified));
+                // 文件改名后 file_name 也要换（排序 / 搜索用它）。
+                let file_name = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| t.file_name.clone());
+                TrackEntry {
+                    path,
+                    file_name,
+                    stamp,
+                    modified,
+                    ..t.clone()
+                }
+            })
+            .collect();
+        if rows.is_empty() {
+            return;
+        }
+        *self.tracks.write().unwrap() = Arc::new(updated);
+        let cache = MetaCache::global();
+        cache.move_path(&rows);
+        crate::db::later(move || crate::db::move_meta(&rows));
+    }
+
     pub fn is_scanning(&self) -> bool {
         self.scanning.load(Ordering::Relaxed)
     }
@@ -650,6 +764,89 @@ pub fn split_genres(raw: &[String], separators: &[String]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+    use std::sync::{Mutex, RwLock};
+
+    /// 造一条只带路径 / 大小 / 修改时间的曲目。
+    fn entry(path: &str, size: u64) -> TrackEntry {
+        TrackEntry {
+            provider: ProviderId::Local,
+            path: path.to_owned(),
+            file_name: std::path::Path::new(path)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            title: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            album_artist: String::new(),
+            genres: Vec::new(),
+            year: None,
+            track: None,
+            disk: None,
+            duration: 0.0,
+            bit_rate: None,
+            sample_rate: None,
+            channels: None,
+            has_art: false,
+            size_bytes: size,
+            modified: 0,
+            stamp: 0,
+        }
+    }
+
+    fn test_store(dir: PathBuf, roots: Vec<String>, tracks: Vec<TrackEntry>) -> LibraryStore {
+        LibraryStore {
+            dir,
+            config: Mutex::new(LibraryConfig {
+                roots,
+                ..Default::default()
+            }),
+            tracks: RwLock::new(Arc::new(tracks)),
+            scanning: AtomicBool::new(false),
+            done: AtomicUsize::new(0),
+            total: AtomicUsize::new(0),
+            current: Mutex::new(String::new()),
+        }
+    }
+
+    #[test]
+    fn move_path_rekeys_index_and_roots() {
+        let sep = std::path::MAIN_SEPARATOR;
+        let base = std::env::temp_dir().join(format!("zeo-move-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let sub = base.join("music/sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.flac"), b"x").unwrap();
+        let music = base.join("music").to_string_lossy().into_owned();
+        let renamed = base.join("renamed").to_string_lossy().into_owned();
+        let old_sub = format!("{music}{sep}sub");
+        let new_sub = format!("{music}{sep}renamed");
+        let store = test_store(
+            base.clone(),
+            vec![music.clone()],
+            vec![entry(&format!("{old_sub}{sep}a.flac"), 1)],
+        );
+        // 文件夹已移走：索引换前缀，不在其下的根不动，指纹按新路径重算。
+        std::fs::rename(&old_sub, &new_sub).unwrap();
+        store.move_path(&old_sub, &new_sub);
+        assert_eq!(store.tracks()[0].path, format!("{new_sub}{sep}a.flac"));
+        assert_eq!(store.roots(), vec![music.clone()]);
+        assert_ne!(store.tracks()[0].stamp, 0, "指纹按新路径重算");
+        // 根本身被改名：根配置跟着换。
+        std::fs::rename(&music, &renamed).unwrap();
+        store.move_path(&music, &renamed);
+        assert_eq!(store.roots(), vec![renamed.clone()]);
+        assert_eq!(
+            store.tracks()[0].path,
+            format!("{renamed}{sep}renamed{sep}a.flac")
+        );
+        // 摘除：索引清掉。
+        store.remove_under(&format!("{renamed}{sep}renamed"));
+        assert!(store.tracks().is_empty());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn genre_split() {

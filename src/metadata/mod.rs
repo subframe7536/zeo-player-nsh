@@ -297,6 +297,58 @@ impl MetaCache {
         self.pending.lock().unwrap().retain(|(p, _)| *p != key);
     }
 
+    /// 移除 `path` 下（含自身）的全部条目（文件夹删除 / 根摘除）：连
+    /// 待写队列与数据库行一起清，文件还在时下次扫描会重新入库。
+    pub fn remove_under(&self, path: &str) {
+        // 先把待写的旧键落库：否则删完它们还会以旧路径写回一条死行。
+        self.flush();
+        let sep = std::path::MAIN_SEPARATOR;
+        let trimmed = path.trim_end_matches(sep);
+        let under = format!("{trimmed}{sep}");
+        self.entries
+            .lock()
+            .unwrap()
+            .retain(|p, _| p != trimmed && !p.starts_with(&under));
+        self.pending
+            .lock()
+            .unwrap()
+            .retain(|(p, _)| p != trimmed && !p.starts_with(&under));
+        crate::db::remove_meta_under(trimmed);
+    }
+
+    /// `rows = (旧路径, 新路径, 新指纹, 新修改时间)`：文件 / 文件夹移
+    /// 动或改名后把缓存键换到新路径并带上新指纹（改名改了 ctime，不换
+    /// 指纹下次扫描会误判内容变了重读标签）。数据库更新由调用方排。
+    pub fn move_path(&self, rows: &[(String, String, u64, u64)]) {
+        if rows.is_empty() {
+            return;
+        }
+        // 先把待写的旧键落库：数据库随后整体 UPDATE 到新键；不然
+        // pending 里的旧键会在换键之后被 flush 写回一条死行。
+        self.flush();
+        {
+            let mut entries = self.entries.lock().unwrap();
+            for (old, new, stamp, modified) in rows {
+                if let Some(mut e) = entries.remove(old) {
+                    e.stamp = *stamp;
+                    e.modified = *modified;
+                    entries.insert(new.clone(), e);
+                }
+            }
+        }
+        // 待写队列同一路径的也换：不然下次 flush 会按旧路径写回一条死行。
+        let mut pending = self.pending.lock().unwrap();
+        for (old, new, stamp, modified) in rows {
+            for (p, e) in pending.iter_mut() {
+                if p == old {
+                    *p = new.clone();
+                    e.stamp = *stamp;
+                    e.modified = *modified;
+                }
+            }
+        }
+    }
+
     /// 只留下 `keep` 里的路径（扫描后去掉已不存在的文件）。
     pub fn retain(&self, keep: &HashSet<String>) {
         self.flush();

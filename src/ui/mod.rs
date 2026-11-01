@@ -11,7 +11,7 @@ mod views;
 
 use std::rc::Rc;
 
-use nsh_core::TouchEvent;
+use nsh_core::{ContextMenuEvent, TouchEvent};
 use nsh_core::desktop::TitleBarStyle;
 use nsh_core::element::desktop::set_title_bar;
 use nsh_core::prelude::*;
@@ -133,6 +133,10 @@ pub fn App() -> impl IntoElement {
             search.outside_touch(e);
             search_page.outside_touch(e);
         })
+        // 右键事件只派发给最近的监听者：点到没有菜单的地方才轮到根——
+        // 清掉「当前菜单」令牌，开着的菜单随之关闭（右键不产生
+        // PressOutside，不这样处理旧菜单会一直留着）。
+        .on_context_menu(move |_: &ContextMenuEvent| s.menu_open.set(None))
         .child(when(move || !s.hidden.get(), shell))
         // 弹窗按叠放顺序挂载：设置在最底，「关闭窗口」的询问盖过一切。
         .child(when(

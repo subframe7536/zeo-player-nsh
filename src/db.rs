@@ -272,6 +272,40 @@ pub fn remove_meta(path: &str) {
     });
 }
 
+/// 删掉 `path` 下（含自身）的元数据行（文件夹删除 / 根摘除）。
+pub fn remove_meta_under(path: &str) {
+    let sep = std::path::MAIN_SEPARATOR;
+    let trimmed = path.trim_end_matches(sep);
+    let under = format!("{trimmed}{sep}");
+    with("删除元数据", |conn| {
+        conn.execute(
+            "DELETE FROM tracks WHERE path = ?1 OR substr(path, 1, ?2) = ?3",
+            params![trimmed, under.len() as i64, under],
+        )
+        .map(|_| ())
+    });
+}
+
+/// `rows = (旧路径, 新路径, 新指纹, 新修改时间)`：文件 / 文件夹移动或改
+/// 名后把元数据行换到新路径（内容没变，标签不重读）。
+pub fn move_meta(rows: &[(String, String, u64, u64)]) {
+    if rows.is_empty() {
+        return;
+    }
+    with("换元数据路径", |conn| {
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "UPDATE tracks SET path = ?1, stamp = ?2, modified = ?3 WHERE path = ?4",
+            )?;
+            for (old, new, stamp, modified) in rows {
+                stmt.execute(params![new, *stamp as i64, *modified as i64, old])?;
+            }
+        }
+        tx.commit()
+    });
+}
+
 /// 删掉全部元数据（重建曲库）。
 pub fn clear_meta() {
     with("清空元数据", |conn| {

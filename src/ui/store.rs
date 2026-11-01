@@ -4,7 +4,8 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use nsh_core::prelude::*;
@@ -169,6 +170,10 @@ pub struct Store {
     /// 「跟随封面」时封面的原始主色调（色相圈、饱和度）——界面底色向它
     /// 轻调（`theme::bg` 等）；预设色 / 黑白时 `None`。
     pub tint: Signal<Option<(f32, f32)>>,
+    /// 当前开着的弹出菜单（`menu_control` 的 id）：同一时刻只开一个。
+    /// 桌面上右键按下不产生 PressOutside（平台只发 ContextMenu 事件），
+    /// 已开的菜单不会被平台关掉，由它互斥。
+    pub menu_open: Signal<Option<u64>>,
 }
 
 /// 歌单编辑弹窗的草稿：`id` 为 `None` 时是新建。
@@ -250,8 +255,11 @@ pub fn install() -> Store {
         delete_ask: signal(None),
         accent: signal(None),
         tint: signal(None),
+        menu_open: signal(None),
     };
     STORE.with(|cell| cell.set(Some(s)));
+    let (tx, posted) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
+    POSTER.with(|p| *p.borrow_mut() = Some(Post(tx)));
     apply_accent();
 
     // 引擎状态：100 ms 轮询共享状态（信号只在值变化时通知）。
@@ -334,6 +342,11 @@ pub fn install() -> Store {
     spawn(async move {
         loop {
             timer(Duration::from_millis(120)).await;
+            // 后台线程经 poster() 排来的事（重命名 / 删除的收尾等）在这跑；
+            // 单个出事只丢它自己，别拖垮轮询。
+            while let Ok(f) = posted.try_recv() {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+            }
             let state = library_state();
             let changed = state.theme_color != last_color;
             last_color = state.theme_color;
@@ -633,6 +646,48 @@ pub fn remove_record(path: &str) {
     s.tracks.set(Same(library_store().tracks()));
 }
 
+/// `src` 移 / 改名到 `dest`：手动歌单里等于它或以 `src/` 为前缀的路
+/// 径换成新前缀，曲目留在歌单里。
+pub fn move_playlist_paths(src: &str, dest: &str) {
+    let sep = std::path::MAIN_SEPARATOR;
+    let (src, dest) = (
+        src.trim_end_matches(sep).to_owned(),
+        dest.trim_end_matches(sep).to_owned(),
+    );
+    if src == dest {
+        return;
+    }
+    let under = format!("{src}{sep}");
+    change_playlists(|lists| {
+        for p in lists.iter_mut() {
+            if let Kind::Manual { tracks } = &mut p.kind {
+                for t in tracks.iter_mut() {
+                    if *t == src {
+                        *t = dest.clone();
+                    } else if let Some(rest) = t.strip_prefix(&under) {
+                        *t = format!("{dest}{sep}{rest}");
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// 删掉 `path` 下（含自身）的手动歌单条目（文件夹已删 / 记录被清，
+/// 留着是死条目）。
+pub fn remove_playlist_paths_under(path: &str) {
+    let sep = std::path::MAIN_SEPARATOR;
+    let trimmed = path.trim_end_matches(sep);
+    let under = format!("{trimmed}{sep}");
+    change_playlists(|lists| {
+        for p in lists.iter_mut() {
+            if let Kind::Manual { tracks } = &mut p.kind {
+                tracks.retain(|t| t != trimmed && !t.starts_with(&under));
+            }
+        }
+    });
+}
+
 /// 「删除文件…」菜单项：打开确认弹窗（回收站 / 直接删按当前设置）。
 pub fn ask_delete_file(path: &str) {
     let permanent = library_store().delete_permanently();
@@ -648,11 +703,10 @@ pub fn confirm_delete_file() {
     let Some(ask) = store().delete_ask.get() else {
         return;
     };
+    let ui = poster();
     std::thread::spawn(move || {
-        if store()
-            .track
-            .with_untracked(|t| t.path.as_deref() == Some(ask.path.as_str()))
-        {
+        // 工作线程拿不到 store()（线程局部），用播放器快照看当前曲。
+        if player().state().path.as_deref() == Some(ask.path.as_str()) {
             player().stop();
         }
         let path = Path::new(&ask.path);
@@ -667,7 +721,7 @@ pub fn confirm_delete_file() {
                 std::thread::sleep(Duration::from_millis(150));
             }
         }
-        later(move || {
+        ui.post(move || {
             if gone {
                 remove_record(&ask.path);
             }
@@ -883,6 +937,114 @@ pub fn later(f: impl FnOnce() + 'static) {
             f()
         });
     });
+}
+
+/// 下一个受控弹出层的 id（`menu_control`）。
+static NEXT_MENU: AtomicU64 = AtomicU64::new(1);
+
+/// 一个弹出层（`menu` / `context_menu` / `popover`）的互斥门：共享
+/// `store().menu_open` 令牌，同一时刻只开一个。桌面上右键按下不产生
+/// PressOutside（macOS / Windows 的右键只发 ContextMenu 事件，没有
+/// touch Start），平台不会替我们关掉上一个——开新弹层时令牌换号，
+/// 旧弹层的 `open` 翻 false 自己关掉。
+#[derive(Clone, Copy)]
+pub struct MenuGate {
+    id: u64,
+    open: Signal<Option<u64>>,
+}
+
+impl MenuGate {
+    /// `menu` / `context_menu` 的 `.open(..)`。
+    pub fn open(self) -> impl Fn() -> Option<bool> + 'static {
+        let (id, open) = (self.id, self.open);
+        move || Some(open.get() == Some(id))
+    }
+
+    /// `menu` / `context_menu` 的 `.on_open_change(..)`：开关请求写回令牌。
+    pub fn menu_change(self) -> impl Fn(&nsh_base::MenuEvent) + 'static {
+        let (id, open) = (self.id, self.open);
+        move |e| {
+            if let nsh_base::MenuEvent::OpenChange(next, _) = e {
+                if *next {
+                    open.set(Some(id));
+                } else if open.get_untracked() == Some(id) {
+                    open.set(None);
+                }
+            }
+        }
+    }
+
+    /// `popover` 的 `.open(..)`：它另有自己的开关信号 `local`，弹层开着
+    /// 且令牌还在时才显示（令牌被夺走即被挤掉）。
+    pub fn open_with(self, local: Signal<bool>) -> impl Fn() -> Option<bool> + 'static {
+        let (id, open) = (self.id, self.open);
+        move || Some(local.get() && open.get() == Some(id))
+    }
+
+    /// `popover` 的 `.on_open_change(..)`：请求写回本地信号与令牌。
+    pub fn popover_change(
+        self,
+        local: Signal<bool>,
+    ) -> impl Fn(&nsh_base::PopoverEvent) + 'static {
+        let (id, open) = (self.id, self.open);
+        move |e| {
+            if let nsh_base::PopoverEvent::OpenChange(next, _) = e {
+                local.set(*next);
+                if *next {
+                    open.set(Some(id));
+                } else if open.get_untracked() == Some(id) {
+                    open.set(None);
+                }
+            }
+        }
+    }
+
+    /// `effect(gate.evicted(local))`：令牌被别的弹层夺走时复位 `popover`
+    /// 的本地信号（触发器高亮、面板状态读它，不复位会留下「看着还开着」
+    /// 的残影）。
+    pub fn evicted(self, local: Signal<bool>) -> impl Fn() + 'static {
+        let (id, open) = (self.id, self.open);
+        move || {
+            if open.get() != Some(id) {
+                local.set(false);
+            }
+        }
+    }
+}
+
+/// 一个弹出层的互斥门：`.open(..)` 用 `gate.open()`、`.on_open_change(..)`
+/// 用 `gate.menu_change()`；`popover` 用 `gate.open_with(local)` /
+/// `gate.popover_change(local)` 并 `effect(gate.evicted(local))`。
+pub fn menu_control() -> MenuGate {
+    MenuGate {
+        id: NEXT_MENU.fetch_add(1, Ordering::Relaxed),
+        open: store().menu_open,
+    }
+}
+
+/// 「把一件事排回界面侧跑」的把手：`Send`，可以带进后台线程。`STORE`
+/// 是线程局部的，工作线程拿不到 `store()`，在界面侧拿 `poster()` 的
+/// 克隆带去，`post(f)` 排的事由 `install` 的轮询循环在界面侧执行。
+/// 每个应用实例一条通道（界面测试里多个实例并行互不串）。
+#[derive(Clone)]
+pub struct Post(mpsc::Sender<Box<dyn FnOnce() + Send>>);
+
+impl Post {
+    /// 把 `f` 排给界面侧执行。
+    pub fn post(&self, f: impl FnOnce() + Send + 'static) {
+        let _ = self.0.send(Box::new(f));
+    }
+}
+
+thread_local! {
+    static POSTER: RefCell<Option<Post>> = const { RefCell::new(None) };
+}
+
+/// 当前应用实例的回排把手（组件上下文里拿）。
+pub fn poster() -> Post {
+    POSTER
+        .with(|p| p.borrow().clone())
+        .expect("store installed by the root component")
 }
 
 /// 从手动歌单里移除一首。

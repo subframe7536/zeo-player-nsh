@@ -286,19 +286,125 @@ fn font_select_opens_a_searchable_popover() {
     assert!(!has(&app, "系统字体 · 歌词 Aa あ"), "选完弹层应关闭");
 }
 
+/// 文件夹页：左侧目录树只列文件夹（根与子文件夹），右侧默认显示第一个
+/// 根直接包含的曲目；点子文件夹后右侧换成它的文件。
 #[test]
-fn folders_page_lists_roots_with_columns() {
+fn folders_page_shows_tree_and_files() {
     let mut app = start(1200.0, 800.0);
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    app.wait_for_within("大小", Duration::from_secs(20))
+    // 子文件夹要等扫描完曲目才出现在树里，顺带等到曲库就绪。
+    app.wait_for_within("text:sub", Duration::from_secs(20))
         .unwrap();
     let t = texts(&app);
-    assert!(t.iter().any(|s| s.contains("个根文件夹")), "{t:?}");
-    for label in ["时长", "格式"] {
+    assert!(t.iter().any(|s| s == &root_name()), "{t:?}");
+    for label in ["大小", "时长", "格式"] {
         assert!(t.iter().any(|s| s == label), "{label}: {t:?}");
     }
+    // 默认选中根：右侧是它直接包含的曲目（子文件夹里的不在列）。
+    app.wait_for("text:测试歌曲").unwrap();
+    app.press("sub").unwrap();
+    app.wait_for("text:mono").unwrap();
+    app.wait_for("text:short").unwrap();
+}
+
+/// 目录树增删改：右键新建 → 磁盘上真建出来并进树（空文件夹也显示）；
+/// 重命名 → 路径换名；删除走「移到回收站」确认（先取消后确认）。曲目
+/// 行右键里有「重命名文件…」。语料是共享的，只动自己建的文件夹。
+#[test]
+fn folders_page_tree_ops() {
+    let mut app = start(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.wait_for_within("text:sub", Duration::from_secs(20))
+        .unwrap();
+    let sub = dunce::canonicalize(CORPUS).unwrap().join("sub");
+    let made = sub.join("临时文件夹");
+    let renamed = sub.join("改名后");
+    for p in [&made, &renamed] {
+        if p.exists() {
+            // 上次跑挂了的残局先清掉。
+            let _ = std::fs::remove_dir_all(p);
+        }
+    }
+
+    // 右键树里的 sub：增删改三项都在；「新建子文件夹」开输入弹窗。
+    app.right_click("label:sub").unwrap();
+    for item in ["新建子文件夹…", "重命名…", "删除文件夹…"] {
+        app.wait_for(&format!("role:menuitem[{item}]")).unwrap();
+    }
+    app.press("role:menuitem[新建子文件夹…]").unwrap();
+    app.wait_for("label:名称").unwrap();
+    app.type_text("label:名称", "临时文件夹").unwrap();
+    app.press("label:创建").unwrap();
+    app.wait_for("text:临时文件夹").unwrap();
+    assert!(made.is_dir(), "新建应在磁盘上建出目录");
+
+    // 重命名：树行右键 → 重命名… → 输入新名 → 确定；后台改完树刷新。
+    app.right_click("label:临时文件夹").unwrap();
+    app.press("role:menuitem[重命名…]").unwrap();
+    app.wait_for("label:名称").unwrap();
+    app.clear("label:名称").unwrap();
+    app.type_text("label:名称", "改名后").unwrap();
+    app.press("role:button[重命名]").unwrap();
+    app.wait_for("text:改名后").unwrap();
+    assert!(renamed.is_dir() && !made.exists(), "重命名应改磁盘上的目录名");
+
+    // 删除：确认弹窗先取消（目录还在），再确认（没了）。
+    app.right_click("label:改名后").unwrap();
+    app.press("role:menuitem[删除文件夹…]").unwrap();
+    app.wait_for("role:button[移到回收站]").unwrap();
+    app.press("label:取消").unwrap();
+    app.wait_for_gone("role:button[移到回收站]", Duration::from_secs(2))
+        .unwrap();
+    assert!(renamed.is_dir());
+    app.right_click("label:改名后").unwrap();
+    app.press("role:menuitem[删除文件夹…]").unwrap();
+    app.press("role:button[移到回收站]").unwrap();
+    app.wait_for_gone("text:改名后", Duration::from_secs(5)).unwrap();
+    assert!(!renamed.exists(), "确认删除后目录应没了");
+
+    // 曲目行右键菜单里有「重命名文件…」，弹窗能开能取消（不动共享文件）。
+    app.wait_for("text:mono").unwrap();
+    app.right_click("label:mono").unwrap();
+    app.press("role:menuitem[重命名文件…]").unwrap();
+    app.wait_for("label:名称").unwrap();
+    app.press("label:取消").unwrap();
+}
+
+/// 右键菜单互斥：再开一个菜单时旧的关掉（右键按下不产生 PressOutside，
+/// 平台不会收旧菜单，靠 `store::menu_control` 的令牌互斥）；右键点到
+/// 没有菜单的地方，开着的菜单也要关掉。
+#[test]
+fn context_menus_replace_each_other() {
+    let mut app = start(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.wait_for_within("text:sub", Duration::from_secs(20))
+        .unwrap();
+    app.press("sub").unwrap();
+    app.wait_for("text:mono").unwrap();
+
+    // 开树行的菜单。
+    app.right_click("label:sub").unwrap();
+    app.wait_for("role:menuitem[新建子文件夹…]").unwrap();
+    assert_eq!(app.screen().count("role:menu").unwrap(), 1);
+
+    // 再开曲目行的：树菜单关掉，曲目菜单开——仍只有一个。
+    app.right_click("label:mono").unwrap();
+    app.wait_for("role:menuitem[重命名文件…]").unwrap();
+    app.wait_for_gone("role:menuitem[新建子文件夹…]", Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(app.screen().count("role:menu").unwrap(), 1);
+
+    // 右键点在没有菜单的地方（页头）：菜单关掉。
+    app.right_click("text:文件夹 >> nth=0").unwrap();
+    app.wait_for_gone("role:menuitem[重命名文件…]", Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(app.screen().count("role:menu").unwrap(), 0);
 }
 
 #[test]
