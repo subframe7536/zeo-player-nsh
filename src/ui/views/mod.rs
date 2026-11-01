@@ -166,7 +166,9 @@ fn hero(
                                 .line_height(px(11.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .letter_spacing(px(0.8))
-                                .text_color(primary()),
+                                .text_color(move || primary())
+                                .transition_colors()
+                                .duration(300.0),
                         )
                         .child(
                             text(title)

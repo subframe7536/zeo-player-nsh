@@ -207,7 +207,7 @@ pub fn sidebar_section() -> View {
             .role(AccessibilityRole::Button)
             .label("添加歌单")
             .window_drag(false)
-            .hover(|st| st.bg(sidebar_accent()))
+            .hover(|st| st.bg(move || primary().opacity(0.08)))
             .active(|st| st.opacity(0.6))
             .child(icon(Icon::Plus, 14.0, faint)),
     );
@@ -287,8 +287,8 @@ fn sidebar_row(p: &Playlist) -> AnyElement {
             .rounded(px(8.0))
             .accessibility_label(name.clone())
             .selected(active)
-            .selected_style(|st| st.bg(sidebar_accent()))
-            .hover(|st| st.bg(sidebar_accent()))
+            .selected_style(|st| st.bg(move || primary().opacity(0.12)))
+            .hover(|st| st.bg(move || primary().opacity(0.08)))
             .active(|st| st.opacity(0.7))
             .on_press(move |_: &()| {
                 store().search.set(String::new());
@@ -578,7 +578,9 @@ fn rule_editor(draft: Signal<Draft>) -> View {
                 .line_height(px(14.0))
                 .font_weight(FontWeight::MEDIUM)
                 .tabular_nums()
-                .text_color(primary()),
+                .text_color(move || primary())
+                .transition_colors()
+                .duration(300.0),
         );
     // 行数变化（添加 / 删除）时整组重建；改字段、条件、值只更新所在行。
     let rows = dynamic(move || {

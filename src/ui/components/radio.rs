@@ -26,14 +26,13 @@ pub fn group_cards() -> RadioGroupElement {
 
 /// 圆形指示器。
 fn indicator(on: impl Fn() -> bool + Copy + 'static) -> View {
-    let t = nsh_base::theme();
-    let (input, primary) = (t.input, t.primary);
+    let input = nsh_base::theme().input;
     view()
         .size(px(16.0))
         .flex_shrink_0()
         .rounded_full()
         .border_1()
-        .border_color(move || if on() { primary } else { input })
+        .border_color(move || if on() { primary() } else { input })
         .shadow_xs()
         .items_center()
         .justify_center()
@@ -43,8 +42,10 @@ fn indicator(on: impl Fn() -> bool + Copy + 'static) -> View {
             view()
                 .size(px(8.0))
                 .rounded_full()
-                .bg(primary)
-                .opacity(move || if on() { 1.0_f32 } else { 0.0 }),
+                .bg(move || primary())
+                .opacity(move || if on() { 1.0_f32 } else { 0.0 })
+                .transition_colors()
+                .duration(300.0),
         )
 }
 
@@ -90,8 +91,7 @@ pub fn card(
     hint: &'static str,
     pick: impl Fn() + 'static,
 ) -> RadioElement {
-    let t = nsh_base::theme();
-    let (border, primary) = (t.border, t.primary);
+    let border = nsh_base::theme().border;
     base(on, label, pick)
         .flex_1()
         .min_w(px(160.0))
@@ -101,10 +101,10 @@ pub fn card(
         .p(px(12.0))
         .rounded(px(RADIUS_LG))
         .border_1()
-        .border_color(move || if on() { primary } else { border })
+        .border_color(move || if on() { primary() } else { border })
         .bg(move || {
             if on() {
-                primary.opacity(0.05)
+                primary().opacity(0.05)
             } else {
                 AdaptiveColor::TRANSPARENT
             }

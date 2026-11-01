@@ -42,14 +42,31 @@ fn isolate() -> bool {
     corpus
 }
 
+/// 播放器是进程内全局单例：`init` 的 `restore_last` 会换掉共享的当前
+/// 曲目。播放敏感的用例持锁跑全程；其它用例起 app 时短暂取锁，撞上了
+/// 就等它放完。
+static PLAY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 持锁的用例 panic 会毒化 Mutex——锁里只有顺序语义没有数据，照拿。
+fn play_lock() -> std::sync::MutexGuard<'static, ()> {
+    PLAY_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// 桌面尺寸（宽 × 高，点）启动应用，主题与 nsh.json 相同。
 fn start(width: f32, height: f32) -> Headless {
+    let _guard = play_lock();
+    start_inner(width, height)
+}
+
+fn start_inner(width: f32, height: f32) -> Headless {
     isolate();
     let theme = nsh_base::Theme::from_json(include_str!("../theme.json")).expect("theme.json");
     let mut config = EngineConfig::new(Root::of::<App>().tokens(theme.into_tokens()));
     config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
     config.viewport = size(px(width), px(height));
     config.environment.os = Os::MacOs;
+    // 静音（在挂载前）：按压与恢复的播放会真的走 cpal 输出，测试不要出声。
+    zeo_player::engine::Player::global().set_volume(0.0);
     let mut app = Headless::start(config).expect("start the app");
     app.wait_for("文件夹").unwrap();
     app
@@ -74,7 +91,8 @@ fn sidebar_navigates_between_library_views() {
         assert!(has(&app, label), "{label}: {:?}", texts(&app));
     }
     app.press("专辑").unwrap();
-    assert!(has(&app, "未在播放"));
+    // 播放条在（共享播放器可能已被别的用例装上曲目，不断言「未在播放」）。
+    app.wait_for("label:播放队列").unwrap();
     // 设置弹窗：左栏分类 + 右栏选项，默认「外观」。
     app.press("设置").unwrap();
     app.wait_for("id:settings-content >> label:外观").unwrap();
@@ -150,6 +168,97 @@ fn appearance_select_switches_the_color_scheme() {
     app.press("label:系统").unwrap();
 }
 
+/// 设置弹窗 →「外观」分类 →「主题色」色块：选中态即时生效并落盘。
+#[test]
+fn accent_swatches_switch_and_persist_the_theme_color() {
+    let mut app = start(1200.0, 800.0);
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[外观]").unwrap();
+    app.wait_for("id:settings-content >> text:主题色").unwrap();
+    let swatch =
+        |label: &str| format!("id:settings-content >> role:button[主题色：{label}]");
+    app.wait_until(
+        "「封面」选中（出厂默认）",
+        Duration::from_secs(2),
+        |s| s.selected(&swatch("封面")).unwrap_or(false),
+    )
+    .unwrap();
+    app.press(&swatch("红")).unwrap();
+    app.wait_until(
+        "「红」选中",
+        Duration::from_secs(2),
+        |s| s.selected(&swatch("红")).unwrap_or(false),
+    )
+    .unwrap();
+    assert!(!app.screen().selected(&swatch("封面")).unwrap());
+    // 配置在线程里落盘：等它写完再断言。
+    let file = std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap())
+        .join("library.json");
+    let saved = |color: &str| {
+        std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .is_some_and(|v| v["theme_color"] == color)
+    };
+    for _ in 0..40 {
+        if saved("red") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(saved("red"));
+    app.press(&swatch("封面")).unwrap();
+}
+
+/// 「跟随封面」（出厂默认）：播放带封面的曲目后强调色换成封面主色调——
+/// 曲目标题从黑白染上彩色（饱和度 > 0）。
+#[test]
+fn cover_mode_tints_the_playing_track_title() {
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
+    // 先等封面线程把缩略图（连带主色调）算出来：art_hue 进了 MetaCache
+    // 后 request_accent 走同步快路径，不依赖可能被别的用例抢先取走的
+    // drain 通知。
+    let covers = std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap())
+        .join("covers");
+    app.wait_until(
+        "封面色调已算好",
+        Duration::from_secs(5),
+        |_| {
+            covers
+                .read_dir()
+                .map(|d| {
+                    d.flatten()
+                        .any(|e| e.file_name().to_string_lossy().ends_with("-400.jpg"))
+                })
+                .unwrap_or(false)
+        },
+    )
+    .unwrap();
+    // 文件夹视图 → 点进根文件夹，曲目行才出现。
+    app.press("zeo-player-test-music").unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+    app.press("测试歌曲").unwrap();
+    app.wait_until(
+        "曲目标题染成封面色",
+        Duration::from_secs(5),
+        |s| {
+            // 播放条也有同名标题（中性色）：只看曲目行里的那一个。
+            s.span_style("role:button[测试歌曲] >> text:测试歌曲")
+                .map(|st| {
+                    let c = st.color.0;
+                    let (r, g, b) = (c >> 24 & 0xff, c >> 16 & 0xff, c >> 8 & 0xff);
+                    // 黑白文字三通道相等；封面强调色有明显色差。
+                    r.max(g).max(b) - r.min(g).min(b) > 40
+                })
+                .unwrap_or(false)
+        },
+    )
+    .unwrap();
+    // 共享播放器：别让它放着歌去影响别的用例。
+    zeo_player::engine::Player::global().pause();
+}
+
 /// 设置弹窗 →「外观」分类 →「字体」下拉：触发器即当前字体；弹层里有
 /// 搜索框与预览行，选「系统字体」立即生效并关弹层。
 #[test]
@@ -209,12 +318,14 @@ fn full_player_opens_and_closes() {
     app.press("label:全屏播放").unwrap();
     app.wait_for("label:收起").unwrap();
     let t = texts(&app);
-    // 没在播放：不显示歌词区，只有左列。
     assert!(t.iter().any(|s| s == "Zeo Player"), "{t:?}");
-    assert!(
-        !t.iter().any(|s| s == "暂无歌词" || s == "正在载入歌词…"),
-        "{t:?}"
-    );
+    // 没在播放时才没有歌词区；播放器是共享的，别的用例可能已装上曲目。
+    if has(&app, "未在播放") {
+        assert!(
+            !t.iter().any(|s| s == "暂无歌词" || s == "正在载入歌词…"),
+            "{t:?}"
+        );
+    }
     app.press("label:收起").unwrap();
     app.wait_for_gone("label:收起", Duration::from_secs(2))
         .unwrap();

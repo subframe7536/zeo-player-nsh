@@ -223,6 +223,8 @@ pub struct Shared {
     pub gain: AtomicU32,
     /// 循环模式（[`LoopMode`] 的判别值）。
     pub loop_mode: AtomicU8,
+    /// 封面线程代次：换曲 +1，晚到的旧结果自检失效。
+    pub cover_gen: AtomicU64,
 }
 
 impl Shared {
@@ -311,6 +313,7 @@ impl EngineHandle {
             ring: Ring::new(),
             track: Mutex::new(TrackPublic::default()),
             loop_mode: AtomicU8::new(0),
+            cover_gen: AtomicU64::new(0),
         });
         let media = MediaSession::start(tx.clone());
         std::thread::Builder::new()
@@ -929,6 +932,10 @@ fn load_track(
                     .map(|i| i as i64)
                     .unwrap_or(0)
             };
+            // 封面文件已在缓存里（队尾预载 / 播过 / 扫过）就直接进快照：
+            // 同一帧里曲目信息与封面一起换，界面不会闪占位符；后台
+            // `load_covers` 照旧跑（色调补算、媒体会话、冷缓存生成）。
+            let cached = crate::metadata::covers::cached(&path);
             {
                 let mut t = shared.track.lock().unwrap();
                 t.path = Some(path.to_string_lossy().into_owned());
@@ -936,9 +943,13 @@ fn load_track(
                 t.artist = meta.artist.clone();
                 t.album = meta.album.clone();
                 // 封面在就绪后再生成（缩小的文件，不放原图字节）。
-                t.artwork = None;
-                t.backdrop = None;
-                t.covers_ready = false;
+                t.artwork = cached
+                    .as_ref()
+                    .map(|(large, _)| large.to_string_lossy().into_owned());
+                t.backdrop = cached
+                    .as_ref()
+                    .map(|(_, bg)| bg.to_string_lossy().into_owned());
+                t.covers_ready = cached.is_some();
                 t.duration = meta.duration;
                 t.queue = queue;
                 t.queue_index = actual_index;
@@ -946,7 +957,9 @@ fn load_track(
             }
             shared.ready.store(true, Ordering::Relaxed);
             // 封面由引擎循环在缓冲填起来之后生成（`load_covers`）。
-            media.set_artwork_file(None);
+            media.set_artwork_file(
+                cached.map(|(large, _)| file_url(&large.to_string_lossy())),
+            );
             publish_media(shared, media, true);
         }
         Err(err) => set_error(shared, &err),
@@ -955,26 +968,39 @@ fn load_track(
 }
 
 /// 给当前曲目生成封面：缩到 720 px 的 JPEG 缓存文件（界面与系统媒体会话
-/// 共用）和全屏背景小图。
+/// 共用）和全屏背景小图。解码 + 模糊在冷缓存时要几百毫秒：挪出引擎线程
+/// （不然饿死音频回调、也排不进正在预热的缩略图池），线程随换曲自生自灭，
+/// `cover_gen` 让晚到的旧结果失效。
 fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
     let Some(path) = shared.track.lock().unwrap().path.clone() else {
         return;
     };
-    let file = std::path::Path::new(&path);
-    let cover = crate::metadata::covers::large(file).map(|p| p.to_string_lossy().into_owned());
-    let backdrop =
-        crate::metadata::covers::backdrop(file).map(|p| p.to_string_lossy().into_owned());
-    {
-        let mut t = shared.track.lock().unwrap();
-        if t.path.as_deref() != Some(path.as_str()) {
+    let gen_id = shared.cover_gen.fetch_add(1, Ordering::Relaxed) + 1;
+    let shared = shared.clone();
+    let media = media.clone();
+    std::thread::spawn(move || {
+        if shared.cover_gen.load(Ordering::Relaxed) != gen_id {
             return;
         }
-        t.artwork = cover.clone();
-        t.backdrop = backdrop;
-        t.covers_ready = true;
-    }
-    media.set_artwork_file(cover.map(|c| file_url(&c)));
-    publish_media(shared, media, true);
+        let file = std::path::Path::new(&path);
+        let cover =
+            crate::metadata::covers::large(file).map(|p| p.to_string_lossy().into_owned());
+        let backdrop =
+            crate::metadata::covers::backdrop(file).map(|p| p.to_string_lossy().into_owned());
+        {
+            let mut t = shared.track.lock().unwrap();
+            if shared.cover_gen.load(Ordering::Relaxed) != gen_id
+                || t.path.as_deref() != Some(path.as_str())
+            {
+                return;
+            }
+            t.artwork = cover.clone();
+            t.backdrop = backdrop;
+            t.covers_ready = true;
+        }
+        media.set_artwork_file(cover.map(|c| file_url(&c)));
+        publish_media(&shared, &media, true);
+    });
 }
 
 /// 本地路径 → `file://` URL（Windows 盘符路径同样处理）。
@@ -1181,6 +1207,7 @@ mod tests {
             fade_target: AtomicU32::new(1f32.to_bits()),
             gain: AtomicU32::new(0f32.to_bits()),
             loop_mode: AtomicU8::new(0),
+            cover_gen: AtomicU64::new(0),
         };
         // 100 ms 后到一半（smoothstep(0.5) = 0.5），200 ms 后满。
         let mut buf = vec![0.0_f32; 4800 * 2];

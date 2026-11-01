@@ -95,6 +95,23 @@ pub const DEFAULT_MIN_DURATION_SECS: u32 = 10;
 /// 出厂过滤：小于 100 KB 的音频不进曲库。
 pub const DEFAULT_MIN_SIZE_KB: u32 = 100;
 
+/// 主题色（强调色）：默认跟随当前曲目封面的主色调（没有封面或封面
+/// 不饱和时回黑白），也可钉住黑白或预设色。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeColor {
+    /// 黑白。
+    Neutral,
+    Red,
+    Orange,
+    Green,
+    Blue,
+    Purple,
+    /// 当前曲目封面的主色调。
+    #[default]
+    Cover,
+}
+
 /// 持久化配置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryConfig {
@@ -126,6 +143,9 @@ pub struct LibraryConfig {
     /// 界面外观（跟随系统 / 浅色 / 深色）。
     #[serde(default)]
     pub appearance: Appearance,
+    /// 主题色（强调色）。
+    #[serde(default)]
+    pub theme_color: ThemeColor,
     /// 过滤：短于此时长（秒）的音频不进曲库（0 不过滤）。
     #[serde(default = "default_min_duration_secs")]
     pub min_duration_secs: u32,
@@ -159,6 +179,7 @@ impl Default for LibraryConfig {
             loop_mode: crate::engine::audio::LoopMode::default(),
             lyrics_align: LyricsAlign::default(),
             appearance: Appearance::default(),
+            theme_color: ThemeColor::default(),
             min_duration_secs: default_min_duration_secs(),
             min_size_kb: default_min_size_kb(),
         }
@@ -389,6 +410,18 @@ impl LibraryStore {
         self.config().watch
     }
 
+    /// 主题色（强调色）。
+    pub fn theme_color(&self) -> ThemeColor {
+        self.config().theme_color
+    }
+
+    /// 设置主题色（保存）。
+    pub fn set_theme_color(&self, color: ThemeColor) {
+        let mut config = self.config.lock().unwrap();
+        config.theme_color = color;
+        self.save_config(&config);
+    }
+
     /// 过滤：短于此时长（秒）的音频不进索引。
     pub fn min_duration_secs(&self) -> u32 {
         self.config().min_duration_secs
@@ -543,6 +576,11 @@ mod tests {
             "旧字段不再写出：{json}"
         );
         let fresh: LibraryConfig = serde_json::from_str(r#"{"roots":[]}"#).unwrap();
+        assert_eq!(
+            fresh.theme_color,
+            ThemeColor::Cover,
+            "缺主题色字段时出厂为跟随封面"
+        );
         assert_eq!(
             fresh.normalized().genre_separators,
             vec![";"],

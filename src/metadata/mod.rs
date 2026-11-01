@@ -26,8 +26,6 @@ pub struct MetaInfo {
     pub duration: f64,
     /// 是否有内嵌封面（字节不常驻内存：用 [`read_artwork`] 按需读取）。
     pub has_art: bool,
-    /// 内嵌歌词原文。
-    pub lyrics: Option<String>,
     pub bit_rate: Option<u32>,
     pub bit_depth: Option<u32>,
     pub sample_rate: Option<u32>,
@@ -42,6 +40,9 @@ pub struct MetaInfo {
     pub disk_total: Option<u32>,
     pub album_artists: Vec<String>,
     pub composers: Vec<String>,
+    /// 封面主色调（色相圈 0..1、饱和度 0..1）：不是标签，由 covers 工作线程
+    /// 在解码封面时算好并写进同一行（`MetaCache::set_art_hue`）。
+    pub art_hue: Option<(f32, f32)>,
 }
 
 fn strings(tag: &Tag, key: ItemKey) -> Vec<String> {
@@ -123,7 +124,6 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
         album_artist: String::new(),
         duration: props.duration().as_secs_f64(),
         has_art: false,
-        lyrics: None,
         bit_rate: props.overall_bitrate().or(props.audio_bitrate()),
         bit_depth: props.bit_depth().map(u32::from),
         sample_rate: props.sample_rate(),
@@ -144,6 +144,7 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
         disk_total: None,
         album_artists: Vec::new(),
         composers: Vec::new(),
+        art_hue: None,
     };
 
     if let Some(tag) = tag {
@@ -164,7 +165,6 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
             info.album_artist = album_artist;
         }
         info.genres = strings(tag, ItemKey::Genre);
-        info.lyrics = first(tag, ItemKey::Lyrics).or_else(|| first(tag, ItemKey::UnsyncLyrics));
         info.year = number(tag, ItemKey::Year).or_else(|| number(tag, ItemKey::RecordingDate));
         let (track, track_total) = pair(tag, ItemKey::TrackNumber);
         info.track = track;
@@ -192,6 +192,15 @@ pub fn read_artwork(path: &Path) -> Option<(Vec<u8>, Option<String>)> {
         picture.data().to_vec(),
         picture.mime_type().map(|m| m.as_str().to_owned()),
     ))
+}
+
+/// 按需读取内嵌歌词原文（同 [`read_artwork`]：用完即释放）。歌词不进
+/// 全局元数据缓存 / 数据库——全库常驻歌词文本太占内存，只缓存播放
+/// 位置附近的几首（`engine::Meta::lyrics`）。
+pub fn read_lyrics(path: &Path) -> Option<String> {
+    let tagged = lofty::read_from_path(path).ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    first(tag, ItemKey::Lyrics).or_else(|| first(tag, ItemKey::UnsyncLyrics))
 }
 
 /// 文件指纹：修改时间（纳秒）、大小，再加 Unix 的 inode 与 ctime 或
@@ -309,6 +318,47 @@ impl MetaCache {
     /// 读取（带缓存）：文件未变时直接返回缓存。
     pub fn get(&self, path: &Path) -> Result<Arc<MetaInfo>, String> {
         self.entry(path).map(|e| e.value)
+    }
+
+    /// `path` 已存的封面主色调（同步读，界面用）。
+    pub fn art_hue(&self, path: &Path) -> Option<(f32, f32)> {
+        self.entries
+            .lock()
+            .unwrap()
+            .get(path.to_string_lossy().as_ref())?
+            .value
+            .art_hue
+    }
+
+    /// 写封面主色调（covers 工作线程）：条目在且文件指纹未变才写
+    /// （指纹变了说明算的是旧封面，等下次读取重建）。写入走 `pending`
+    /// 与元数据同一批落库。
+    pub fn set_art_hue(&self, path: &Path, hue: Option<(f32, f32)>) {
+        let stamp = std::fs::metadata(path)
+            .map(|m| file_stamp(&m))
+            .unwrap_or(0);
+        let key = path.to_string_lossy().into_owned();
+        let row = {
+            let mut entries = self.entries.lock().unwrap();
+            let Some(entry) = entries.get_mut(&key) else {
+                return;
+            };
+            if entry.stamp != stamp || entry.value.art_hue == hue {
+                return;
+            }
+            let mut info = (*entry.value).clone();
+            info.art_hue = hue;
+            entry.value = Arc::new(info);
+            (key, entry.clone())
+        };
+        let flush = {
+            let mut pending = self.pending.lock().unwrap();
+            pending.push(row);
+            !self.batching.load(Ordering::Relaxed) || pending.len() >= FLUSH_AT
+        };
+        if flush {
+            self.flush();
+        }
     }
 
     /// 同 [`Self::get`]，连同文件指纹、大小与修改时间。

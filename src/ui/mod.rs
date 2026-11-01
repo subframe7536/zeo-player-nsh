@@ -119,7 +119,9 @@ pub fn App() -> impl IntoElement {
 
     let root = view()
         .flex_1()
-        .bg(bg())
+        .bg(move || bg())
+        .transition_colors()
+        .duration(300.0)
         .text_color(fg())
         // 文字样式由里面的文字继承：整个界面跟着设置里的字体走。
         .font_family(store::font_family)

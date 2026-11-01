@@ -18,9 +18,10 @@ cpal = "0.18"
 rubato = "5"
 playwire = "2"
 
-# 曲库：标签、封面缩略图、扫描与文件夹监视。
+# 曲库：标签、封面缩略图 / 主色调（color-thief 中位切分）、扫描与文件夹监视。
 lofty = "0.25"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
+color-thief = "0.2.2"
 walkdir = "2"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 dunce = "1"

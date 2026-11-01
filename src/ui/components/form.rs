@@ -126,7 +126,9 @@ pub fn dialog_content(width: f32) -> View {
         .rounded(px(RADIUS_LG))
         .border_1()
         .border_color(border())
-        .bg(bg())
+        .bg(move || bg())
+        .transition_colors()
+        .duration(300.0)
         .shadow_lg()
         .on_press(|| {})
 }

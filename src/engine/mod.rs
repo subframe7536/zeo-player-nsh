@@ -12,7 +12,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::config::{TrackEntry, library_store};
 use crate::db::LastPlayed;
 use crate::engine::audio::{EngineCmd, EngineHandle, Snapshot};
-use crate::metadata::MetaCache;
 use crate::metadata::lyrics::{LyricOptions, LyricsOutput, parse_lyric};
 
 /// 播放器引擎句柄。
@@ -244,33 +243,52 @@ pub enum LyricsSource {
 /// 歌词与波形。
 pub struct Meta;
 
+/// 已解析歌词的小缓存：只留播放位置附近的几首（当前曲目 + 队尾预载）。
+/// 歌词文本大，不进全局元数据缓存 / 数据库；条目带音频与 `.lrc` 的
+/// 文件指纹，任一变了自动失效。命中时移到队尾（LRU）。
+const LYRICS_CAP: usize = 8;
+type LyricsCache = Mutex<Vec<(String, u64, Arc<(LyricsOutput, LyricsSource)>)>>;
+
+fn lyrics_cache() -> &'static LyricsCache {
+    static CACHE: OnceLock<LyricsCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
 impl Meta {
-    /// 歌词：外置同名 `.lrc` 优先，其次内嵌；按 ap-spec 算法解析。
+    /// 歌词：外置同名 `.lrc` 优先，其次内嵌（按需 lofty 读，不进全局
+    /// 缓存）；按 ap-spec 算法解析。结果进 [`lyrics_cache`]——在后台
+    /// 线程调它即为队尾曲目的歌词预载。
     pub fn lyrics(path: &str) -> (LyricsOutput, LyricsSource) {
         let path = Path::new(path);
-        if let Some(lrc) = find_external_lrc(path)
-            && let Ok(text) = std::fs::read_to_string(&lrc)
+        let lrc = find_external_lrc(path);
+        let stamp = |p: &Path| {
+            std::fs::metadata(p).map_or(0, |m| crate::metadata::file_stamp(&m))
+        };
+        let key = lrc
+            .as_deref()
+            .map_or_else(|| stamp(path), |l| stamp(path) ^ stamp(l).wrapping_mul(31));
+        let name = path.to_string_lossy().into_owned();
         {
-            return (
-                parse_lyric(&text, LyricOptions::default()),
-                LyricsSource::External,
-            );
+            let mut cache = lyrics_cache().lock().unwrap();
+            if let Some(pos) = cache.iter().position(|(p, k, _)| *k == key && p == &name) {
+                let entry = cache.remove(pos);
+                let out = (*entry.2).clone();
+                cache.push(entry);
+                return out;
+            }
         }
-        if let Ok(meta) = MetaCache::global().get(path)
-            && let Some(text) = meta.lyrics.as_deref()
+        let loaded = load_lyrics(path, lrc.as_deref());
+        let out = loaded.0.clone();
+        let out_source = loaded.1;
         {
-            return (
-                parse_lyric(text, LyricOptions::default()),
-                LyricsSource::Embedded,
-            );
+            let mut cache = lyrics_cache().lock().unwrap();
+            cache.retain(|(p, _, _)| p != &name);
+            cache.push((name, key, Arc::new(loaded)));
+            while cache.len() > LYRICS_CAP {
+                cache.remove(0);
+            }
         }
-        (
-            LyricsOutput {
-                lines: Vec::new(),
-                timed: false,
-            },
-            LyricsSource::None,
-        )
+        (out, out_source)
     }
 
     /// 曲目的外置歌词文件路径（同名 `.lrc`）。
@@ -287,4 +305,30 @@ fn find_external_lrc(path: &Path) -> Option<PathBuf> {
         .into_iter()
         .map(|name| dir.join(name))
         .find(|candidate| candidate.is_file())
+}
+
+/// 真正读歌词：外置 `.lrc` 文本优先，内嵌按需 lofty 读；解析后由
+/// [`Meta::lyrics`] 放进小缓存。
+fn load_lyrics(path: &Path, lrc: Option<&Path>) -> (LyricsOutput, LyricsSource) {
+    if let Some(lrc) = lrc
+        && let Ok(text) = std::fs::read_to_string(lrc)
+    {
+        return (
+            parse_lyric(&text, LyricOptions::default()),
+            LyricsSource::External,
+        );
+    }
+    if let Some(text) = crate::metadata::read_lyrics(path) {
+        return (
+            parse_lyric(&text, LyricOptions::default()),
+            LyricsSource::Embedded,
+        );
+    }
+    (
+        LyricsOutput {
+            lines: Vec::new(),
+            timed: false,
+        },
+        LyricsSource::None,
+    )
 }

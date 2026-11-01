@@ -85,6 +85,8 @@ pub struct LibraryState {
     /// 过滤：短于此时长（秒）/ 小于此大小（KB）的音频不进曲库。
     pub min_duration_secs: u32,
     pub min_size_kb: u32,
+    /// 主题色（强调色）。
+    pub theme_color: crate::config::ThemeColor,
 }
 
 fn library_state() -> LibraryState {
@@ -104,6 +106,7 @@ fn library_state() -> LibraryState {
         appearance: lib.appearance(),
         min_duration_secs: lib.min_duration_secs(),
         min_size_kb: lib.min_size_kb(),
+        theme_color: lib.theme_color(),
     }
 }
 
@@ -146,6 +149,11 @@ pub struct Store {
     pub editor: Signal<Option<Draft>>,
     /// 设置弹窗打开中。
     pub settings: Signal<bool>,
+    /// 主题色覆盖的强调色（`None`：主题默认黑白）；`theme::primary` 读它。
+    pub accent: Signal<Option<AdaptiveColor>>,
+    /// 「跟随封面」时封面的原始主色调（色相圈、饱和度）——界面底色向它
+    /// 轻调（`theme::bg` 等）；预设色 / 黑白时 `None`。
+    pub tint: Signal<Option<(f32, f32)>>,
 }
 
 /// 歌单编辑弹窗的草稿：`id` 为 `None` 时是新建。
@@ -223,11 +231,16 @@ pub fn install() -> Store {
         }))),
         editor: signal(None),
         settings: signal(false),
+        accent: signal(None),
+        tint: signal(None),
     };
     STORE.with(|cell| cell.set(Some(s)));
+    apply_accent();
 
     // 引擎状态：100 ms 轮询共享状态（信号只在值变化时通知）。
     spawn(async move {
+        // 跟随封面的强调色：上次请求主色调的曲目。
+        let mut accent_track: Option<String> = None;
         loop {
             timer(Duration::from_millis(100)).await;
             let snap = player().state();
@@ -242,7 +255,12 @@ pub fn install() -> Store {
             s.track.set(now_playing(&snap));
             s.queue.set(Same(snap.queue.clone()));
             player().remember(&snap);
+            if snap.path != accent_track {
+                accent_track = snap.path.clone();
+                request_accent(&s, snap.path.as_deref());
+            }
             drain_covers();
+            drain_dominant();
         }
     });
 
@@ -367,6 +385,34 @@ pub fn install() -> Store {
         });
     });
 
+    // 队尾预载：当前曲目的后三首提前生成全部封面尺寸、解析好歌词
+    // （各自的有界缓存；歌词不进全局元数据缓存）。换曲或队列变化时
+    // 重算；重复请求在封面池 / 歌词缓存里去重，成本约等于零。
+    effect(move || {
+        path.get();
+        s.queue.get();
+        let snap = player().state();
+        let Ok(index) = usize::try_from(snap.queue_index) else {
+            return;
+        };
+        let next: Vec<String> = snap
+            .queue
+            .iter()
+            .skip(index + 1)
+            .take(3)
+            .cloned()
+            .collect();
+        if next.is_empty() {
+            return;
+        }
+        std::thread::spawn(move || {
+            for p in next {
+                crate::metadata::covers::request_warm(&p);
+                Meta::lyrics(&p);
+            }
+        });
+    });
+
     // 文件内容变了（监视或手动扫描后指纹不同）：重新生成它的封面。
     effect(move || {
         let tracks = s.tracks.get();
@@ -435,6 +481,79 @@ pub fn set_appearance(mode: crate::config::Appearance) {
     store().library.update(|l| l.appearance = mode);
     set_color_scheme(color_scheme(mode));
     std::thread::spawn(move || library_store().set_appearance(mode));
+}
+
+/// 主题色的当前覆盖强调色（`None`：主题默认黑白）；`theme::primary` 读它。
+pub fn accent() -> Option<AdaptiveColor> {
+    store().accent.get()
+}
+
+/// 「跟随封面」的原始主色调（界面底色轻调用；非封面模式为 `None`）。
+pub fn tint() -> Option<(f32, f32)> {
+    store().tint.get()
+}
+
+/// 主题色：预设强调色或跟随当前曲目封面（立即生效并保存）。
+pub fn set_theme_color(color: crate::config::ThemeColor) {
+    store().library.update(|l| l.theme_color = color);
+    apply_accent();
+    std::thread::spawn(move || library_store().set_theme_color(color));
+}
+
+/// 按 `theme_color` 刷新覆盖色：预设色直接写；跟随封面时对当前曲目
+/// 异步取主色调（结果由轮询的 [`drain_dominant`] 写回）。模式读 `library`
+/// 信号（`set_theme_color` 先更新它，落盘在线程里，内存配置有延迟）。
+fn apply_accent() {
+    let s = store();
+    match s.library.with(|l| l.theme_color) {
+        crate::config::ThemeColor::Cover => {
+            let path = s.track.with(|t| t.path.clone());
+            request_accent(&s, path.as_deref())
+        }
+        mode => {
+            s.accent.set(super::theme::preset_accent(mode));
+            s.tint.set(None);
+        }
+    }
+}
+
+/// 跟随封面模式下取 `path` 的主色调（扫描时已写进 SQLite，同步读）；
+/// 库里没有（老库 / 还没扫到）就让 covers 工作线程补算，结果经
+/// [`drain_dominant`] 写回。没有曲目时回主题色。
+fn request_accent(s: &Store, path: Option<&str>) {
+    if s.library.with(|l| l.theme_color) != crate::config::ThemeColor::Cover {
+        return;
+    }
+    let Some(path) = path else {
+        s.accent.set(None);
+        s.tint.set(None);
+        return;
+    };
+    match crate::metadata::covers::art_hue(std::path::Path::new(path)) {
+        Some((h, sat)) => {
+            s.accent.set(Some(super::theme::accent_of(h, sat)));
+            s.tint.set(Some((h, sat)));
+        }
+        None => {
+            s.accent.set(None);
+            s.tint.set(None);
+            crate::metadata::covers::request(path);
+        }
+    }
+}
+
+/// 封面主色调结果：跟随封面模式下成为强调色（只对当前曲目生效）。
+fn drain_dominant() {
+    for (path, hue) in crate::metadata::covers::take_dominant() {
+        let s = store();
+        if s.library.with(|l| l.theme_color) == crate::config::ThemeColor::Cover
+            && s.track.with(|t| t.path.as_deref() == Some(path.as_str()))
+        {
+            s.accent
+                .set(hue.map(|(h, sat)| super::theme::accent_of(h, sat)));
+            s.tint.set(hue);
+        }
+    }
 }
 
 /// 淡入淡出时长（立即生效并保存）。
@@ -838,6 +957,11 @@ pub fn cover_of(path: &str) -> Option<SharedString> {
             let owner = store().owner;
             let cover = owner.run(|| signal(None::<SharedString>));
             COVERS.with(|c| c.borrow_mut().insert(path.to_owned(), cover));
+            // 缩略图已在磁盘缓存（扫描预热 / 队尾预载 / 播过）就先填上，
+            // 免得闪一次占位符；请求照旧入队（色调补算 / 指纹变更重算）。
+            if let Some(thumb) = crate::metadata::covers::cached_thumb(Path::new(path)) {
+                cover.set(Some(thumb.to_string_lossy().into_owned().into()));
+            }
             crate::metadata::covers::request(path);
             cover
         }

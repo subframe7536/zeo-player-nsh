@@ -69,7 +69,9 @@ fn search_box(focus: SearchFocus) -> View {
         .rounded(px(SEARCH_H / 2.0))
         .border_1()
         .border_color(border())
-        .bg(bg())
+        .bg(move || bg())
+        .transition_colors()
+        .duration(300.0)
         .on_touch(move |e: &TouchEvent| {
             if e.phase == TouchPhase::Start {
                 focus.inside.set(true);
@@ -121,8 +123,8 @@ fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> nsh_base::ButtonEle
         .rounded(px(8.0))
         .accessibility_label(label)
         .selected(active)
-        .selected_style(|s| s.bg(sidebar_accent()))
-        .hover(|s| s.bg(sidebar_accent()))
+        .selected_style(|s| s.bg(move || primary().opacity(0.12)))
+        .hover(|s| s.bg(move || primary().opacity(0.08)))
         .active(|s| s.opacity(0.7))
         .on_press(move |_: &()| nav.set(target))
         .child(icon(glyph, 17.0, move || {
@@ -150,8 +152,8 @@ fn settings_row() -> nsh_base::ButtonElement {
         .rounded(px(8.0))
         .accessibility_label("设置")
         .selected(move || s.settings.get())
-        .selected_style(|st| st.bg(sidebar_accent()))
-        .hover(|st| st.bg(sidebar_accent()))
+        .selected_style(|st| st.bg(move || primary().opacity(0.12)))
+        .hover(|st| st.bg(move || primary().opacity(0.08)))
         .active(|st| st.opacity(0.7))
         .on_press(move |_: &()| s.settings.set(true))
         .child(icon(Icon::Settings, 17.0, move || {
@@ -186,7 +188,9 @@ pub(crate) fn sidebar(search: SearchFocus) -> View {
     view()
         .w(px(SIDEBAR))
         .flex_shrink_0()
-        .bg(theme::sidebar())
+        .bg(move || theme::sidebar())
+        .transition_colors()
+        .duration(300.0)
         .border_r_1()
         .border_r_color(sidebar_border())
         // 顶部让给标题栏（侧栏底色一直铺到窗口顶边，交通灯落在上面）。

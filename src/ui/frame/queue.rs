@@ -144,7 +144,9 @@ fn queue_panel(open: Signal<bool>) -> View {
                             .text_size(px(13.0))
                             .line_height(px(13.0))
                             .font_weight(FontWeight::MEDIUM)
-                            .text_color(move || if is_current() { primary() } else { fg() }),
+                            .text_color(move || if is_current() { primary() } else { fg() })
+                            .transition_colors()
+                            .duration(300.0),
                     )
                     .child(
                         text(move || {

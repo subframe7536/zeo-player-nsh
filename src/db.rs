@@ -1,6 +1,7 @@
-//! SQLite 存储：曲目元数据（封面之外的全部：标签、技术参数、内嵌歌词，
-//! 按文件指纹失效）与播放状态（上次播放的曲目、位置和队列）。文件是数据
-//! 目录里的 `zeo-player.db`；打不开时什么也不存，应用照常只用内存。
+//! SQLite 存储：曲目元数据（封面与歌词之外的全部：标签、技术参数，
+//! 按文件指纹失效；歌词不入库——只缓存播放位置附近的几首）与播放状态
+//! （上次播放的曲目、位置和队列）。文件是数据目录里的 `zeo-player.db`；
+//! 打不开时什么也不存，应用照常只用内存。
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -13,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::metadata::{CacheEntry, MetaInfo};
 
 /// 当前表结构版本（`PRAGMA user_version`）。改表时加一，并在 [`migrate`] 里迁移。
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 3;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS tracks (
@@ -49,9 +50,9 @@ CREATE TABLE IF NOT EXISTS state (
 );
 ";
 
-const COLUMNS: &str = "path, stamp, size, modified, title, artist, album, album_artist, duration, has_art, lyrics, \
+const COLUMNS: &str = "path, stamp, size, modified, title, artist, album, album_artist, duration, has_art, \
     bit_rate, bit_depth, sample_rate, channels, codec, quality, genres, year, track, track_total, disk, disk_total, \
-    album_artists, composers";
+    album_artists, composers, art_hue, art_sat";
 
 fn db() -> Option<&'static Mutex<Connection>> {
     static DB: OnceLock<Option<Mutex<Connection>>> = OnceLock::new();
@@ -87,6 +88,18 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     if version < 1 {
         conn.execute_batch(SCHEMA_V1)?;
+    }
+    if version < 2 {
+        // 封面主色调（扫描时 covers 工作线程算好写入；老行 NULL = 未算）。
+        conn.execute_batch(
+            "ALTER TABLE tracks ADD COLUMN art_hue REAL;
+             ALTER TABLE tracks ADD COLUMN art_sat REAL;",
+        )?;
+    }
+    if version < 3 {
+        // 歌词不再入全局缓存 / 数据库（内嵌歌词按需读，只缓存播放位置
+        // 附近的几首）：清掉老行里存的歌词文本。列保留，新行写 NULL。
+        conn.execute_batch("UPDATE tracks SET lyrics = NULL")?;
     }
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -149,21 +162,27 @@ pub fn load_meta() -> Vec<(String, CacheEntry)> {
                 album_artist: r.get(7)?,
                 duration: r.get(8)?,
                 has_art: r.get(9)?,
-                lyrics: r.get(10)?,
-                bit_rate: r.get(11)?,
-                bit_depth: r.get(12)?,
-                sample_rate: r.get(13)?,
-                channels: r.get(14)?,
-                codec: r.get(15)?,
-                quality: r.get(16)?,
-                genres: list(r.get(17)?),
-                year: r.get(18)?,
-                track: r.get(19)?,
-                track_total: r.get(20)?,
-                disk: r.get(21)?,
-                disk_total: r.get(22)?,
-                album_artists: list(r.get(23)?),
-                composers: list(r.get(24)?),
+                bit_rate: r.get(10)?,
+                bit_depth: r.get(11)?,
+                sample_rate: r.get(12)?,
+                channels: r.get(13)?,
+                codec: r.get(14)?,
+                quality: r.get(15)?,
+                genres: list(r.get(16)?),
+                year: r.get(17)?,
+                track: r.get(18)?,
+                track_total: r.get(19)?,
+                disk: r.get(20)?,
+                disk_total: r.get(21)?,
+                album_artists: list(r.get(22)?),
+                composers: list(r.get(23)?),
+                art_hue: match (
+                    r.get::<_, Option<f64>>(24)?,
+                    r.get::<_, Option<f64>>(25)?,
+                ) {
+                    (Some(h), Some(s)) => Some((h as f32, s as f32)),
+                    _ => None,
+                },
             };
             let entry = CacheEntry {
                 stamp: r.get::<_, i64>(1)? as u64,
@@ -188,7 +207,7 @@ pub fn save_meta(rows: &[(String, CacheEntry)]) {
         {
             let mut stmt = tx.prepare_cached(&format!(
                 "INSERT OR REPLACE INTO tracks ({COLUMNS}) VALUES \
-                 (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)"
+                 (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)"
             ))?;
             for (path, entry) in rows {
                 let m = &entry.value;
@@ -203,7 +222,6 @@ pub fn save_meta(rows: &[(String, CacheEntry)]) {
                     m.album_artist,
                     m.duration,
                     m.has_art,
-                    m.lyrics,
                     m.bit_rate,
                     m.bit_depth,
                     m.sample_rate,
@@ -218,6 +236,8 @@ pub fn save_meta(rows: &[(String, CacheEntry)]) {
                     m.disk_total,
                     json(&m.album_artists),
                     json(&m.composers),
+                    m.art_hue.map(|(h, _)| h as f64),
+                    m.art_hue.map(|(_, s)| s as f64),
                 ])?;
             }
         }

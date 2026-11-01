@@ -10,11 +10,11 @@ use nsh_core::prelude::*;
 use super::super::components::button::{
     Size, Variant, icon_button, outline_button, pill_button, text_button,
 };
-use super::super::components::icons::{Icon, icon};
-use super::super::store::{Same, format_total, scan, store};
+use super::super::components::icons::{Icon, icon, icon_dyn};
+use super::super::store::{Same, format_total, scan, set_theme_color, store};
 use super::super::theme::*;
 use super::{SEP, last_segment, total_duration};
-use crate::config::library_store;
+use crate::config::{ThemeColor, library_store};
 
 /// file:// URL → 路径（百分号解码）。Windows 的 `file:///C:/Music` 去掉
 /// 盘符前的 `/`，并换成 `\\`。
@@ -200,7 +200,7 @@ fn folders_section() -> View {
                         view()
                             .size(px(36.0))
                             .rounded(px(9.0))
-                            .bg(bg())
+                            .bg(move || bg())
                             .items_center()
                             .justify_center()
                             .child(icon(Icon::Folder, 18.0, primary)),
@@ -270,6 +270,8 @@ fn folders_section() -> View {
             AdaptiveColor::TRANSPARENT
         }
     })
+    .transition_colors()
+    .duration(300.0)
     .on_file_drag_enter(move || dragging.set(true))
     .on_file_drag_leave(move || dragging.set(false))
     .on_file_drop(move |event: &FileDropEvent| {
@@ -389,7 +391,7 @@ fn library_section() -> View {
                     .indicator_style(|st| {
                         st.h_full()
                             .rounded_full()
-                            .bg(primary())
+                            .bg(move || primary())
                             .transition_all()
                             .duration(150.0)
                     }),
@@ -456,7 +458,10 @@ fn watch_row() -> View {
                 .border_color(border())
                 .transition_colors()
                 .duration(150.0)
-                .checked(|st| st.bg(primary()).border_color(primary()))
+                .checked(|st| {
+                    st.bg(move || primary())
+                        .border_color(move || primary())
+                })
         })
         .thumb_style(|st| {
             st.size(px(18.0))
@@ -579,7 +584,12 @@ fn genres_section() -> View {
             .border_1()
             .border_color(border())
             .selected(on)
-            .selected_style(|st| st.border_color(primary()).bg(primary().opacity(0.12)))
+            .selected_style(|st| {
+                st.border_color(move || primary())
+                    .bg(move || primary().opacity(0.12))
+            })
+            .transition_colors()
+            .duration(300.0)
             .accessibility_label(caption.unwrap_or("自定义分隔符"))
             .hover(|st| st.bg(hover()))
             .active(|st| st.opacity(0.7))
@@ -727,7 +737,7 @@ fn genres_section() -> View {
                 .gap(px(4.0))
                 .p(px(12.0))
                 .rounded(px(10.0))
-                .bg(bg())
+                .bg(move || bg())
                 .child(
                     text(move || {
                         let total: HashSet<String> = s
@@ -876,6 +886,78 @@ fn appearance_select() -> AnyElement {
     menu.into_element()
 }
 
+/// 主题色：一排预设色 + 跟随当前曲目封面（强调色，立即生效）。
+fn accent_section() -> View {
+    const OPTIONS: &[(ThemeColor, &str)] = &[
+        (ThemeColor::Neutral, "黑白"),
+        (ThemeColor::Red, "红"),
+        (ThemeColor::Orange, "橙"),
+        (ThemeColor::Green, "绿"),
+        (ThemeColor::Blue, "蓝"),
+        (ThemeColor::Purple, "紫"),
+        (ThemeColor::Cover, "封面"),
+    ];
+    let mut swatches = view().flex_row().flex_wrap().gap(px(8.0));
+    for &(mode, label) in OPTIONS {
+        swatches = swatches.child(accent_swatch(mode, label));
+    }
+    setting_section(
+        "主题色",
+        "按钮与选中态的强调色：默认跟随当前曲目封面（并轻调界面底色），也可钉住黑白或预设色。",
+        Some(swatches.into_element()),
+    )
+}
+
+/// 主题色色块：圆形预设色，选中时显示对勾。「封面」块未生效时为灰底
+/// 音符，生效后实时显示当前封面的主色调。
+fn accent_swatch(mode: ThemeColor, label: &'static str) -> nsh_base::ButtonElement {
+    use super::super::store::accent;
+    let preset = preset_accent(mode);
+    let on = move || store().library.with(|l| l.theme_color) == mode;
+    nsh_base::button()
+        .size(px(24.0))
+        .rounded_full()
+        .items_center()
+        .justify_center()
+        .bg(move || match mode {
+            ThemeColor::Neutral => nsh_base::theme().primary,
+            // 封面色：只在本选项生效时实时显示，否则灰底。
+            ThemeColor::Cover => accent().filter(|_| on()).unwrap_or_else(muted),
+            _ => preset.unwrap(),
+        })
+        .transition_colors()
+        .duration(300.0)
+        .accessibility_label(SharedString::from(format!("主题色：{label}")))
+        .selected(on)
+        .hover(|st| st.opacity(0.85))
+        .active(|st| st.opacity(0.7))
+        .on_press(move |_: &()| set_theme_color(mode))
+        .child(
+            icon_dyn(
+                move || {
+                    if on() {
+                        Icon::Check
+                    } else {
+                        Icon::Note
+                    }
+                },
+                12.0,
+                move || {
+                    if !on() {
+                        fg()
+                    } else if mode == ThemeColor::Neutral {
+                        nsh_base::theme().primary_foreground
+                    } else {
+                        AdaptiveColor::rgb(0xffffff, 0xffffff)
+                    }
+                },
+            )
+            .opacity(move || {
+                (on() || mode == ThemeColor::Cover) as i32 as f32
+            }),
+        )
+}
+
 /// 字体：系统字体或任一已安装字体（同一行右侧的下拉，带搜索与逐字体预览）。
 /// 字体列表懒加载：打开弹层才读取已安装字体；关闭或离开设置页时整块销毁
 /// （列表数据、读取任务、各行的字体预览一起释放）。
@@ -955,7 +1037,9 @@ fn font_choice(
         .rounded(px(6.0))
         .accessibility_label(move || SharedString::from(label()))
         .selected(selected)
-        .selected_style(|st| st.bg(primary().opacity(0.12)))
+        .selected_style(|st| st.bg(move || primary().opacity(0.12)))
+        .transition_colors()
+        .duration(300.0)
         .hover(|st| st.bg(hover()))
         .active(|st| st.opacity(0.7))
         .on_press(move |_: &()| press())
@@ -1230,6 +1314,12 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         pane: Pane::Appearance,
+        title: "主题色",
+        keys: "主题色 颜色 强调色 黑白 红 橙 绿 蓝 紫 封面 自动",
+        build: accent_section,
+    },
+    Section {
+        pane: Pane::Appearance,
         title: "字体",
         keys: "字体 系统字体 已安装 预览 字形",
         build: font_section,
@@ -1266,7 +1356,7 @@ fn search_box(query: Signal<String>) -> View {
         .rounded(px(14.0))
         .border_1()
         .border_color(border())
-        .bg(bg())
+        .bg(move || bg())
         .child(icon(Icon::Search, 13.0, faint).flex_shrink_0())
         .child(
             input()
@@ -1305,8 +1395,8 @@ fn pane_row(p: Pane, pane: Signal<Pane>) -> nsh_base::ButtonElement {
         .rounded(px(8.0))
         .accessibility_label(p.title())
         .selected(active)
-        .selected_style(|st| st.bg(sidebar_accent()))
-        .hover(|st| st.bg(sidebar_accent()))
+        .selected_style(|st| st.bg(move || primary().opacity(0.12)))
+        .hover(|st| st.bg(move || primary().opacity(0.08)))
         .active(|st| st.opacity(0.7))
         .on_press(move |_: &()| pane.set(p))
         .child(icon(p.glyph(), 15.0, move || {
@@ -1332,7 +1422,7 @@ fn result_row(s: &'static Section, pane: Signal<Pane>) -> nsh_base::ButtonElemen
         .px(px(10.0))
         .rounded(px(8.0))
         .accessibility_label(s.title)
-        .hover(|st| st.bg(sidebar_accent()))
+        .hover(|st| st.bg(move || primary().opacity(0.08)))
         .active(|st| st.opacity(0.7))
         .on_press(move |_: &()| pane.set(s.pane))
         .child(icon(s.pane.glyph(), 15.0, sidebar_fg))
@@ -1376,7 +1466,9 @@ fn nav_column(pane: Signal<Pane>, query: Signal<String>) -> View {
     view()
         .w(px(220.0))
         .flex_shrink_0()
-        .bg(sidebar())
+        .bg(move || sidebar())
+        .transition_colors()
+        .duration(300.0)
         .test_id("settings-nav")
         .child(view().p(px(10.0)).child(search_box(query)))
         .child(
@@ -1484,7 +1576,9 @@ pub(crate) fn dialog() -> AnyElement {
         .rounded(px(super::super::components::form::RADIUS_LG))
         .border_1()
         .border_color(border())
-        .bg(bg())
+        .bg(move || bg())
+        .transition_colors()
+        .duration(300.0)
         .shadow_lg()
         // 点在内容上不会穿到背后的遮罩。
         .on_press(|| {})

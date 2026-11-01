@@ -242,7 +242,9 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .gap(px(16.0))
         .px(px(14.0))
         .rounded(px(16.0))
-        .bg(bar())
+        .bg(move || bar())
+        .transition_colors()
+        .duration(300.0)
         .border_1()
         .border_color(border())
         .shadow_lg();

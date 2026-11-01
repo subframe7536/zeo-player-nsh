@@ -82,7 +82,7 @@ impl Size {
 pub fn foreground(variant: Variant) -> AdaptiveColor {
     let t = nsh_base::theme();
     match variant {
-        Variant::Default => t.primary_foreground,
+        Variant::Default => primary_fg(),
         Variant::Secondary => t.secondary_foreground,
         Variant::Outline | Variant::Ghost => t.foreground,
         Variant::Destructive => AdaptiveColor::rgb(0xffffff, 0xffffff),
@@ -92,8 +92,8 @@ pub fn foreground(variant: Variant) -> AdaptiveColor {
 /// 只有外形的按钮（尺寸、底色、状态样式），内容由调用方给。
 pub fn shell(variant: Variant, size: Size) -> ButtonElement {
     let t = nsh_base::theme();
-    let (ring, primary, secondary, destructive, outline) =
-        (t.ring, t.primary, t.secondary, t.destructive, t.border);
+    let (ring, secondary, destructive, outline) =
+        (t.ring, t.secondary, t.destructive, t.border);
     let h = size.height();
     let b = button()
         .flex_row()
@@ -118,14 +118,20 @@ pub fn shell(variant: Variant, size: Size) -> ButtonElement {
         b.px(px(pad)).gap(px(gap))
     };
     match variant {
-        Variant::Default => b.bg(primary).hover(move |st| st.bg(primary.opacity(0.9))),
+        Variant::Default => b
+            .bg(move || primary())
+            .hover(|st| st.bg(move || primary().opacity(0.9)))
+            .transition_colors()
+            .duration(300.0),
         Variant::Secondary => b
             .bg(secondary)
             .hover(move |st| st.bg(secondary.opacity(0.8))),
         Variant::Outline => b
             .border_1()
             .border_color(outline)
-            .bg(bg())
+            .bg(move || bg())
+            .transition_colors()
+            .duration(300.0)
             .shadow_xs()
             .hover(|st| st.bg(hover())),
         Variant::Ghost => b.hover(|st| st.bg(hover())),
@@ -155,7 +161,7 @@ pub fn text_button(
                 .text_size(px(size.text_size()))
                 .line_height(px(size.text_size()))
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(fg()),
+                .text_color(move || fg()),
         )
 }
 

@@ -65,8 +65,8 @@ fn end_to_end_playback() {
     );
     assert_eq!(flac.track, Some(1));
     assert!(
-        flac.duration > 1.9 && flac.duration < 2.1,
-        "flac 时长 ≈2s，实际 {}",
+        flac.duration > 9.9 && flac.duration < 10.1,
+        "flac 时长 ≈10s，实际 {}",
         flac.duration
     );
 
@@ -120,6 +120,8 @@ fn end_to_end_playback() {
         flac.path.clone(),
     ];
     let player = Player::new();
+    // 静音：真实输出设备上跑解码与播放路径，但不要出声。
+    player.set_volume(0.0);
     player.open(mp3.to_string_lossy().into_owned(), queue);
     assert!(
         wait_for(3000, || player.state().is_ready

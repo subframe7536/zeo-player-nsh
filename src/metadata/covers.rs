@@ -3,9 +3,9 @@
 //! Windows `%APPDATA%\Zeo Player\covers`；按 路径 + 修改时间 + 大小 + 文件指纹 命名）。
 //! 后台线程池处理请求，结果由 UI 轮询取走。
 
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use crate::metadata::MetaCache;
 
@@ -20,43 +20,104 @@ const WORKERS: usize = 3;
 /// 已完成的（曲目路径, 缩略图路径），工作线程写、界面取走。
 type Done = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
+/// 工作任务：`Thumb` 只生成列表缩略图，`Warm` 生成全部尺寸（队尾
+/// 预载——当前曲目的后三首，换歌时大封面 / 背景不再现算）。
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum Job {
+    Thumb(String),
+    Warm(String),
+}
+
+/// 工作队列：界面可见与队尾预载的请求从队首进（高优先级），扫描
+/// 预热从队尾进（低优先级）；`queued` 按（类型, 路径）去重，已在
+/// 队列里的重复请求直接丢掉。
 struct Pool {
-    tx: Mutex<Sender<String>>,
+    q: Arc<(Mutex<VecDeque<Job>>, Condvar)>,
+    queued: Arc<Mutex<HashSet<Job>>>,
     done: Done,
 }
 
 fn pool() -> &'static Pool {
     static POOL: OnceLock<Pool> = OnceLock::new();
     POOL.get_or_init(|| {
-        let (tx, rx) = channel::<String>();
-        let rx = Arc::new(Mutex::new(rx));
+        let q = Arc::new((Mutex::new(VecDeque::new()), Condvar::new()));
+        let queued = Arc::new(Mutex::new(HashSet::new()));
         let done = Arc::new(Mutex::new(Vec::new()));
         for i in 0..WORKERS {
-            let rx: Arc<Mutex<Receiver<String>>> = rx.clone();
+            let q = q.clone();
+            let queued = queued.clone();
             let done = done.clone();
             std::thread::Builder::new()
                 .name(format!("zeo-player-cover-{i}"))
                 .spawn(move || {
+                    let (m, cv) = &*q;
                     loop {
-                        let next = rx.lock().unwrap().recv();
-                        let Ok(path) = next else { return };
-                        let thumb =
-                            thumbnail(Path::new(&path)).map(|p| p.to_string_lossy().into_owned());
-                        done.lock().unwrap().push((path, thumb));
+                        let job = {
+                            let mut q = m.lock().unwrap();
+                            loop {
+                                if let Some(j) = q.pop_front() {
+                                    break j;
+                                }
+                                q = cv.wait(q).unwrap();
+                            }
+                        };
+                        // 先出标记再干活：处理中的重请求会再入队（文件可
+                        // 能变了，值得重算），排队中的重请求则丢掉。
+                        queued.lock().unwrap().remove(&job);
+                        match job {
+                            Job::Thumb(path) => {
+                                let thumb = thumbnail(Path::new(&path))
+                                    .map(|p| p.to_string_lossy().into_owned());
+                                done.lock().unwrap().push((path, thumb));
+                            }
+                            Job::Warm(path) => {
+                                let p = Path::new(&path);
+                                let thumb = thumbnail(p);
+                                large(p);
+                                backdrop(p);
+                                let thumb = thumb.map(|p| p.to_string_lossy().into_owned());
+                                done.lock().unwrap().push((path, thumb));
+                            }
+                        }
                     }
                 })
                 .expect("spawn cover worker");
         }
-        Pool {
-            tx: Mutex::new(tx),
-            done,
-        }
+        Pool { q, queued, done }
     })
 }
 
-/// 请求 `path` 的缩略图（结果经 [`take_done`] 取回）。
+fn enqueue(job: Job, front: bool) {
+    let pool = pool();
+    if !pool.queued.lock().unwrap().insert(job.clone()) {
+        return;
+    }
+    let (m, cv) = &*pool.q;
+    let mut q = m.lock().unwrap();
+    if front {
+        q.push_front(job);
+    } else {
+        q.push_back(job);
+    }
+    cv.notify_one();
+}
+
+/// 请求 `path` 的缩略图（结果经 [`take_done`] 取回）。工作线程顺手算
+/// 封面主色调写库，色调结果经 [`take_dominant`] 取回。高优先级：界面
+/// 可见的封面插到队首，不排在扫描预热后面。
 pub fn request(path: &str) {
-    let _ = pool().tx.lock().unwrap().send(path.to_owned());
+    enqueue(Job::Thumb(path.to_owned()), true);
+}
+
+/// 队尾预载：`path` 的全部封面尺寸（缩略图 + 大封面 + 背景）都提前
+/// 生成好；同样插队首，排在扫描预热前面。
+pub fn request_warm(path: &str) {
+    enqueue(Job::Warm(path.to_owned()), true);
+}
+
+/// 低优先级请求（扫描时给整库预热缩略图）：排到队尾。
+pub fn request_low(path: &str) {
+    enqueue(Job::Thumb(path.to_owned()), false);
 }
 
 /// 取走已完成的（曲目路径, 缩略图路径）。
@@ -78,11 +139,112 @@ pub fn clear_cache() {
     let _ = std::fs::remove_dir_all(cache_dir());
 }
 
+// --- 主色调 -------------------------------------------------------------------
+
+/// 已完成的（曲目路径, 主色调），工作线程写、界面取走。
+fn hue_done() -> &'static Mutex<Vec<(String, Option<(f32, f32)>)>> {
+    static DONE: OnceLock<Mutex<Vec<(String, Option<(f32, f32)>)>>> = OnceLock::new();
+    DONE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// 取走已完成的（曲目路径, 主色调）（「跟随封面」强调色的实时更新）。
+pub fn take_dominant() -> Vec<(String, Option<(f32, f32)>)> {
+    std::mem::take(&mut *hue_done().lock().unwrap())
+}
+
+/// `path` 封面已存的主色调（界面同步读；存在 SQLite 曲目行里，扫描时算好，
+/// 没有内存缓存层）。
+pub fn art_hue(path: &Path) -> Option<(f32, f32)> {
+    MetaCache::global().art_hue(path)
+}
+
+/// 库里没有色调时解码封面算一次（covers 工作线程；扫描时每个有封面的
+/// 文件都会走到这里，保证 `art_hue` 尽量入库）。优先用已缓存的 `cached`
+/// 缩略图（小 JPEG，省一次 lofty + 原图解码），没有才回源文件读内嵌封面。
+fn ensure_hue(path: &Path, cached: &Path) {
+    if MetaCache::global().art_hue(path).is_some() {
+        return;
+    }
+    let hue = image::open(cached)
+        .ok()
+        .and_then(|img| palette_hue(&img))
+        .or_else(|| {
+            let (bytes, _) = crate::metadata::read_artwork(path)?;
+            palette_hue(&image::load_from_memory(&bytes).ok()?)
+        });
+    store_hue(path, hue);
+}
+
+/// 主色调写进元数据缓存（随元数据行落 SQLite）并通知界面。
+fn store_hue(path: &Path, hue: Option<(f32, f32)>) {
+    MetaCache::global().set_art_hue(path, hue);
+    hue_done()
+        .lock()
+        .unwrap()
+        .push((path.to_string_lossy().into_owned(), hue));
+}
+
+/// 封面主色调（色相 0..1 圈、饱和度 0..1）：中位切分取调色板里最饱和的
+/// 颜色（color-thief，同 JS color-thief 算法）；全是灰 / 太白太黑时
+/// 为 `None`——调用方回主题色。
+fn palette_hue(img: &image::DynamicImage) -> Option<(f32, f32)> {
+    let rgb = img
+        .resize(64, 64, image::imageops::FilterType::Triangle)
+        .to_rgb8();
+    let palette =
+        color_thief::get_palette(rgb.as_raw(), color_thief::ColorFormat::Rgb, 4, 5).ok()?;
+    palette
+        .iter()
+        .filter_map(|c| {
+            let (h, s, l) = hsl_of(c.r, c.g, c.b);
+            (s >= 0.15 && (0.12..0.85).contains(&l)).then_some((h, s))
+        })
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+/// sRGB → HSL（各 0..1，色相为圈）。
+fn hsl_of(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let (r, g, b) = (r as f32 / 255., g as f32 / 255., b as f32 / 255.);
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (max + min) / 2.;
+    let d = max - min;
+    if d == 0. {
+        return (0., 0., l);
+    }
+    let s = d / (1. - (2. * l - 1.).abs());
+    let h = if max == r {
+        (g - b) / d + if g < b { 6. } else { 0. }
+    } else if max == g {
+        (b - r) / d + 2.
+    } else {
+        (r - g) / d + 4.
+    } / 6.;
+    (h, s, l)
+}
+
 /// FNV-1a（跨版本稳定的文件名）。
 fn fnv(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
         (h ^ *b as u64).wrapping_mul(0x0000_0100_0000_01b3)
     })
+}
+
+/// `path` 已缓存的大封面与背景（两个文件都在才返回）：只查文件存在
+/// 与否、不生成——引擎换曲时同步调它，热缓存的封面直接进快照、不露
+/// 占位符；色调补算 / 生成仍走后台（`load_covers` / 工作池）。
+pub fn cached(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    let key = cache_key(path)?;
+    let dir = cache_dir();
+    let large = dir.join(format!("{key:016x}-{LARGE}.jpg"));
+    let bg = dir.join(format!("{key:016x}-bg{BACKDROP}.jpg"));
+    (large.is_file() && bg.is_file()).then_some((large, bg))
+}
+
+/// `path` 已缓存的列表缩略图（只查文件，不生成）。
+pub fn cached_thumb(path: &Path) -> Option<PathBuf> {
+    let key = cache_key(path)?;
+    let out = cache_dir().join(format!("{key:016x}-{THUMB}.jpg"));
+    out.is_file().then_some(out)
 }
 
 /// `path` 的封面缩略图文件（[`THUMB`] 像素）；没有封面为 `None`。
@@ -132,6 +294,8 @@ fn cover_file(path: &Path, side: u32) -> Option<PathBuf> {
     let dir = cache_dir();
     let out = dir.join(format!("{key:016x}-{side}.jpg"));
     if out.is_file() {
+        // 缩略图已在但色调未算（老库 / 灰封面）：补算一次写库。
+        ensure_hue(path, &out);
         return Some(out);
     }
     if !MetaCache::global().get(path).ok()?.has_art {
@@ -142,6 +306,9 @@ fn cover_file(path: &Path, side: u32) -> Option<PathBuf> {
     let tmp = out.with_extension("tmp");
     match image::load_from_memory(&bytes) {
         Ok(img) => {
+            if MetaCache::global().art_hue(path).is_none() {
+                store_hue(path, palette_hue(&img));
+            }
             let img = if img.width() > side || img.height() > side {
                 img.resize(side, side, image::imageops::FilterType::Triangle)
             } else {
@@ -164,6 +331,60 @@ fn cover_file(path: &Path, side: u32) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 调色板取色：纯色图出主色，灰图不给强调色。
+    #[test]
+    fn palette_hue_picks_the_saturated_color() {
+        let red = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            64,
+            64,
+            image::Rgb([220, 30, 40]),
+        ));
+        let (h, s) = palette_hue(&red).expect("红图应有主色调");
+        assert!((h - 0.0).abs() < 0.02 || h > 0.98, "红色相约 0: {h}");
+        assert!(s > 0.5, "饱和度应高: {s}");
+        let gray = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            64,
+            64,
+            image::Rgb([128, 128, 128]),
+        ));
+        assert_eq!(palette_hue(&gray), None, "灰图不给强调色");
+    }
+
+    /// sRGB → HSL 的基准色与灰度。
+    #[test]
+    fn hsl_of_primaries_and_grays() {
+        let (h, s, l) = hsl_of(255, 0, 0);
+        assert!((h - 0.0).abs() < 1e-6 && (s - 1.0).abs() < 1e-6 && (l - 0.5).abs() < 1e-6);
+        let (h, _, l) = hsl_of(0, 255, 0);
+        assert!((h - 1.0 / 3.0).abs() < 1e-6 && (l - 0.5).abs() < 1e-6);
+        let (h, _, l) = hsl_of(0, 0, 255);
+        assert!((h - 2.0 / 3.0).abs() < 1e-6 && (l - 0.5).abs() < 1e-6);
+        let (_, s, l) = hsl_of(255, 255, 255);
+        assert_eq!((s, l), (0.0, 1.0));
+        let (_, s, l) = hsl_of(128, 128, 128);
+        assert_eq!(s, 0.0);
+        assert!((l - 128.0 / 255.0).abs() < 1e-6);
+    }
+
+    /// 语料 sine.flac（内嵌红色封面）：读标签 → has_art → 取封面 → 主色调。
+    #[test]
+    fn corpus_cover_pipeline() {
+        let path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/.nsh/tmp/zeo-player-test-music/sine.flac"
+        ));
+        if !path.is_file() {
+            eprintln!("跳过：语料不存在（sh scripts/make-test-music.sh）");
+            return;
+        }
+        let info = crate::metadata::read_meta(path).expect("read_meta");
+        assert!(info.has_art, "sine.flac 应有内嵌封面");
+        let (bytes, mime) = crate::metadata::read_artwork(path).expect("read_artwork");
+        let img = image::load_from_memory(&bytes).expect("decode cover");
+        let hue = palette_hue(&img);
+        assert!(hue.is_some(), "红色封面应有主色调（mime={mime:?}）");
+    }
 
     /// 真实曲库里的一首（没有则跳过）：生成缩略图并命中缓存。
     #[test]

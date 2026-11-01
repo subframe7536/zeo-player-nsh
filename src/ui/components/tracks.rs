@@ -228,7 +228,9 @@ pub fn track_row(
                         .text_size(px(14.0))
                         .line_height(px(14.0))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(move || if current.get() { primary() } else { fg() }),
+                        .text_color(move || if current.get() { primary() } else { fg() })
+                        .transition_colors()
+                        .duration(300.0),
                 )
                 .child(
                     text(field(|t| t.artist.clone()))

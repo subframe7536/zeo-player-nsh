@@ -515,7 +515,6 @@ mod tests {
             album_artist: String::new(),
             duration: 0.0,
             has_art: false,
-            lyrics: None,
             bit_rate: Some(160),
             bit_depth: None,
             sample_rate: Some(44_100),
@@ -530,6 +529,7 @@ mod tests {
             disk_total: None,
             album_artists: Vec::new(),
             composers: Vec::new(),
+            art_hue: None,
         }
     }
 

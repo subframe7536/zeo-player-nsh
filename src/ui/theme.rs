@@ -1,7 +1,11 @@
 //! 颜色与尺寸：全部取自主题（`theme.json`），全屏播放页固定深色。
+//! 强调色（`primary`）可被「主题色」设置覆盖：预设色或当前曲目封面
+//! 的主色调（`store::accent` 信号，读取即订阅）。
 
 use nsh_base::theme;
 use nsh_core::prelude::*;
+
+use crate::config::ThemeColor;
 
 /// 侧栏宽度。
 pub const SIDEBAR: f32 = 232.0;
@@ -10,8 +14,9 @@ pub const TITLE_BAR: f32 = 40.0;
 /// 底部播放条高度（含外边距），列表据此留出底部空间。
 pub const BAR_SPACE: f32 = 104.0;
 
+/// 主体界面底色：同侧栏一样的饱和加值，但提亮度成粉彩（更亮的有色底）。
 pub fn bg() -> AdaptiveColor {
-    theme().background
+    tinted(theme().background, 0.05, 0.04)
 }
 pub fn fg() -> AdaptiveColor {
     theme().foreground
@@ -25,17 +30,60 @@ pub fn muted_fg() -> AdaptiveColor {
 pub fn border() -> AdaptiveColor {
     theme().border
 }
+/// 主色：「主题色」为强调色 / 跟随封面时返回覆盖色，否则主题默认（黑白）。
+/// 在绑定 / `move ||` 里调用才会订阅覆盖信号。
 pub fn primary() -> AdaptiveColor {
-    theme().primary
+    super::store::accent().unwrap_or_else(|| theme().primary)
 }
+/// 主色上的文字 / 图标：有覆盖色时统一近白（预设与封面色都压得够深），
+/// 否则主题值。
+pub fn primary_fg() -> AdaptiveColor {
+    if super::store::accent().is_some() {
+        AdaptiveColor::rgb(0xffffff, 0xffffff)
+    } else {
+        theme().primary_foreground
+    }
+}
+/// 预设强调色（`Neutral` / `Cover` 为 `None`）。
+pub fn preset_accent(color: ThemeColor) -> Option<AdaptiveColor> {
+    Some(match color {
+        ThemeColor::Neutral | ThemeColor::Cover => return None,
+        ThemeColor::Red => AdaptiveColor::rgb(0xe5263f, 0xff4d63),
+        ThemeColor::Orange => AdaptiveColor::rgb(0xea580c, 0xfb923c),
+        ThemeColor::Green => AdaptiveColor::rgb(0x16a34a, 0x4ade80),
+        ThemeColor::Blue => AdaptiveColor::rgb(0x2563eb, 0x60a5fa),
+        ThemeColor::Purple => AdaptiveColor::rgb(0x9333ea, 0xc084fc),
+    })
+}
+/// 封面主色调（色相圈、饱和度）→ 浅 / 深色各一份强调色：饱和度与亮度
+/// 压进可读范围，避免荧光色或太浅看不清。
+pub fn accent_of(hue: f32, saturation: f32) -> AdaptiveColor {
+    let s = saturation.clamp(0.45, 0.85);
+    AdaptiveColor::new(hsla(hue, s, 0.42, 1.0), hsla(hue, s, 0.62, 1.0))
+}
+/// 「跟随封面」时向封面色相轻调的底色：保留各模式的透明，只加封面色
+/// 的饱和（`store::tint` 信号，读取即订阅）。`sat_add` 是额外饱和度
+///（0..1），`light` 是亮度加减（非 0 时夹在 0.04..0.96，让白底变成
+/// 仍有色的粉彩）。
+fn tinted(base: AdaptiveColor, sat_add: f32, light: f32) -> AdaptiveColor {
+    match super::store::tint() {
+        Some((h, s)) => base.map(|c| {
+            let l = if light == 0.0 {
+                c.l
+            } else {
+                (c.l + light).clamp(0.04, 0.96)
+            };
+            hsla(h, (s * 0.35 + sat_add).min(0.5), l, c.a)
+        }),
+        None => base,
+    }
+}
+/// 主侧边栏与设置弹窗左栏的底色：压暗一档，比右侧内容区深（也多一点饱和）。
 pub fn sidebar() -> AdaptiveColor {
-    theme().sidebar
+    tinted(theme().sidebar, 0.05, -0.04)
 }
 pub fn sidebar_fg() -> AdaptiveColor {
     theme().sidebar_foreground
-}
-pub fn sidebar_accent() -> AdaptiveColor {
-    theme().sidebar_accent
 }
 pub fn sidebar_border() -> AdaptiveColor {
     theme().sidebar_border
@@ -45,9 +93,9 @@ pub fn sidebar_border() -> AdaptiveColor {
 /// 底下的封面直接透出来。
 pub fn bar() -> AdaptiveColor {
     #[cfg(target_os = "windows")]
-    return theme().card;
+    return tinted(theme().card, 0.05, 0.0);
     #[cfg(not(target_os = "windows"))]
-    theme().color("bar").unwrap_or(theme().card)
+    tinted(theme().color("bar").unwrap_or(theme().card), 0.05, 0.0)
 }
 /// 最弱一级文字（列头、占位）。
 pub fn faint() -> AdaptiveColor {

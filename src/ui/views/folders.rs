@@ -401,6 +401,8 @@ fn folder_cell(
                 muted()
             }
         })
+        .transition_colors()
+        .duration(300.0)
         .child(icon(Icon::Folder, 20.0, move || {
             if is_root() { primary() } else { muted_fg() }
         }));

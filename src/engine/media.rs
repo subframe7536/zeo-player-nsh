@@ -15,6 +15,7 @@ enum Op {
     Artwork(Option<String>),
 }
 
+#[derive(Clone)]
 pub struct MediaSession {
     tx: Sender<Op>,
 }
