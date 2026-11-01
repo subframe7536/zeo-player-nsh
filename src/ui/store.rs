@@ -80,6 +80,8 @@ pub struct LibraryState {
     pub close_action: crate::library::CloseAction,
     pub fade_ms: u32,
     pub lyrics_align: crate::library::LyricsAlign,
+    /// 界面外观（跟随系统 / 浅色 / 深色）。
+    pub appearance: crate::library::Appearance,
 }
 
 fn library_state() -> LibraryState {
@@ -96,6 +98,7 @@ fn library_state() -> LibraryState {
         close_action: lib.close_action(),
         fade_ms: lib.fade_ms(),
         lyrics_align: lib.lyrics_align(),
+        appearance: lib.appearance(),
     }
 }
 
@@ -376,6 +379,7 @@ pub fn install() -> Store {
 
     crate::watcher::sync();
     crate::window::set_close_action(library_store().close_action());
+    set_color_scheme(color_scheme(library_store().appearance()));
     player().set_fade_ms(library_store().fade_ms());
     player().set_loop_mode(library_store().loop_mode());
     // 在设好循环模式之后：随机模式下恢复的队列按它重新洗牌。
@@ -405,6 +409,22 @@ pub fn font_family() -> SharedString {
 pub fn set_lyrics_align(align: crate::library::LyricsAlign) {
     store().library.update(|l| l.lyrics_align = align);
     std::thread::spawn(move || library_store().set_lyrics_align(align));
+}
+
+/// 持久化的外观 → NSH 的 `Appearance`（`set_color_scheme` 的参数）。
+fn color_scheme(mode: crate::library::Appearance) -> Appearance {
+    match mode {
+        crate::library::Appearance::System => Appearance::System,
+        crate::library::Appearance::Light => Appearance::Light,
+        crate::library::Appearance::Dark => Appearance::Dark,
+    }
+}
+
+/// 界面外观（立即生效并保存）。
+pub fn set_appearance(mode: crate::library::Appearance) {
+    store().library.update(|l| l.appearance = mode);
+    set_color_scheme(color_scheme(mode));
+    std::thread::spawn(move || library_store().set_appearance(mode));
 }
 
 /// 淡入淡出时长（立即生效并保存）。

@@ -534,6 +534,7 @@ fn rule_editor(draft: Signal<Draft>) -> View {
     let chip = move |label: &'static str, all: bool| {
         tab_trigger(
             move || match_all() == all,
+            None,
             label,
             move || change(Box::new(move |r| r.match_all = all)),
         )
@@ -780,7 +781,7 @@ fn select(
     options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)>,
     width: f32,
 ) -> AnyElement {
-    let trigger = select_trigger(current, label, width, "");
+    let trigger = select_trigger(current, || None, label, width, "");
     let menu = menu().offset(px(4.0)).margin(px(8.0)).trigger(trigger);
     // 选项多（字段有十几个）时在弹层里滚动：弹层的 max_h 只限制它自己，
     // 不限制直接放进去的子项。
@@ -803,7 +804,7 @@ fn tag_select(
     pick: impl Fn(String) + Copy + 'static,
 ) -> AnyElement {
     let s = store();
-    let trigger = select_trigger(current, "值", 0.0, "选择标签");
+    let trigger = select_trigger(current, || None, "值", 0.0, "选择标签");
     let menu = menu().offset(px(4.0)).margin(px(8.0)).trigger(trigger);
     let items = dynamic(move || {
         let tracks = s.tracks.get();

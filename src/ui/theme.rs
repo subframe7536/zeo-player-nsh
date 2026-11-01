@@ -25,9 +25,6 @@ pub fn muted_fg() -> AdaptiveColor {
 pub fn border() -> AdaptiveColor {
     theme().border
 }
-pub fn card() -> AdaptiveColor {
-    theme().card
-}
 pub fn primary() -> AdaptiveColor {
     theme().primary
 }

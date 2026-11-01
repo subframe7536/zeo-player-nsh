@@ -39,12 +39,49 @@ pub fn input_field(small: bool) -> Input {
 /// shadcn SelectTrigger（`size="sm"`）：`h-8 rounded-md border border-input
 /// px-3 text-sm shadow-xs`，右侧 16 pt chevron 半透明。`width` 不大于 0
 /// 时随父容器伸缩（最小 80）；值为空时显示浅色的 `placeholder`。
+/// `glyph` 是当前值的前置图标（可无，随 `current` 变化）。
 pub fn select_trigger(
     current: impl Fn() -> String + Copy + 'static,
+    glyph: impl Fn() -> Option<Icon> + Copy + 'static,
     label: &'static str,
     width: f32,
     placeholder: &'static str,
 ) -> View {
+    trigger_shell(label, width)
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .child(dynamic(move || {
+                    glyph().map(|g| icon(g, 14.0, fg).into_element())
+                }))
+                .child(
+                    text(move || {
+                        let value = current();
+                        if value.is_empty() {
+                            placeholder.to_owned()
+                        } else {
+                            value
+                        }
+                    })
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .number_of_lines(1)
+                    .text_size(px(14.0))
+                    .text_color(move || if current().is_empty() { faint() } else { fg() }),
+                ),
+        )
+        .child(trigger_chevron())
+}
+
+/// SelectTrigger 的外壳（`h-8 rounded-md border border-input px-3
+/// shadow-xs`，悬停 `bg-accent`，深色 `bg-input/30`），内容（值、chevron
+/// 等）由调用方给。`width` 约定同 [`select_trigger`]。popover 的触发器
+/// 必须是普通 view 时用这个，保持和下拉触发器同一外观。
+pub fn trigger_shell(label: &'static str, width: f32) -> View {
     let input_c = nsh_base::theme().input;
     let trigger = view()
         .h(px(32.0))
@@ -60,31 +97,19 @@ pub fn select_trigger(
         .dark(move |st| st.bg(input_c.opacity(0.3)))
         .hover(move |st| st.bg(hover()))
         .role(AccessibilityRole::Button)
-        .label(label)
-        .child(
-            text(move || {
-                let value = current();
-                if value.is_empty() {
-                    placeholder.to_owned()
-                } else {
-                    value
-                }
-            })
-            .flex_1()
-            .number_of_lines(1)
-            .text_size(px(14.0))
-            .text_color(move || if current().is_empty() { faint() } else { fg() }),
-        )
-        .child(
-            view()
-                .opacity(0.5)
-                .child(icon(Icon::ChevronDown, 16.0, muted_fg)),
-        );
+        .label(label);
     if width > 0.0 {
         trigger.w(px(width))
     } else {
         trigger.flex_1().min_w(px(80.0))
     }
+}
+
+/// SelectTrigger 右侧的 chevron（16 pt，半透明）。
+pub fn trigger_chevron() -> View {
+    view()
+        .opacity(0.5)
+        .child(icon(Icon::ChevronDown, 16.0, muted_fg))
 }
 
 /// shadcn DialogContent：`rounded-lg border bg-background p-6 gap-4
@@ -156,8 +181,10 @@ pub fn tab_list() -> TabsElement {
 
 /// shadcn TabsTrigger：`rounded-md px-2 py-1 text-sm font-medium`，选中时
 /// `bg-background shadow-sm`（深色时背景色本身就比 `bg-muted` 暗，不另加描边）。
+/// `glyph` 为前置图标（可无）；图标与文字颜色一样，选中变深。
 pub fn tab_trigger(
     on: impl Fn() -> bool + Copy + 'static,
+    glyph: Option<Icon>,
     label: &'static str,
     press: impl Fn() + 'static,
 ) -> TabElement {
@@ -167,14 +194,17 @@ pub fn tab_trigger(
         .on_press(move |_: &()| press())
         .h_full()
         .px(px(8.0))
+        .flex_row()
         .items_center()
         .justify_center()
+        .gap(px(6.0))
         .rounded(px(RADIUS_MD))
         .border_1()
         .border_color(AdaptiveColor::TRANSPARENT)
         .transition_colors()
         .duration(150.0)
         .style_with(move |st| if on() { st.bg(bg()).shadow_sm() } else { st })
+        .child(glyph.map(|g| icon(g, 14.0, move || if on() { fg() } else { muted_fg() })))
         .child(
             text(label)
                 .text_size(px(14.0))

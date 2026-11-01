@@ -4,10 +4,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use nsh_core::element::input;
 use nsh_core::prelude::*;
 
 use super::Nav;
+use super::button::{Size, Variant, text_button};
 use super::icons::{Icon, icon};
 use super::parts::*;
 use super::store::{Same, cover_of, format_total, play_list, scan, store};
@@ -1264,16 +1264,12 @@ fn add_as_root(path: &str) -> String {
     }
 }
 
-/// 设置里的一张卡片：标题、说明、右上角操作，然后是内容。
-fn card_section(title: &'static str, body: &'static str, action: Option<AnyElement>) -> View {
+/// 设置里的一节：标题、说明、右上角操作，然后是内容（无卡片包装，
+/// 节与节之间靠页面间距分开）。
+fn setting_section(title: &'static str, body: &'static str, action: Option<AnyElement>) -> View {
     view()
         .w_full()
         .gap(px(16.0))
-        .p(px(20.0))
-        .rounded(px(14.0))
-        .bg(card())
-        .border_1()
-        .border_color(border())
         .child(
             view()
                 .flex_row()
@@ -1305,7 +1301,7 @@ fn note(message: Signal<String>) -> AnyElement {
     })
 }
 
-fn folders_card() -> View {
+fn folders_section() -> View {
     let s = store();
     let message = signal(String::new());
     let dragging = signal(false);
@@ -1392,7 +1388,7 @@ fn folders_card() -> View {
                         view()
                             .size(px(36.0))
                             .rounded(px(9.0))
-                            .bg(card())
+                            .bg(bg())
                             .items_center()
                             .justify_center()
                             .child(icon(Icon::Folder, 18.0, primary)),
@@ -1444,12 +1440,21 @@ fn folders_card() -> View {
         .style_when(move || picking.get(), |st| st.opacity(0.5))
         .child(pill_button(Icon::Plus, "添加文件夹…", pick));
 
-    card_section(
+    setting_section(
         "音乐文件夹",
-        "Zeo Player 会扫描这些文件夹里的 MP3、FLAC 和 WAV，包括子文件夹。也可以把文件夹拖进这张卡片。",
+        "Zeo Player 会扫描这些文件夹里的 MP3、FLAC 和 WAV，包括子文件夹。也可以把文件夹拖到这一节上。",
         Some(add.into_element()),
     )
-    .border_color(move || if dragging.get() { primary() } else { border() })
+    // 拖放目标的描边：平时透明，文件拖入时亮主题色。
+    .rounded(px(10.0))
+    .border_1()
+    .border_color(move || {
+        if dragging.get() {
+            primary()
+        } else {
+            AdaptiveColor::TRANSPARENT
+        }
+    })
     .on_file_drag_enter(move || dragging.set(true))
     .on_file_drag_leave(move || dragging.set(false))
     .on_file_drop(move |event: &FileDropEvent| {
@@ -1461,7 +1466,7 @@ fn folders_card() -> View {
     .child(note(message))
 }
 
-fn library_card() -> View {
+fn library_section() -> View {
     let s = store();
     let progress = move || s.library.with(|l| l.progress.clone());
     let scanning = move || s.library.with(|l| l.scanning);
@@ -1578,7 +1583,7 @@ fn library_card() -> View {
             )
     };
 
-    card_section(
+    setting_section(
         "曲库",
         "索引保存在本机，启动时自动扫描。「重建曲库」会清空标签和封面缓存，从文件重新读取全部曲目。",
         Some(actions.into_element()),
@@ -1700,7 +1705,7 @@ fn separator_label(sep: &str) -> String {
     }
 }
 
-fn genres_card() -> View {
+fn genres_section() -> View {
     let s = store();
     let draft = signal(String::new());
     let separators = move || s.library.with(|l| l.separators.clone());
@@ -1787,16 +1792,8 @@ fn genres_card() -> View {
         .items_center()
         .gap(px(8.0))
         .child(
-            input()
+            super::form::input_field(true)
                 .w(px(160.0))
-                .h(px(32.0))
-                .px(px(12.0))
-                .rounded(px(8.0))
-                .border_1()
-                .border_color(theme_input())
-                .bg(bg())
-                .text_size(px(14.0))
-                .text_color(fg())
                 .value(move || draft.get())
                 .placeholder("其它分隔符，如 ・")
                 .on_change(move |text: &str| draft.set(text.to_owned()))
@@ -1804,26 +1801,20 @@ fn genres_card() -> View {
         )
         .child(outline_button(Icon::Plus, "添加", add_custom))
         .child(view().flex_1())
-        .child(
-            view()
-                .role(AccessibilityRole::Button)
-                .label("恢复默认")
-                .px(px(10.0))
-                .h(px(32.0))
-                .justify_center()
-                .rounded(px(8.0))
-                .hover(|st| st.bg(hover()))
-                .active(|st| st.opacity(0.7))
-                .on_press(|| {
-                    super::store::set_separators(
-                        crate::library::DEFAULT_SEPARATORS
-                            .iter()
-                            .map(|s| (*s).to_owned())
-                            .collect(),
-                    )
-                })
-                .child(text("恢复默认").text_size(px(13.0)).text_color(muted_fg())),
-        );
+        .child(text_button(
+            Variant::Ghost,
+            Size::Sm,
+            None,
+            "恢复默认",
+            || {
+                super::store::set_separators(
+                    crate::library::DEFAULT_SEPARATORS
+                        .iter()
+                        .map(|s| (*s).to_owned())
+                        .collect(),
+                )
+            },
+        ));
 
     // 预览：曲库里最常见的、含多个值的原始流派标签，按当前分隔符拆开。
     let samples = computed(move || {
@@ -1921,7 +1912,7 @@ fn genres_card() -> View {
         })
     });
 
-    card_section(
+    setting_section(
         "流派标签",
         "一个流派标签里有多个值时，按下面选中的分隔符拆开，并去掉首尾空格。修改后立即生效，不用重新扫描。",
         None,
@@ -1931,77 +1922,160 @@ fn genres_card() -> View {
     .child(preview)
 }
 
-/// 字体：系统字体或任一已安装的字体家族，整个界面立即换用。
-/// 字体列表懒加载：点「更改字体…」才读取；收起或离开设置页时整块销毁
-/// （列表数据、读取任务、各行的字体预览一起释放）。
-fn font_card() -> View {
-    let s = store();
-    let expanded = signal(false);
-    let current = move || s.library.with(|l| l.font.clone());
-
-    let system = view()
-        .flex_row()
-        .items_center()
-        .gap(px(12.0))
-        .h(px(48.0))
-        .px(px(12.0))
-        .rounded(px(10.0))
-        .border_1()
-        .border_color(move || {
-            if current().is_none() {
-                primary()
-            } else {
-                border()
-            }
-        })
-        .bg(move || {
-            if current().is_none() {
-                primary().opacity(0.12)
-            } else {
-                AdaptiveColor::TRANSPARENT
-            }
-        })
-        .role(AccessibilityRole::Button)
-        .label("系统字体")
-        .hover(|st| st.bg(hover()))
-        .active(|st| st.opacity(0.7))
-        .on_press(|| super::store::set_font(None))
-        .child(
-            view()
-                .flex_1()
-                .gap(px(2.0))
-                .child(
-                    text("系统字体")
-                        .font_family("system-ui")
-                        .text_size(px(14.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(fg()),
-                )
-                .child(
-                    text(move || match current() {
-                        Some(font) => format!("当前：{font}"),
-                        None => "当前使用系统字体".to_owned(),
-                    })
-                    .text_size(px(12.0))
-                    .text_color(muted_fg()),
-                ),
-        );
-
-    let toggle = move || {
-        view().self_start().child(outline_button(
-            Icon::ChevronDown,
-            "更改字体…",
-            move || expanded.set(true),
-        ))
-    };
-
-    card_section("字体", "整个界面（包括歌词）换用所选字体，立即生效。", None)
-        .child(system)
-        .child(when(move || expanded.get(), move || font_browser(expanded)).otherwise(toggle))
+/// 外观：跟随系统 / 固定浅色 / 固定深色（同一行右侧的下拉）。
+fn appearance_section() -> View {
+    setting_section(
+        "外观",
+        "跟随系统的浅色 / 深色外观，或为界面固定一种。",
+        Some(appearance_select()),
+    )
 }
 
-/// 展开后的字体列表：在后台读取系统已安装的字体，读完再显示。
-fn font_browser(expanded: Signal<bool>) -> View {
+/// 「外观」的下拉：触发器显示当前值，菜单列三个带图标的选项。
+fn appearance_select() -> AnyElement {
+    use crate::library::Appearance;
+    use nsh_base::menu;
+    let s = store();
+    const OPTIONS: &[(Appearance, Icon, &str)] = &[
+        (Appearance::System, Icon::Monitor, "系统"),
+        (Appearance::Light, Icon::Sun, "浅色"),
+        (Appearance::Dark, Icon::Moon, "深色"),
+    ];
+    let current_mode = move || {
+        OPTIONS
+            .iter()
+            .find(|(m, _, _)| *m == s.library.with(|l| l.appearance))
+            .copied()
+    };
+    let current = move || current_mode().map_or("系统", |(_, _, l)| l).to_owned();
+    let trigger = super::form::select_trigger(
+        current,
+        move || current_mode().map(|(_, g, _)| g),
+        "外观",
+        110.0,
+        "",
+    );
+    let mut menu = menu()
+        .offset(px(4.0))
+        .margin(px(8.0))
+        .popup_style(|st| {
+            st.min_w(px(140.0))
+                .p(px(4.0))
+                .rounded(px(10.0))
+                .overflow_hidden()
+                .border_1()
+                .border_color(border())
+                .bg(nsh_base::theme().popover)
+                .shadow_lg()
+        })
+        .trigger(trigger);
+    for &(mode, glyph, label) in OPTIONS {
+        menu = menu.child(super::playlists::item(
+            label,
+            Some(glyph),
+            move || super::store::set_appearance(mode),
+        ));
+    }
+    menu.into_element()
+}
+
+/// 字体：系统字体或任一已安装字体（同一行右侧的下拉，带搜索与逐字体预览）。
+/// 字体列表懒加载：打开弹层才读取已安装字体；关闭或离开设置页时整块销毁
+/// （列表数据、读取任务、各行的字体预览一起释放）。
+fn font_section() -> View {
+    setting_section(
+        "字体",
+        "整个界面（包括歌词）换用所选字体，立即生效。",
+        Some(font_select()),
+    )
+}
+
+/// 「字体」的下拉：触发器用当前字体写自己的名字；弹层里是搜索框 +
+/// 「系统字体」+ 已安装字体列表。`open` 由这里持有（选一个后关上）。
+fn font_select() -> AnyElement {
+    use nsh_base::{PopoverEvent, popover};
+    let s = store();
+    let open = signal(false);
+    let current = move || s.library.with(|l| l.font.clone());
+    // 触发器是普通 view（popover 接管按压）：select_trigger 的外壳 +
+    // chevron，名字用所选字体渲染，所见即所得。
+    let trigger = super::form::trigger_shell("字体", 200.0)
+        .child(
+            text(move || current().unwrap_or_else(|| "系统字体".to_owned()))
+                .flex_1()
+                .min_w(px(0.0))
+                .number_of_lines(1)
+                .text_size(px(14.0))
+                .font_family(move || {
+                    SharedString::from(current().unwrap_or_else(|| "system-ui".to_owned()))
+                })
+                .text_color(fg()),
+        )
+        .child(super::form::trigger_chevron());
+
+    popover()
+        .open(move || Some(open.get()))
+        .on_open_change(move |e: &PopoverEvent| {
+            if let PopoverEvent::OpenChange(next, _) = e {
+                open.set(*next);
+            }
+        })
+        .placement(Placement::Bottom)
+        .align(Align::End)
+        .offset(px(4.0))
+        .margin(px(8.0))
+        .popup_style(|st| {
+            st.w(px(300.0))
+                .p(px(4.0))
+                .rounded(px(10.0))
+                .overflow_hidden()
+                .border_1()
+                .border_color(border())
+                .bg(nsh_base::theme().popover)
+                .shadow_lg()
+        })
+        .trigger(trigger)
+        // 面板随 open 建 / 拆：打开才枚举已安装字体，关闭整块释放。
+        .child(when(move || open.get(), move || font_panel(open)))
+        .into_element()
+}
+
+/// 字体选项的一行：显示名用它自己的字体渲染 + 「歌词 Aa あ」样例，
+/// 选中行有主题色底与对勾。
+fn font_choice(
+    label: impl Fn() -> String + Copy + 'static,
+    family: impl Fn() -> String + Copy + 'static,
+    selected: impl Fn() -> bool + Copy + 'static,
+    press: impl Fn() + 'static,
+) -> View {
+    view()
+        .h(px(40.0))
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(8.0))
+        .rounded(px(6.0))
+        .role(AccessibilityRole::Button)
+        .label(move || label())
+        .style_when(selected, |st| st.bg(primary().opacity(0.12)))
+        .hover(|st| st.bg(hover()))
+        .active(|st| st.opacity(0.7))
+        .on_press(move || press())
+        .child(
+            text(move || format!("{} · 歌词 Aa あ", label()))
+                .flex_1()
+                .min_w(px(0.0))
+                .number_of_lines(1)
+                .font_family(move || SharedString::from(family()))
+                .text_size(px(14.0))
+                .text_color(fg()),
+        )
+        .child(when(selected, || icon(Icon::Check, 14.0, primary)))
+}
+
+/// 「字体」弹层：搜索框、「系统字体」、已安装字体（懒加载：打开才读，
+/// 关闭整块销毁）。
+fn font_panel(open: Signal<bool>) -> View {
     let s = store();
     let query = signal(String::new());
     let current = move || s.library.with(|l| l.font.clone());
@@ -2033,95 +2107,60 @@ fn font_browser(expanded: Signal<bool>) -> View {
             computed(move || rows.with(|r| r.get(at.index()).cloned().unwrap_or_default()));
         let family = move || family.get();
         let selected = move || current().as_deref() == Some(family().as_str());
-        view()
-            .h(px(44.0))
-            .flex_row()
-            .items_center()
-            .gap(px(12.0))
-            .px(px(12.0))
-            .rounded(px(8.0))
-            .role(AccessibilityRole::Button)
-            .label(family)
-            .style_when(selected, |st| st.bg(primary().opacity(0.12)))
-            .hover(|st| st.bg(hover()))
-            .active(|st| st.opacity(0.7))
-            .on_press(move || super::store::set_font(Some(family())))
-            // 每一行用它自己的字体预览。
-            .child(
-                text(move || format!("{} · 歌词 Aa あ", family()))
-                    .flex_1()
-                    .number_of_lines(1)
-                    .font_family(move || SharedString::from(family()))
-                    .text_size(px(15.0))
-                    .text_color(fg()),
-            )
-            .child(when(selected, || icon(Icon::Play, 10.0, primary)))
+        font_choice(
+            family,
+            family,
+            selected,
+            move || {
+                super::store::set_font(Some(family()));
+                open.set(false);
+            },
+        )
     })
-    .estimated_item_size(px(44.0))
+    .estimated_item_size(px(40.0))
     .empty(
-        view().h(px(80.0)).items_center().justify_center().child(
-            text("没有匹配的字体")
+        view()
+            .h(px(64.0))
+            .items_center()
+            .justify_center()
+            .child(
+                text(move || {
+                    if loading() {
+                        "正在读取字体…"
+                    } else {
+                        "没有匹配的字体"
+                    }
+                })
                 .text_size(px(13.0))
                 .text_color(muted_fg()),
-        ),
+            ),
     )
     .flex_1();
 
-    let search = input()
-        .flex_1()
-        .h(px(32.0))
-        .px(px(12.0))
-        .rounded(px(8.0))
-        .border_1()
-        .border_color(theme_input())
-        .bg(bg())
-        .text_size(px(14.0))
-        .text_color(fg())
-        .value(move || query.get())
-        .placeholder("搜索已安装的字体")
-        .on_change(move |text: &str| query.set(text.to_owned()));
-
     view()
-        .gap(px(12.0))
+        .gap(px(4.0))
         .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap(px(8.0))
-                .child(search)
-                .child(
-                    text(move || {
-                        if loading() {
-                            "正在读取字体…".to_owned()
-                        } else {
-                            format!("{} 个", count.get())
-                        }
-                    })
-                    .text_size(px(12.0))
-                    .tabular_nums()
-                    .text_color(faint()),
-                )
-                .child(icon_button(
-                    || Icon::ChevronDown,
-                    14.0,
-                    "收起字体列表",
-                    muted_fg,
-                    move || expanded.set(false),
-                )),
+            super::form::input_field(true)
+                .w_full()
+                .value(move || query.get())
+                .placeholder("搜索已安装的字体")
+                .on_change(move |text: &str| query.set(text.to_owned())),
         )
-        .child(
-            view()
-                .h(px(264.0))
-                .rounded(px(10.0))
-                .bg(bg())
-                .p(px(4.0))
-                .overflow_hidden()
-                .child(list),
-        )
+        .child(font_choice(
+            || "系统字体".to_owned(),
+            || "system-ui".to_owned(),
+            move || current().is_none(),
+            move || {
+                super::store::set_font(None);
+                open.set(false);
+            },
+        ))
+        .child(view().h(px(1.0)).bg(border()))
+        .child(view().h(px(216.0)).child(list))
 }
 
 /// 播放：淡入淡出时长。
-fn playback_card() -> View {
+fn playback_section() -> View {
     let s = store();
     const STEPS: &[(u32, &str)] = &[
         (0, "关闭"),
@@ -2131,7 +2170,7 @@ fn playback_card() -> View {
         (800, "0.8 秒"),
         (1500, "1.5 秒"),
     ];
-    card_section(
+    setting_section(
         "淡入淡出",
         "播放、暂停、拖动进度和切歌时，音量在这段时间里渐变，不会突然响起或戛然而止。一首自然播完接下一首时不淡变。",
         None,
@@ -2142,7 +2181,7 @@ fn playback_card() -> View {
 }
 
 /// 全屏歌词的对齐方式。
-fn lyrics_card() -> View {
+fn lyrics_section() -> View {
     use crate::library::LyricsAlign;
     let s = store();
     const OPTIONS: &[(LyricsAlign, &str)] = &[
@@ -2150,7 +2189,7 @@ fn lyrics_card() -> View {
         (LyricsAlign::Center, "居中"),
         (LyricsAlign::Right, "右对齐"),
     ];
-    card_section("歌词对齐", "全屏播放页里歌词的对齐方式。", None).child(
+    setting_section("歌词对齐", "全屏播放页里歌词的对齐方式。", None).child(
         super::radio::group_row().children(OPTIONS.iter().map(|&(align, label)| {
             super::radio::item(
                 move || s.library.with(|l| l.lyrics_align == align),
@@ -2162,7 +2201,7 @@ fn lyrics_card() -> View {
 }
 
 /// 关闭窗口时：每次询问 / 最小化到托盘 / 退出。
-fn window_card() -> View {
+fn window_section() -> View {
     use crate::library::CloseAction;
     let s = store();
     let option = move |action: CloseAction, label: &'static str, hint: &'static str| {
@@ -2174,7 +2213,7 @@ fn window_card() -> View {
         )
     };
     let supported = cfg!(any(target_os = "macos", target_os = "windows"));
-    card_section(
+    setting_section(
         "关闭窗口时",
         if supported {
             "最小化到托盘后音乐继续播放，界面释放以节省内存；托盘图标可以打开窗口、播放 / 暂停、切歌和退出。"
@@ -2197,7 +2236,7 @@ pub fn Settings() -> impl IntoElement {
         .flex_1()
         .child(page_header(
             || "设置".into(),
-            || "曲库、播放、窗口、标签与字体".into(),
+            || "曲库、播放、窗口、标签、外观与字体".into(),
             None,
             None,
         ))
@@ -2205,22 +2244,20 @@ pub fn Settings() -> impl IntoElement {
             scroll().flex_1().child(
                 view()
                     .px(px(32.0))
+                    .pt(px(8.0))
                     .pb(px(BAR_SPACE))
-                    .gap(px(16.0))
+                    .gap(px(36.0))
                     .max_w(px(820.0))
-                    .child(folders_card())
-                    .child(library_card())
-                    .child(playback_card())
-                    .child(lyrics_card())
-                    .child(window_card())
-                    .child(genres_card())
-                    .child(font_card()),
+                    .child(folders_section())
+                    .child(library_section())
+                    .child(playback_section())
+                    .child(lyrics_section())
+                    .child(window_section())
+                    .child(genres_section())
+                    .child(appearance_section())
+                    .child(font_section()),
             ),
         )
-}
-
-fn theme_input() -> AdaptiveColor {
-    nsh_base::theme().input
 }
 
 #[cfg(test)]

@@ -59,6 +59,19 @@ pub enum LyricsAlign {
     Right,
 }
 
+/// 界面外观（浅色 / 深色）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Appearance {
+    /// 跟随系统。
+    #[default]
+    System,
+    /// 固定浅色。
+    Light,
+    /// 固定深色。
+    Dark,
+}
+
 /// 出厂流派分隔符。
 pub const DEFAULT_SEPARATORS: &[&str] = &[";"];
 
@@ -90,6 +103,9 @@ pub struct LibraryConfig {
     /// 全屏歌词的对齐方式。
     #[serde(default)]
     pub lyrics_align: LyricsAlign,
+    /// 界面外观（跟随系统 / 浅色 / 深色）。
+    #[serde(default)]
+    pub appearance: Appearance,
 }
 
 fn default_fade_ms() -> u32 {
@@ -108,6 +124,7 @@ impl Default for LibraryConfig {
             fade_ms: default_fade_ms(),
             loop_mode: crate::audio::LoopMode::default(),
             lyrics_align: LyricsAlign::default(),
+            appearance: Appearance::default(),
         }
     }
 }
@@ -306,6 +323,17 @@ impl LibraryStore {
     pub fn set_lyrics_align(&self, align: LyricsAlign) {
         let mut config = self.config.lock().unwrap();
         config.lyrics_align = align;
+        self.save_config(&config);
+    }
+
+    pub fn appearance(&self) -> Appearance {
+        self.config().appearance
+    }
+
+    /// 设置界面外观（保存）。
+    pub fn set_appearance(&self, appearance: Appearance) {
+        let mut config = self.config.lock().unwrap();
+        config.appearance = appearance;
         self.save_config(&config);
     }
 

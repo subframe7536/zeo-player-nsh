@@ -47,6 +47,10 @@ pub enum Icon {
     Heart,
     /// 实心的心形（已喜欢）。
     HeartFilled,
+    Sun,
+    Moon,
+    Monitor,
+    Check,
     /// Windows 窗口按钮（`ui::caption`）：字形占 24 格里的 4.5–19.5，按
     /// 16 pt 显示时为 10 pt 见方、线宽 1 pt，与系统按钮一致。
     #[cfg(target_os = "windows")]
@@ -184,6 +188,18 @@ impl Icon {
             Icon::HeartFilled => {
                 r#"<path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5" fill="currentColor"/>"#
             }
+            // sun
+            Icon::Sun => {
+                r#"<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>"#
+            }
+            // moon
+            Icon::Moon => r#"<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>"#,
+            // monitor
+            Icon::Monitor => {
+                r#"<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>"#
+            }
+            // check
+            Icon::Check => r#"<path d="M20 6 9 17l-5-5"/>"#,
             // Windows 窗口按钮：不是 Lucide，按系统按钮的尺寸画（见上）。
             #[cfg(target_os = "windows")]
             Icon::WinMinimize => {

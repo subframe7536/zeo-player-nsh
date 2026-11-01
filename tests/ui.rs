@@ -82,9 +82,49 @@ fn sidebar_navigates_between_library_views() {
         "系统字体",
         "关闭窗口时",
         "淡入淡出",
+        "外观",
     ] {
         assert!(has(&app, label), "{label}: {:?}", texts(&app));
     }
+}
+
+/// 设置 →「外观」下拉：选深色 / 浅色立即换色板（文字颜色即变），回到「系统」。
+#[test]
+fn appearance_select_switches_the_color_scheme() {
+    let mut app = start(1200.0, 800.0);
+    app.press("设置").unwrap();
+    app.wait_for("外观").unwrap();
+    // 说明文字是 muted_fg，浅色 / 深色下不同；「外观」本身在多处出现，用整句取唯一。
+    let fg = |app: &Headless| {
+        app.screen()
+            .span_style("text:或为界面固定一种")
+            .unwrap()
+            .color
+    };
+    let light = fg(&app);
+    app.press("label:外观").unwrap();
+    app.press("label:深色").unwrap();
+    assert_ne!(fg(&app), light, "切到深色后界面应换深色色板");
+    app.press("label:外观").unwrap();
+    app.press("label:浅色").unwrap();
+    assert_eq!(fg(&app), light, "切到浅色后界面回到浅色色板");
+    app.press("label:外观").unwrap();
+    app.press("label:系统").unwrap();
+}
+
+/// 设置 →「字体」下拉：触发器即当前字体；弹层里有搜索框与预览行，
+/// 选「系统字体」立即生效并关弹层。
+#[test]
+fn font_select_opens_a_searchable_popover() {
+    let mut app = start(1200.0, 800.0);
+    app.press("设置").unwrap();
+    app.wait_for("字体").unwrap();
+    // 弹层未开时预览行不在屏上。
+    assert!(!has(&app, "系统字体 · 歌词 Aa あ"));
+    app.press("label:字体").unwrap();
+    assert!(has(&app, "系统字体 · 歌词 Aa あ"), "{:?}", texts(&app));
+    app.press("label:系统字体").unwrap();
+    assert!(!has(&app, "系统字体 · 歌词 Aa あ"), "选完弹层应关闭");
 }
 
 #[test]
