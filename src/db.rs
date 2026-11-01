@@ -176,10 +176,7 @@ pub fn load_meta() -> Vec<(String, CacheEntry)> {
                 disk_total: r.get(21)?,
                 album_artists: list(r.get(22)?),
                 composers: list(r.get(23)?),
-                art_hue: match (
-                    r.get::<_, Option<f64>>(24)?,
-                    r.get::<_, Option<f64>>(25)?,
-                ) {
+                art_hue: match (r.get::<_, Option<f64>>(24)?, r.get::<_, Option<f64>>(25)?) {
                     (Some(h), Some(s)) => Some((h as f32, s as f32)),
                     _ => None,
                 },
@@ -264,6 +261,14 @@ pub fn retain_meta(keep: &HashSet<String>) {
             }
         }
         tx.commit()
+    });
+}
+
+/// 删掉 `path` 的元数据行（界面「删除记录」）。
+pub fn remove_meta(path: &str) {
+    with("删除元数据", |conn| {
+        conn.execute("DELETE FROM tracks WHERE path = ?1", [path])
+            .map(|_| ())
     });
 }
 

@@ -415,16 +415,31 @@ fn library_section() -> View {
     .child(watch_row())
 }
 
+/// 「删除文件」节：曲目右键「删除文件…」是否经过回收站。
+fn delete_section() -> View {
+    let s = store();
+    setting_section("删除文件", "曲目右键菜单「删除文件…」的行为。", None).child(pref_row(
+        "直接删除文件",
+        "开启后删除文件不经过回收站（不可恢复）；关闭时文件先移到回收站。",
+        move || s.library.with(|l| l.delete_permanently),
+        super::super::store::set_delete_permanently,
+    ))
+}
+
 /// 封面来源：本地同名图片 / 内嵌封面的优先序。
 fn covers_source_section() -> View {
     let s = store();
-    setting_section("封面来源", "封面可以来自曲目同目录的同名图片，或音频文件的内嵌封面。", None)
-        .child(pref_row(
-            "本地图片优先",
-            "使用同目录的同名图片（jpg / jpeg / png / webp）作为封面；关闭则优先内嵌封面。",
-            move || s.library.with(|l| l.prefer_local_covers),
-            super::super::store::set_prefer_local_covers,
-        ))
+    setting_section(
+        "封面来源",
+        "封面可以来自曲目同目录的同名图片，或音频文件的内嵌封面。",
+        None,
+    )
+    .child(pref_row(
+        "本地图片优先",
+        "使用同目录的同名图片（jpg / jpeg / png / webp）作为封面；关闭则优先内嵌封面。",
+        move || s.library.with(|l| l.prefer_local_covers),
+        super::super::store::set_prefer_local_covers,
+    ))
 }
 
 /// 「本地优先」开关行：标题 + 说明 + 右侧开关。
@@ -448,10 +463,7 @@ fn pref_row(
                 .border_color(border())
                 .transition_colors()
                 .duration(150.0)
-                .checked(|st| {
-                    st.bg(move || primary())
-                        .border_color(move || primary())
-                })
+                .checked(|st| st.bg(move || primary()).border_color(move || primary()))
         })
         .thumb_style(|st| {
             st.size(px(18.0))
@@ -532,10 +544,7 @@ fn watch_row() -> View {
                 .border_color(border())
                 .transition_colors()
                 .duration(150.0)
-                .checked(|st| {
-                    st.bg(move || primary())
-                        .border_color(move || primary())
-                })
+                .checked(|st| st.bg(move || primary()).border_color(move || primary()))
         })
         .thumb_style(|st| {
             st.size(px(18.0))
@@ -875,15 +884,17 @@ fn filter_section() -> View {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(fg()),
             )
-            .child(super::super::components::radio::group_row().children(
-                options.iter().map(|&(value, name)| {
-                    super::super::components::radio::item(
-                        move || s.library.with(|l| field(l) == value),
-                        name,
-                        move || set(value),
-                    )
-                }),
-            ))
+            .child(
+                super::super::components::radio::group_row().children(options.iter().map(
+                    |&(value, name)| {
+                        super::super::components::radio::item(
+                            move || s.library.with(|l| field(l) == value),
+                            name,
+                            move || set(value),
+                        )
+                    },
+                )),
+            )
             .into_element()
     };
     setting_section(
@@ -1009,11 +1020,7 @@ fn accent_swatch(mode: ThemeColor, label: &'static str) -> nsh_base::ButtonEleme
         .child(
             icon_dyn(
                 move || {
-                    if on() {
-                        Icon::Check
-                    } else {
-                        Icon::Note
-                    }
+                    if on() { Icon::Check } else { Icon::Note }
                 },
                 12.0,
                 move || {
@@ -1026,9 +1033,7 @@ fn accent_swatch(mode: ThemeColor, label: &'static str) -> nsh_base::ButtonEleme
                     }
                 },
             )
-            .opacity(move || {
-                (on() || mode == ThemeColor::Cover) as i32 as f32
-            }),
+            .opacity(move || (on() || mode == ThemeColor::Cover) as i32 as f32),
         )
 }
 
@@ -1254,13 +1259,17 @@ fn lyrics_section() -> View {
 /// 歌词来源：本地同名 .lrc / 内嵌歌词的优先序。
 fn lyrics_source_section() -> View {
     let s = store();
-    setting_section("歌词来源", "歌词可以来自曲目同目录的同名 .lrc 文件，或音频文件的内嵌歌词。", None)
-        .child(pref_row(
-            "本地歌词优先",
-            "使用同目录的同名 .lrc 文件作为歌词；关闭则优先内嵌歌词。",
-            move || s.library.with(|l| l.prefer_local_lyrics),
-            super::super::store::set_prefer_local_lyrics,
-        ))
+    setting_section(
+        "歌词来源",
+        "歌词可以来自曲目同目录的同名 .lrc 文件，或音频文件的内嵌歌词。",
+        None,
+    )
+    .child(pref_row(
+        "本地歌词优先",
+        "使用同目录的同名 .lrc 文件作为歌词；关闭则优先内嵌歌词。",
+        move || s.library.with(|l| l.prefer_local_lyrics),
+        super::super::store::set_prefer_local_lyrics,
+    ))
 }
 
 /// 关闭窗口时：每次询问 / 最小化到托盘 / 退出。
@@ -1385,6 +1394,12 @@ const SECTIONS: &[Section] = &[
         build: filter_section,
     },
     Section {
+        pane: Pane::Library,
+        title: "删除文件",
+        keys: "删除 文件 回收站 永久删除 直接删除 曲目 右键 菜单",
+        build: delete_section,
+    },
+    Section {
         pane: Pane::Covers,
         title: "封面来源",
         keys: "封面 图片 本地 同名 内嵌 优先 来源 cover jpg jpeg png webp 专辑",
@@ -1485,16 +1500,19 @@ fn search_box(query: Signal<String>) -> View {
                 .label("搜索设置")
                 .on_change(move |t: &str| query.set(t.to_owned())),
         )
-        .child(when(move || !empty(), move || {
-            icon_button(
-                || Icon::Close,
-                10.0,
-                "清除搜索",
-                faint,
-                move || query.set(String::new()),
-            )
-            .flex_shrink_0()
-        }))
+        .child(when(
+            move || !empty(),
+            move || {
+                icon_button(
+                    || Icon::Close,
+                    10.0,
+                    "清除搜索",
+                    faint,
+                    move || query.set(String::new()),
+                )
+                .flex_shrink_0()
+            },
+        ))
 }
 
 /// 左栏分类行（外观同主侧栏的导航行）。
@@ -1585,9 +1603,8 @@ fn nav_column(pane: Signal<Pane>, query: Signal<String>) -> View {
                 .iter()
                 .enumerate()
                 .flat_map(|(i, &(name, panes))| {
-                    std::iter::once(group_heading(name, i > 0).into_element()).chain(
-                        panes.iter().map(|&p| pane_row(p, pane).into_element()),
-                    )
+                    std::iter::once(group_heading(name, i > 0).into_element())
+                        .chain(panes.iter().map(|&p| pane_row(p, pane).into_element()))
                 })
                 .collect::<Vec<_>>();
         }
@@ -1626,70 +1643,78 @@ fn content_column(pane: Signal<Pane>, query: Signal<String>) -> View {
             .copied()
             .map(|p| (p, q))
     };
-    view().flex_1().min_w(px(0.0)).test_id("settings-content").child(dynamic(move || {
-        let Some((p, q)) = shown() else {
-            return view()
-                .flex_1()
-                .items_center()
-                .justify_center()
-                .gap(px(8.0))
-                .p(px(32.0))
-                .child(icon(Icon::Search, 24.0, faint))
-                .child(
-                    text("没有匹配的设置")
-                        .text_size(px(14.0))
-                        .line_height(px(14.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(fg()),
-                )
-                .child(
-                    text("换个关键词，或清空搜索看全部分类。")
-                        .text_size(px(12.0))
-                        .line_height(px(12.0))
-                        .text_color(muted_fg()),
-                )
-                .into_element();
-        };
-        view()
-            .flex_1()
-            .child(
-                view()
-                    .flex_row()
+    view()
+        .flex_1()
+        .min_w(px(0.0))
+        .test_id("settings-content")
+        .child(dynamic(move || {
+            let Some((p, q)) = shown() else {
+                return view()
+                    .flex_1()
                     .items_center()
-                    .h(px(52.0))
-                    .pl(px(24.0))
-                    .pr(px(14.0))
-                    .border_b_1()
-                    .border_b_color(border())
+                    .justify_center()
+                    .gap(px(8.0))
+                    .p(px(32.0))
+                    .child(icon(Icon::Search, 24.0, faint))
                     .child(
-                        text(p.title())
-                            .text_size(px(15.0))
-                            .line_height(px(15.0))
-                            .font_weight(FontWeight::SEMIBOLD)
+                        text("没有匹配的设置")
+                            .text_size(px(14.0))
+                            .line_height(px(14.0))
+                            .font_weight(FontWeight::MEDIUM)
                             .text_color(fg()),
                     )
-                    .child(view().flex_1())
-                    .child(icon_button(|| Icon::Close, 14.0, "关闭设置", muted_fg, move || {
-                        s.settings.set(false)
-                    })),
-            )
-            .child(
-                scroll().flex_1().child(
+                    .child(
+                        text("换个关键词，或清空搜索看全部分类。")
+                            .text_size(px(12.0))
+                            .line_height(px(12.0))
+                            .text_color(muted_fg()),
+                    )
+                    .into_element();
+            };
+            view()
+                .flex_1()
+                .child(
                     view()
-                        .px(px(24.0))
-                        .pt(px(20.0))
-                        .pb(px(28.0))
-                        .gap(px(36.0))
-                        .children(
-                            SECTIONS
-                                .iter()
-                                .filter(|sec| sec.pane == p && section_hits(&q, sec))
-                                .map(|sec| (sec.build)()),
-                        ),
-                ),
-            )
-            .into_element()
-    }))
+                        .flex_row()
+                        .items_center()
+                        .h(px(52.0))
+                        .pl(px(24.0))
+                        .pr(px(14.0))
+                        .border_b_1()
+                        .border_b_color(border())
+                        .child(
+                            text(p.title())
+                                .text_size(px(15.0))
+                                .line_height(px(15.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(fg()),
+                        )
+                        .child(view().flex_1())
+                        .child(icon_button(
+                            || Icon::Close,
+                            14.0,
+                            "关闭设置",
+                            muted_fg,
+                            move || s.settings.set(false),
+                        )),
+                )
+                .child(
+                    scroll().flex_1().child(
+                        view()
+                            .px(px(24.0))
+                            .pt(px(20.0))
+                            .pb(px(28.0))
+                            .gap(px(36.0))
+                            .children(
+                                SECTIONS
+                                    .iter()
+                                    .filter(|sec| sec.pane == p && section_hits(&q, sec))
+                                    .map(|sec| (sec.build)()),
+                            ),
+                    ),
+                )
+                .into_element()
+        }))
 }
 
 /// 设置弹窗（nsh-base `dialog`，Esc / 点遮罩关闭）。

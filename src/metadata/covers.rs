@@ -258,6 +258,22 @@ pub fn cached_thumb(path: &Path) -> Option<PathBuf> {
     out.is_file().then_some(out)
 }
 
+/// 删掉 `path` 已生成的各尺寸封面（删记录 / 删文件时调）：缓存键
+/// 要 `path` 的文件指纹，文件没了就算不出键——删文件前先调。
+pub fn evict(path: &Path) {
+    let Some(key) = cache_key(path) else {
+        return;
+    };
+    let dir = cache_dir();
+    for name in [
+        format!("{key:016x}-{THUMB}.jpg"),
+        format!("{key:016x}-{LARGE}.jpg"),
+        format!("{key:016x}-bg{BACKDROP}.jpg"),
+    ] {
+        let _ = std::fs::remove_file(dir.join(name));
+    }
+}
+
 /// `path` 的封面缩略图文件（[`THUMB`] 像素）；没有封面为 `None`。
 pub fn thumbnail(path: &Path) -> Option<PathBuf> {
     cover_file(path, THUMB)
@@ -462,7 +478,10 @@ mod tests {
             CoverSrc::Raw(_) => None,
         };
         let local = hue_of(cover_source_for(path, true)).expect("sidecar 应有主色调");
-        assert!((0.55..0.75).contains(&local), "本地优先应取蓝 sidecar：{local:.3}");
+        assert!(
+            (0.55..0.75).contains(&local),
+            "本地优先应取蓝 sidecar：{local:.3}"
+        );
         let embedded = hue_of(cover_source_for(path, false)).expect("内嵌封面应有主色调");
         assert!(
             !(0.55..0.75).contains(&embedded),

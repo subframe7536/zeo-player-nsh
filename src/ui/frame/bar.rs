@@ -40,7 +40,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
             view()
                 .flex_1()
                 .min_w(px(0.0))
-                .gap(px(2.0))
+                .gap(px(3.0))
                 .child(
                     text(move || {
                         s.track.with(|t| {
@@ -53,7 +53,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                     })
                     .number_of_lines(1)
                     .text_size(px(14.0))
-                    .line_height(px(14.0))
+                    .line_height(px(17.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(fg()),
                 )
@@ -67,7 +67,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                     })
                     .number_of_lines(1)
                     .text_size(px(12.0))
-                    .line_height(px(12.0))
+                    .line_height(px(15.0))
                     .text_color(muted_fg()),
                 ),
         );
@@ -164,7 +164,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .child(
             slider(
                 progress_fraction,
-                muted(),
+                input(),
                 fg(),
                 fg(),
                 move |f| s.seek_preview.set(Some(f * duration())),
@@ -218,7 +218,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
             ),
             "静音",
         ))
-        .child(slider(volume, muted(), muted_fg(), fg(), set_volume, set_volume).w(px(96.0)))
+        .child(slider(volume, input(), muted_fg(), fg(), set_volume, set_volume).w(px(96.0)))
         .child(tipped(super::queue::queue_button(queue_open), "播放队列"))
         .child(tipped(
             icon_button(

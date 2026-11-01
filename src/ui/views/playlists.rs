@@ -158,7 +158,7 @@ pub fn add_to_submenu(paths: impl Fn() -> Vec<String> + Clone + 'static) -> AnyE
 }
 
 /// 曲目的右键菜单（包着 `row`）：播放、添加到歌单、从歌单移除（`from`：
-/// 当前所在的手动歌单）、在访达中显示。
+/// 当前所在的手动歌单）、在访达中显示、删除记录 / 删除文件。
 pub fn track_menu(
     row: impl IntoElement,
     track: Memo<Option<TrackEntry>>,
@@ -190,6 +190,18 @@ pub fn track_menu(
                 }
             },
         ))
+        .child(separator())
+        .child(item("从曲库中删除", Some(Icon::Close), move || {
+            // 等菜单关掉再删：删掉会拆掉这一行（连同它的菜单）。
+            if let Some(p) = path() {
+                store::later(move || store::remove_record(&p));
+            }
+        }))
+        .child(item("删除文件…", Some(Icon::Trash), move || {
+            if let Some(p) = path() {
+                store::ask_delete_file(&p);
+            }
+        }))
         .into_element()
 }
 

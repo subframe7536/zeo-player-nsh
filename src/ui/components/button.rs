@@ -92,8 +92,7 @@ pub fn foreground(variant: Variant) -> AdaptiveColor {
 /// 只有外形的按钮（尺寸、底色、状态样式），内容由调用方给。
 pub fn shell(variant: Variant, size: Size) -> ButtonElement {
     let t = nsh_base::theme();
-    let (ring, secondary, destructive, outline) =
-        (t.ring, t.secondary, t.destructive, t.border);
+    let (ring, secondary, destructive, outline) = (t.ring, t.secondary, t.destructive, t.border);
     let h = size.height();
     let b = button()
         .flex_row()

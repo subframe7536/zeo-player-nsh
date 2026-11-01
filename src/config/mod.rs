@@ -158,6 +158,9 @@ pub struct LibraryConfig {
     /// 本地同名图片（jpg / jpeg / png / webp）优先于内嵌封面。
     #[serde(default = "default_true")]
     pub prefer_local_covers: bool,
+    /// 「删除文件」不经过回收站、直接删除（不可恢复）。
+    #[serde(default)]
+    pub delete_permanently: bool,
 }
 
 fn default_fade_ms() -> u32 {
@@ -194,6 +197,7 @@ impl Default for LibraryConfig {
             min_size_kb: default_min_size_kb(),
             prefer_local_lyrics: default_true(),
             prefer_local_covers: default_true(),
+            delete_permanently: false,
         }
     }
 }
@@ -428,6 +432,17 @@ impl LibraryStore {
         self.save_config(&config);
     }
 
+    /// 「删除文件」是否不经过回收站、直接删除。
+    pub fn delete_permanently(&self) -> bool {
+        self.config().delete_permanently
+    }
+
+    pub fn set_delete_permanently(&self, on: bool) {
+        let mut config = self.config.lock().unwrap();
+        config.delete_permanently = on;
+        self.save_config(&config);
+    }
+
     pub fn close_action(&self) -> CloseAction {
         self.config().close_action
     }
@@ -492,6 +507,17 @@ impl LibraryStore {
 
     pub fn tracks(&self) -> Arc<Vec<TrackEntry>> {
         self.tracks.read().unwrap().clone()
+    }
+
+    /// 从索引里移除 `path`（界面「删除记录」）；元数据行与界面信号由
+    /// 调用方清，文件不碰。文件仍在时下次扫描会重新入库。
+    pub fn remove_track(&self, path: &str) {
+        let current = self.tracks();
+        if !current.iter().any(|t| t.path == path) {
+            return;
+        }
+        let kept: Vec<TrackEntry> = current.iter().filter(|t| t.path != path).cloned().collect();
+        *self.tracks.write().unwrap() = Arc::new(kept);
     }
 
     pub fn is_scanning(&self) -> bool {

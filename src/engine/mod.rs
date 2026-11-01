@@ -262,9 +262,7 @@ impl Meta {
         let path = Path::new(path);
         let lrc = find_external_lrc(path);
         let prefer = library_store().prefer_local_lyrics();
-        let stamp = |p: &Path| {
-            std::fs::metadata(p).map_or(0, |m| crate::metadata::file_stamp(&m))
-        };
+        let stamp = |p: &Path| std::fs::metadata(p).map_or(0, |m| crate::metadata::file_stamp(&m));
         // 缓存键含 .lrc 指纹与「本地优先」开关：任一变化自动失效。
         let key = lrc
             .as_deref()
@@ -297,6 +295,13 @@ impl Meta {
     /// 曲目的外置歌词文件路径（同名 `.lrc`）。
     pub fn external_lrc(path: String) -> Option<String> {
         find_external_lrc(Path::new(&path)).map(|p| p.to_string_lossy().into_owned())
+    }
+
+    /// 曲目封面的主色调（色相 0..360、饱和度 0..1），还没算出来为
+    /// `None`：扫描 / 封面生成时写进全局元数据缓存——这里同步读，不
+    /// 触发计算。
+    pub fn art_hue(path: &str) -> Option<(f32, f32)> {
+        crate::metadata::covers::art_hue(Path::new(path))
     }
 }
 

@@ -1,9 +1,12 @@
 //! 曲目表套件：列定义、定宽单元格、列头与曲目行；文件夹 / 浏览 / 歌单页共用。
 
-use nsh_base::{ButtonElement, button};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+
 use nsh_core::prelude::*;
 
-use super::super::store::{cover_of, format_time, store};
+use super::super::store::{cover_of, format_time, is_liked, store, toggle_like};
 use super::super::theme::*;
 use super::cover::cover;
 use super::icons::{Icon, icon_dyn};
@@ -35,6 +38,7 @@ pub const W_ALBUM: f32 = 220.0;
 pub const W_SIZE: f32 = 72.0;
 pub const W_FORMAT: f32 = 48.0;
 pub const W_TIME: f32 = 56.0;
+pub const W_LIKE: f32 = 32.0;
 
 /// 内容区宽度（窗口减侧栏）。读取即订阅窗口大小。
 fn content_width() -> f32 {
@@ -149,19 +153,24 @@ pub fn track_columns(cols: Columns) -> View {
             })
         }))
         .child(view().w(px(W_TIME)).items_end().child(label("时长")))
+        // 喜欢列（曲目行的爱心按钮）。
+        .child(view().w(px(W_LIKE)))
 }
 
 /// 曲目行高。
 pub const ROW: f32 = 56.0;
 
-/// 一行曲目：序号（当前曲目为音波）、封面、曲名 + 歌手、专辑、时长。
-/// `track` 随单元格复用而变化。
+/// 双击窗口（行内按压只选中曲目所在的行，双击才播放）。
+const DOUBLE_CLICK: Duration = Duration::from_millis(450);
+
+/// 一行曲目：序号（当前曲目为音波）、封面、曲名 + 歌手、专辑、时长、
+/// 喜欢按钮。双击播放（`on_play`）；`track` 随单元格复用而变化。
 pub fn track_row(
     track: Memo<Option<TrackEntry>>,
     number: Memo<String>,
     cols: Columns,
     on_play: impl Fn() + 'static,
-) -> ButtonElement {
+) -> View {
     let s = store();
     let current = computed(move || {
         track.with(|t| {
@@ -175,19 +184,47 @@ pub fn track_row(
         move || track.with(|t| t.as_ref().map(f).unwrap_or_default())
     };
     let title = field(|t| t.title.clone());
-    button()
+    let path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
+    let liked = move || track.with(|t| t.as_ref().is_some_and(|t| is_liked(&t.path)));
+    let hovering = signal(false);
+    // 单击不播放：记下曲目与时间，同一首在 `DOUBLE_CLICK` 内再按一次才播。
+    let on_play = Rc::new(on_play);
+    let last = Rc::new(RefCell::new(None::<(String, Instant)>));
+    view()
         .h(px(ROW))
         .flex_row()
         .items_center()
         .gap(px(12.0))
         .px(px(12.0))
         .rounded(px(10.0))
-        .accessibility_label(move || SharedString::from(title()))
-        .selected(current)
-        .selected_style(|st| st.bg(hover()))
+        .role(AccessibilityRole::Button)
+        .label(move || SharedString::from(title()))
+        .accessibility_state(move || AccessibilityState {
+            selected: current.get(),
+            ..AccessibilityState::default()
+        })
+        .bg(move || {
+            if current.get() {
+                hover()
+            } else {
+                AdaptiveColor::TRANSPARENT
+            }
+        })
         .hover(|st| st.bg(hover()))
-        .active(|st| st.opacity(0.7))
-        .on_press(move |_: &()| on_play())
+        .on_hover_in(move |_: &()| hovering.set(true))
+        .on_hover_out(move |_: &()| hovering.set(false))
+        .on_press(move |_: &()| {
+            let now = Instant::now();
+            let hit = last.borrow().as_ref().is_some_and(|(p, t)| {
+                path().as_deref() == Some(p.as_str()) && now.duration_since(*t) <= DOUBLE_CLICK
+            });
+            if hit {
+                *last.borrow_mut() = None;
+                on_play();
+            } else {
+                *last.borrow_mut() = path().map(|p| (p, now));
+            }
+        })
         .child(when(fits_number, move || {
             view()
                 .w(px(W_NUMBER))
@@ -262,4 +299,38 @@ pub fn track_row(
             })
         }))
         .child(value_cell(W_TIME, field(|t| format_time(t.duration))))
+        .child(
+            view().w(px(W_LIKE)).items_center().justify_center().child(
+                view()
+                    .size(px(26.0))
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(6.0))
+                    .role(AccessibilityRole::Button)
+                    .label(move || if liked() { "取消喜欢" } else { "喜欢" })
+                    .hover(|st| st.bg(hover()))
+                    .active(|st| st.opacity(0.6))
+                    .on_press(move |_: &()| {
+                        if let Some(p) = path() {
+                            toggle_like(&p);
+                        }
+                    })
+                    .child(when(
+                        move || liked() || hovering.get(),
+                        move || {
+                            icon_dyn(
+                                move || {
+                                    if liked() {
+                                        Icon::HeartFilled
+                                    } else {
+                                        Icon::Heart
+                                    }
+                                },
+                                15.0,
+                                move || if liked() { primary() } else { faint() },
+                            )
+                        },
+                    )),
+            ),
+        )
 }

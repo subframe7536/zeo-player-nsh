@@ -30,6 +30,10 @@ pub fn muted_fg() -> AdaptiveColor {
 pub fn border() -> AdaptiveColor {
     theme().border
 }
+/// 凹陷控件的底（滑块轨道）：明暗两态都比 `muted` 离底色远一档。
+pub fn input() -> AdaptiveColor {
+    theme().input
+}
 /// 主色：「主题色」为强调色 / 跟随封面时返回覆盖色，否则主题默认（黑白）。
 /// 在绑定 / `move ||` 里调用才会订阅覆盖信号。
 pub fn primary() -> AdaptiveColor {

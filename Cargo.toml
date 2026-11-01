@@ -25,6 +25,8 @@ color-thief = "0.2.2"
 walkdir = "2"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 dunce = "1"
+# 「删除文件」移到回收站（macOS Finder / Windows 回收站；Linux 走 freedesktop）。
+trash = "5"
 
 # 持久化：数据 / 缓存目录与 JSON；曲目元数据与播放状态存 SQLite（bundled：自带 SQLite，不依赖系统库）。
 dirs = "7"

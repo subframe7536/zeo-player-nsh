@@ -289,6 +289,14 @@ impl MetaCache {
         crate::db::clear_meta();
     }
 
+    /// 移除单条缓存（界面「删除记录」）：连待写队列里同一路径的条目
+    /// 一起丢，否则下次 flush 的 `INSERT OR REPLACE` 会把它写回。
+    pub fn remove(&self, path: &Path) {
+        let key = path.to_string_lossy().into_owned();
+        self.entries.lock().unwrap().remove(&key);
+        self.pending.lock().unwrap().retain(|(p, _)| *p != key);
+    }
+
     /// 只留下 `keep` 里的路径（扫描后去掉已不存在的文件）。
     pub fn retain(&self, keep: &HashSet<String>) {
         self.flush();
@@ -334,9 +342,7 @@ impl MetaCache {
     /// （指纹变了说明算的是旧封面，等下次读取重建）。写入走 `pending`
     /// 与元数据同一批落库。
     pub fn set_art_hue(&self, path: &Path, hue: Option<(f32, f32)>) {
-        let stamp = std::fs::metadata(path)
-            .map(|m| file_stamp(&m))
-            .unwrap_or(0);
+        let stamp = std::fs::metadata(path).map(|m| file_stamp(&m)).unwrap_or(0);
         let key = path.to_string_lossy().into_owned();
         let row = {
             let mut entries = self.entries.lock().unwrap();

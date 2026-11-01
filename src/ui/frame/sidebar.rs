@@ -157,7 +157,11 @@ fn settings_row() -> nsh_base::ButtonElement {
         .active(|st| st.opacity(0.7))
         .on_press(move |_: &()| s.settings.set(true))
         .child(icon(Icon::Settings, 17.0, move || {
-            if s.settings.get() { theme::primary() } else { sidebar_fg() }
+            if s.settings.get() {
+                theme::primary()
+            } else {
+                sidebar_fg()
+            }
         }))
         .child(
             text("设置")
@@ -166,7 +170,11 @@ fn settings_row() -> nsh_base::ButtonElement {
                 .line_height(px(14.0))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(move || {
-                    if s.settings.get() { theme::fg() } else { sidebar_fg() }
+                    if s.settings.get() {
+                        theme::fg()
+                    } else {
+                        sidebar_fg()
+                    }
                 }),
         )
 }

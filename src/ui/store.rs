@@ -90,6 +90,8 @@ pub struct LibraryState {
     /// 本地同名 `.lrc` / 图片是否优先于内嵌歌词 / 封面。
     pub prefer_local_lyrics: bool,
     pub prefer_local_covers: bool,
+    /// 「删除文件」是否不经过回收站、直接删除。
+    pub delete_permanently: bool,
 }
 
 fn library_state() -> LibraryState {
@@ -112,6 +114,7 @@ fn library_state() -> LibraryState {
         theme_color: lib.theme_color(),
         prefer_local_lyrics: lib.prefer_local_lyrics(),
         prefer_local_covers: lib.prefer_local_covers(),
+        delete_permanently: lib.delete_permanently(),
     }
 }
 
@@ -154,6 +157,8 @@ pub struct Store {
     pub editor: Signal<Option<Draft>>,
     /// 设置弹窗打开中。
     pub settings: Signal<bool>,
+    /// 「删除文件」的确认弹窗（`Some` 时打开）。
+    pub delete_ask: Signal<Option<DeleteAsk>>,
     /// 主题色覆盖的强调色（`None`：主题默认黑白）；`theme::primary` 读它。
     pub accent: Signal<Option<AdaptiveColor>>,
     /// 「跟随封面」时封面的原始主色调（色相圈、饱和度）——界面底色向它
@@ -236,6 +241,7 @@ pub fn install() -> Store {
         }))),
         editor: signal(None),
         settings: signal(false),
+        delete_ask: signal(None),
         accent: signal(None),
         tint: signal(None),
     };
@@ -316,11 +322,19 @@ pub fn install() -> Store {
         crate::window::update_tray(state);
     });
 
-    // 曲库：扫盘状态、根目录与索引。
+    // 曲库：扫盘状态、根目录与索引。主题色走全局配置——别处（多窗口 /
+    // 其它实例）改了它时重取强调色，不然换曲才刷新的强调色会停在旧值。
+    let mut last_color = s.library.with(|l| l.theme_color);
     spawn(async move {
         loop {
             timer(Duration::from_millis(120)).await;
-            s.library.set(library_state());
+            let state = library_state();
+            let changed = state.theme_color != last_color;
+            last_color = state.theme_color;
+            s.library.set(state);
+            if changed {
+                apply_accent();
+            }
             s.tracks.set(Same(library_store().tracks()));
         }
     });
@@ -400,13 +414,7 @@ pub fn install() -> Store {
         let Ok(index) = usize::try_from(snap.queue_index) else {
             return;
         };
-        let next: Vec<String> = snap
-            .queue
-            .iter()
-            .skip(index + 1)
-            .take(3)
-            .cloned()
-            .collect();
+        let next: Vec<String> = snap.queue.iter().skip(index + 1).take(3).cloned().collect();
         if next.is_empty() {
             return;
         }
@@ -579,6 +587,85 @@ pub fn cycle_loop_mode() {
 pub fn set_prefer_local_lyrics(on: bool) {
     store().library.update(|l| l.prefer_local_lyrics = on);
     std::thread::spawn(move || library_store().set_prefer_local_lyrics(on));
+}
+
+/// 「删除文件」不经过回收站（保存）。
+pub fn set_delete_permanently(on: bool) {
+    store().library.update(|l| l.delete_permanently = on);
+    std::thread::spawn(move || library_store().set_delete_permanently(on));
+}
+
+/// 「删除文件」确认弹窗的请求：记下路径与当前的删除方式（回收站 / 直接删）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeleteAsk {
+    pub path: String,
+    pub permanent: bool,
+}
+
+/// 从曲库移除 `path` 的记录：索引、元数据缓存与数据库、封面缓存文件、
+/// 各手动歌单（含「我喜欢」）都清掉；文件不碰（还在时下次扫描会重新
+/// 入库）。正在播放这首就停掉。
+pub fn remove_record(path: &str) {
+    let s = store();
+    if s.track.with_untracked(|t| t.path.as_deref() == Some(path)) {
+        player().stop();
+    }
+    let fs_path = Path::new(path);
+    crate::metadata::covers::evict(fs_path);
+    MetaCache::global().remove(fs_path);
+    let db_path = path.to_owned();
+    crate::db::later(move || crate::db::remove_meta(&db_path));
+    change_playlists(|lists| {
+        for p in lists.iter_mut() {
+            if let Kind::Manual { tracks } = &mut p.kind {
+                tracks.retain(|t| t != path);
+            }
+        }
+    });
+    library_store().remove_track(path);
+    s.tracks.set(Same(library_store().tracks()));
+}
+
+/// 「删除文件…」菜单项：打开确认弹窗（回收站 / 直接删按当前设置）。
+pub fn ask_delete_file(path: &str) {
+    let permanent = library_store().delete_permanently();
+    store().delete_ask.set(Some(DeleteAsk {
+        path: path.to_owned(),
+        permanent,
+    }));
+}
+
+/// 确认删除：后台线程做文件操作（解码器可能还握着文件——Windows 上开着
+/// 移不走，先停掉再多试几次），成功后删掉曲库记录。
+pub fn confirm_delete_file() {
+    let Some(ask) = store().delete_ask.get() else {
+        return;
+    };
+    std::thread::spawn(move || {
+        if store()
+            .track
+            .with_untracked(|t| t.path.as_deref() == Some(ask.path.as_str()))
+        {
+            player().stop();
+        }
+        let path = Path::new(&ask.path);
+        let mut gone = !path.exists();
+        for _ in 0..10 {
+            if gone {
+                break;
+            }
+            if crate::provider::local::delete_file(path, ask.permanent).is_ok() {
+                gone = true;
+            } else {
+                std::thread::sleep(Duration::from_millis(150));
+            }
+        }
+        later(move || {
+            if gone {
+                remove_record(&ask.path);
+            }
+        });
+    });
 }
 
 /// 本地封面优先（保存）：封面缓存键含开关位，重算已显示的封面

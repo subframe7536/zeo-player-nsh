@@ -139,6 +139,10 @@ pub fn App() -> impl IntoElement {
             views::playlists::editor_dialog,
         ))
         .child(when(
+            move || s.delete_ask.with(Option::is_some) && !s.hidden.get(),
+            delete_prompt,
+        ))
+        .child(when(
             move || s.close_prompt.get() && !s.hidden.get(),
             close_prompt,
         ));
@@ -186,6 +190,63 @@ fn close_prompt() -> AnyElement {
                 .child(text_button(Variant::Default, Size::Default, None, "最小化到托盘", || {
                     store::answer_close(CloseAction::Tray)
                 })),
+        );
+    components::form::modal(content, cancel)
+}
+
+/// 「删除文件」的确认弹窗：回收站 / 直接删（不可恢复）按设置里的「删除
+/// 文件」选项决定。确认后后台线程做文件操作，成功再删曲库记录。
+fn delete_prompt() -> AnyElement {
+    use components::button::{Size, Variant, text_button};
+    let s = store::store();
+    let cancel = move || s.delete_ask.set(None);
+    let permanent = s
+        .delete_ask
+        .with_untracked(|a| a.as_ref().is_some_and(|a| a.permanent));
+    let (desc, confirm) = if permanent {
+        (
+            "将被永久删除（不经过回收站，无法恢复），曲库记录一并移除。",
+            "永久删除",
+        )
+    } else {
+        ("将被移到回收站，曲库记录一并移除。", "移到回收站")
+    };
+    let name = move || {
+        s.delete_ask.with(|a| {
+            a.as_ref()
+                .and_then(|a| {
+                    std::path::Path::new(&a.path)
+                        .file_name()
+                        .map(|f| f.to_string_lossy().into_owned())
+                })
+                .unwrap_or_default()
+        })
+    };
+    let content = components::form::dialog_content(440.0)
+        .child(components::form::dialog_header("删除文件", Some(desc)))
+        .child(
+            text(name)
+                .number_of_lines(1)
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .text_color(muted_fg()),
+        )
+        .child(
+            components::form::dialog_footer()
+                .child(text_button(
+                    Variant::Outline,
+                    Size::Default,
+                    None,
+                    "取消",
+                    cancel,
+                ))
+                .child(text_button(
+                    Variant::Destructive,
+                    Size::Default,
+                    None,
+                    confirm,
+                    || store::confirm_delete_file(),
+                )),
         );
     components::form::modal(content, cancel)
 }

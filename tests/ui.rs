@@ -84,6 +84,20 @@ fn has(app: &Headless, s: &str) -> bool {
     app.screen().texts().contains(&s)
 }
 
+/// 双击播放 `sel`（行选中了即已播）：行的双击窗口是 450ms，并行负载下
+/// 两次 `press` 的往返间隔可能超过它、退化成两次单击——连按到有相邻
+/// 一对落进窗口为止（有上界，超时说明播放真的没发生）。
+fn double_press(app: &mut Headless, sel: &str) {
+    for _ in 0..12 {
+        app.press(sel).unwrap();
+        if app.screen().selected(sel).unwrap_or(false) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+    panic!("双击 {sel} 未播放: {:?}", texts(app));
+}
+
 #[test]
 fn sidebar_navigates_between_library_views() {
     let mut app = start(1200.0, 800.0);
@@ -96,7 +110,16 @@ fn sidebar_navigates_between_library_views() {
     // 设置弹窗：左栏分类 + 右栏选项，默认「外观」。
     app.press("设置").unwrap();
     app.wait_for("id:settings-content >> label:外观").unwrap();
-    for label in ["曲库", "播放", "歌词", "封面", "窗口", "标签", "通用", "元数据"] {
+    for label in [
+        "曲库",
+        "播放",
+        "歌词",
+        "封面",
+        "窗口",
+        "标签",
+        "通用",
+        "元数据",
+    ] {
         assert!(has(&app, label), "{label}: {:?}", texts(&app));
     }
     for (pane, section) in [
@@ -130,7 +153,8 @@ fn settings_search_filters_sections() {
     app.wait_for("id:settings-content >> label:外观").unwrap();
     app.type_text("label:搜索设置", "字体").unwrap();
     // 只有「字体」一节命中：左栏一行结果，右栏是它的内容（「外观」节被滤掉）。
-    app.wait_for("id:settings-nav >> role:button[字体]").unwrap();
+    app.wait_for("id:settings-nav >> role:button[字体]")
+        .unwrap();
     assert!(has(&app, "系统字体"));
     assert!(!has(&app, "或为界面固定一种"));
     assert!(!has(&app, "添加文件夹…"));
@@ -176,8 +200,7 @@ fn accent_swatches_switch_and_persist_the_theme_color() {
     app.press("设置").unwrap();
     app.press("id:settings-nav >> role:button[外观]").unwrap();
     app.wait_for("id:settings-content >> text:主题色").unwrap();
-    let swatch =
-        |label: &str| format!("id:settings-content >> role:button[主题色：{label}]");
+    let swatch = |label: &str| format!("id:settings-content >> role:button[主题色：{label}]");
     app.wait_until(
         "「封面」选中（出厂默认）",
         Duration::from_secs(2),
@@ -185,16 +208,14 @@ fn accent_swatches_switch_and_persist_the_theme_color() {
     )
     .unwrap();
     app.press(&swatch("红")).unwrap();
-    app.wait_until(
-        "「红」选中",
-        Duration::from_secs(2),
-        |s| s.selected(&swatch("红")).unwrap_or(false),
-    )
+    app.wait_until("「红」选中", Duration::from_secs(2), |s| {
+        s.selected(&swatch("红")).unwrap_or(false)
+    })
     .unwrap();
     assert!(!app.screen().selected(&swatch("封面")).unwrap());
     // 配置在线程里落盘：等它写完再断言。
-    let file = std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap())
-        .join("library.json");
+    let file =
+        std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap()).join("library.json");
     let saved = |color: &str| {
         std::fs::read_to_string(&file)
             .ok()
@@ -217,44 +238,33 @@ fn accent_swatches_switch_and_persist_the_theme_color() {
 fn cover_mode_tints_the_playing_track_title() {
     let _guard = play_lock();
     let mut app = start_inner(1200.0, 800.0);
-    // 先等封面线程把缩略图（连带主色调）算出来：art_hue 进了 MetaCache
-    // 后 request_accent 走同步快路径，不依赖可能被别的用例抢先取走的
+    // 先等封面线程把主色调算出来（写进全局元数据缓存）：之后播放时
+    // request_accent 走同步快路径，不依赖可能被别的用例抢先取走的
     // drain 通知。
-    let covers = std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap())
-        .join("covers");
-    app.wait_until(
-        "封面色调已算好",
-        Duration::from_secs(5),
-        |_| {
-            covers
-                .read_dir()
-                .map(|d| {
-                    d.flatten()
-                        .any(|e| e.file_name().to_string_lossy().ends_with("-400.jpg"))
-                })
-                .unwrap_or(false)
-        },
-    )
+    let sine = dunce::canonicalize(CORPUS)
+        .unwrap()
+        .join("sine.flac")
+        .to_string_lossy()
+        .into_owned();
+    app.wait_until("封面色调已算好", Duration::from_secs(10), |_| {
+        zeo_player::engine::Meta::art_hue(&sine).is_some()
+    })
     .unwrap();
-    // 文件夹视图 → 点进根文件夹，曲目行才出现。
+    // 文件夹视图 → 点进根文件夹，曲目行才出现。双击才播放。
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
-    app.press("测试歌曲").unwrap();
-    app.wait_until(
-        "曲目标题染成封面色",
-        Duration::from_secs(5),
-        |s| {
-            // 播放条也有同名标题（中性色）：只看曲目行里的那一个。
-            s.span_style("role:button[测试歌曲] >> text:测试歌曲")
-                .map(|st| {
-                    let c = st.color.0;
-                    let (r, g, b) = (c >> 24 & 0xff, c >> 16 & 0xff, c >> 8 & 0xff);
-                    // 黑白文字三通道相等；封面强调色有明显色差。
-                    r.max(g).max(b) - r.min(g).min(b) > 40
-                })
-                .unwrap_or(false)
-        },
-    )
+    double_press(&mut app, "role:button[测试歌曲]");
+    app.wait_until("曲目标题染成封面色", Duration::from_secs(5), |s| {
+        // 播放条也有同名标题（中性色）：只看曲目行里的那一个。
+        s.span_style("role:button[测试歌曲] >> text:测试歌曲")
+            .map(|st| {
+                let c = st.color.0;
+                let (r, g, b) = (c >> 24 & 0xff, c >> 16 & 0xff, c >> 8 & 0xff);
+                // 黑白文字三通道相等；封面强调色有明显色差。
+                r.max(g).max(b) - r.min(g).min(b) > 40
+            })
+            .unwrap_or(false)
+    })
     .unwrap();
     // 共享播放器：别让它放着歌去影响别的用例。
     zeo_player::engine::Player::global().pause();
@@ -443,6 +453,52 @@ fn playlists_manual_and_smart() {
         .unwrap();
     assert!(!has(&app, "智能歌单"), "{:?}", texts(&app));
     assert!(has(&app, "测试歌单"));
+}
+
+/// 曲目行：双击才播放（单击不动）；喜欢列；右键菜单的删除项与「删除
+/// 文件…」确认弹窗。
+#[test]
+fn track_row_double_click_like_and_menu() {
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("zeo-player-test-music").unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+    let row = "role:button[测试歌曲]";
+    // 共享播放器：别的用例可能已把它播成当前曲目——那下单击断言无从
+    // 区分「没播」与「本来就选着」，只跑双击那半。
+    let was_current = app.screen().selected(row).unwrap_or(false);
+    app.press(row).unwrap();
+    if !was_current {
+        assert!(!app.screen().selected(row).unwrap_or(false), "单击不应播放");
+    }
+    double_press(&mut app, row);
+    zeo_player::engine::Player::global().pause();
+
+    // 喜欢列：行内爱心按钮，点了变「取消喜欢」。
+    app.press("role:button[测试歌曲] >> role:button[喜欢]")
+        .unwrap();
+    app.wait_for("role:button[测试歌曲] >> role:button[取消喜欢]")
+        .unwrap();
+
+    // 右键菜单：删除两项都在（context_menu 的项是普通 menuitem 元素）；
+    // 「删除文件…」只开确认弹窗（取消，不真删）。
+    app.right_click(row).unwrap();
+    app.wait_for("role:menuitem[从曲库中删除]").unwrap();
+    for item in ["播放", "添加到歌单", "删除文件…"] {
+        app.wait_for(&format!("role:menuitem[{item}]")).unwrap();
+    }
+    app.press("role:menuitem[删除文件…]").unwrap();
+    app.wait_for("移到回收站").unwrap();
+    app.press("取消").unwrap();
+    app.wait_for_gone("移到回收站", Duration::from_secs(2))
+        .unwrap();
+
+    // 还原：取消喜欢，别让喜欢状态漏给别的用例。
+    app.press("role:button[测试歌曲] >> role:button[取消喜欢]")
+        .unwrap();
 }
 
 /// 测试语料根文件夹在文件夹页里的名字。

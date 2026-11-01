@@ -957,9 +957,7 @@ fn load_track(
             }
             shared.ready.store(true, Ordering::Relaxed);
             // 封面由引擎循环在缓冲填起来之后生成（`load_covers`）。
-            media.set_artwork_file(
-                cached.map(|(large, _)| file_url(&large.to_string_lossy())),
-            );
+            media.set_artwork_file(cached.map(|(large, _)| file_url(&large.to_string_lossy())));
             publish_media(shared, media, true);
         }
         Err(err) => set_error(shared, &err),
@@ -983,8 +981,7 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
             return;
         }
         let file = std::path::Path::new(&path);
-        let cover =
-            crate::metadata::covers::large(file).map(|p| p.to_string_lossy().into_owned());
+        let cover = crate::metadata::covers::large(file).map(|p| p.to_string_lossy().into_owned());
         let backdrop =
             crate::metadata::covers::backdrop(file).map(|p| p.to_string_lossy().into_owned());
         {

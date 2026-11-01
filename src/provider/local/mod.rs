@@ -178,6 +178,16 @@ fn sort_tracks(entries: &mut [TrackEntry]) {
     });
 }
 
+/// 把 `path` 移到回收站；`permanent` 时直接删除（不可恢复）。在调用方
+/// 的工作线程上运行（回收站 API 可能慢）。
+pub fn delete_file(path: &Path, permanent: bool) -> std::io::Result<()> {
+    if permanent {
+        std::fs::remove_file(path)
+    } else {
+        trash::delete(path).map_err(|e| std::io::Error::other(e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
