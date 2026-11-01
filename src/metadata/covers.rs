@@ -70,7 +70,7 @@ fn cache_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("ZEO_PLAYER_CACHE_DIR") {
         return PathBuf::from(dir).join("covers");
     }
-    crate::library::data_dir().join("covers")
+    crate::config::data_dir().join("covers")
 }
 
 /// 删除全部缩略图（重建曲库）。

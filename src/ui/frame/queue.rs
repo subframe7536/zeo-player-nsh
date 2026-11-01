@@ -8,12 +8,12 @@ use std::rc::Rc;
 use nsh_base::{PopoverEvent, popover};
 use nsh_core::prelude::*;
 
-use super::button::RADIUS_MD;
-use super::icons::{Icon, icon, icon_dyn};
-use super::parts::{cover, icon_button};
-use super::store::{cover_of, format_time, player, store};
-use super::theme::*;
-use crate::audio::LoopMode;
+use super::super::components::button::{RADIUS_MD, icon_button};
+use super::super::components::cover::cover;
+use super::super::components::icons::{Icon, icon, icon_dyn};
+use super::super::store::{cover_of, format_time, player, store};
+use super::super::theme::*;
+use crate::engine::audio::LoopMode;
 
 const ROW: f32 = 52.0;
 
@@ -95,7 +95,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                 Some(e) => e.title.clone(),
                 None => path.with(|p| {
                     p.as_deref()
-                        .map(|p| super::views::last_segment(p).to_owned())
+                        .map(|p| super::super::views::last_segment(p).to_owned())
                         .unwrap_or_default()
                 }),
             })
@@ -242,7 +242,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                             primary()
                         }
                     },
-                    super::store::cycle_loop_mode,
+                    super::super::store::cycle_loop_mode,
                 ))
                 .child(icon_button(
                     || Icon::Close,

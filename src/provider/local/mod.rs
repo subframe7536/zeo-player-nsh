@@ -1,0 +1,206 @@
+//! 本地文件源：根目录持久化、遍历目录建索引（带进度），`watcher` 监视根
+//! 目录变化并触发重扫。
+
+pub(crate) mod watcher;
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+
+use crate::config::{LibraryConfig, LibraryStore, ProviderId, TrackEntry, split_genres};
+use crate::metadata::{CacheEntry, MetaCache};
+
+/// 基线音频扩展名（opus/ogg 暂缓，恢复时加回）。
+pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav"];
+
+/// 用数据库里上次的元数据建初始索引，界面马上有曲库；随后的扫描只重读
+/// 变了的文件。
+pub(crate) fn initial_index(config: &LibraryConfig) -> Vec<TrackEntry> {
+    let mut tracks: Vec<TrackEntry> = MetaCache::global()
+        .entries()
+        .into_iter()
+        .filter(|(path, _)| {
+            config
+                .roots
+                .iter()
+                .any(|root| Path::new(path).starts_with(root))
+        })
+        .map(|(path, entry)| track_entry(path, &entry, &config.genre_separators))
+        .collect();
+    sort_tracks(&mut tracks);
+    tracks
+}
+
+/// 扫描所有根目录并重建索引：先遍历目录得到总数，再逐个读标签，
+/// `store.progress()` 随之推进。
+pub(crate) fn scan(store: &LibraryStore) -> usize {
+    if store.scanning.swap(true, Ordering::AcqRel) {
+        return store.tracks().len();
+    }
+    store.done.store(0, Ordering::Relaxed);
+    store.total.store(0, Ordering::Relaxed);
+    let config = store.config();
+    let mut files: Vec<PathBuf> = Vec::new();
+    for root in &config.roots {
+        *store.current.lock().unwrap() = root.clone();
+        collect_audio_files(Path::new(root), &mut files);
+    }
+    store.total.store(files.len(), Ordering::Relaxed);
+    let cache = MetaCache::global();
+    cache.begin_batch();
+    let mut entries: Vec<TrackEntry> = Vec::with_capacity(files.len());
+    for (i, path) in files.iter().enumerate() {
+        if let Some(name) = path.file_name() {
+            *store.current.lock().unwrap() = name.to_string_lossy().into_owned();
+        }
+        if let Some(entry) = read_entry(path, &config.genre_separators) {
+            entries.push(entry);
+        }
+        store.done.store(i + 1, Ordering::Relaxed);
+    }
+    cache.end_batch();
+    // 不在任何根目录下的条目（文件删了、根目录移除了）从缓存和数据库里去掉。
+    cache.retain(&entries.iter().map(|t| t.path.clone()).collect());
+    sort_tracks(&mut entries);
+    let count = entries.len();
+    *store.tracks.write().unwrap() = Arc::new(entries);
+    store.current.lock().unwrap().clear();
+    store.scanning.store(false, Ordering::Release);
+    count
+}
+
+/// 重建：丢掉标签缓存与封面缩略图，从文件重新读取全部曲目。
+pub(crate) fn rebuild(store: &LibraryStore) -> usize {
+    if store.is_scanning() {
+        return store.tracks().len();
+    }
+    MetaCache::global().clear();
+    crate::metadata::covers::clear_cache();
+    scan(store)
+}
+
+fn collect_audio_files(root: &Path, out: &mut Vec<PathBuf>) {
+    for entry in walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let ext = entry
+            .path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
+        if ext.is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.as_str())) {
+            out.push(entry.into_path());
+        }
+    }
+}
+
+/// 读一个文件的索引条目；读不出标签/属性的文件跳过。
+fn read_entry(path: &Path, separators: &[String]) -> Option<TrackEntry> {
+    let entry = MetaCache::global().entry(path).ok()?;
+    Some(track_entry(
+        path.to_string_lossy().into_owned(),
+        &entry,
+        separators,
+    ))
+}
+
+/// 缓存条目 → 索引条目。
+fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> TrackEntry {
+    let meta = &entry.value;
+    TrackEntry {
+        provider: ProviderId::Local,
+        file_name: Path::new(&path)
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        path,
+        title: meta.title.clone(),
+        artist: meta.artist.clone(),
+        album: meta.album.clone(),
+        album_artist: {
+            let aa = meta.album_artist.trim();
+            if aa.is_empty() {
+                meta.artist.clone()
+            } else {
+                aa.to_owned()
+            }
+        },
+        genres: split_genres(&meta.genres, separators),
+        year: meta.year,
+        track: meta.track,
+        disk: meta.disk,
+        duration: meta.duration,
+        bit_rate: meta.bit_rate,
+        sample_rate: meta.sample_rate,
+        channels: meta.channels,
+        has_art: meta.has_art,
+        size_bytes: entry.size,
+        modified: entry.modified,
+        stamp: entry.stamp,
+    }
+}
+
+/// 索引顺序：歌手、专辑、碟号、音轨号、标题。
+fn sort_tracks(entries: &mut [TrackEntry]) {
+    entries.sort_by(|a, b| {
+        a.artist
+            .cmp(&b.artist)
+            .then(a.album.cmp(&b.album))
+            .then(a.disk.cmp(&b.disk))
+            .then(a.track.cmp(&b.track))
+            .then(a.title.cmp(&b.title))
+    });
+}
+
+#[cfg(test)]
+mod real_library {
+    use crate::config::library_store;
+
+    /// `cargo test -- --ignored scan_reports_progress`：用 ~/Music 真实曲库检查进度推进。
+    #[test]
+    #[ignore = "reads the real ~/Music library"]
+    fn scan_reports_progress() {
+        let music = dirs::audio_dir().expect("~/Music");
+        // SAFETY(测试): 只有本测试读写这个变量。
+        unsafe { std::env::set_var("ZEO_PLAYER_DATA_DIR", "/tmp/zeo-player-test-data-progress") };
+        let _ = std::fs::remove_dir_all("/tmp/zeo-player-test-data-progress");
+        let store = library_store();
+        store.add_root(&music.to_string_lossy()).unwrap();
+        let worker = std::thread::spawn(|| library_store().scan());
+        let mut seen = Vec::new();
+        while !worker.is_finished() {
+            let p = store.progress();
+            if p.scanning && p.total > 0 {
+                seen.push(p.done);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let count = worker.join().unwrap();
+        let p = store.progress();
+        assert!(
+            !p.scanning && p.done == p.total && p.total >= count,
+            "{p:?} count={count}"
+        );
+        assert!(
+            seen.windows(2).all(|w| w[0] <= w[1]) && seen.len() >= 2,
+            "进度单调推进：{} 次采样",
+            seen.len()
+        );
+        let started = std::time::Instant::now();
+        assert_eq!(store.rebuild(), count, "重建后曲目数不变");
+        eprintln!(
+            "{count} 首，进度采样 {} 次，首个 {:?} 末个 {:?}，重建 {:?}",
+            seen.len(),
+            seen.first(),
+            seen.last(),
+            started.elapsed()
+        );
+        store.set_separators(&["/".into()]);
+        assert_eq!(store.separators(), vec!["/"]);
+    }
+}

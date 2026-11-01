@@ -10,8 +10,8 @@ use std::time::Duration;
 use nsh_core::prelude::*;
 
 use crate::engine::{LyricsSource, Meta, Player};
-use crate::library::{ScanProgress, TrackEntry, library_store};
-use crate::lyrics::LyricsOutput;
+use crate::config::{ScanProgress, TrackEntry, library_store};
+use crate::metadata::lyrics::LyricsOutput;
 use crate::metadata::{MetaCache, MetaInfo};
 use crate::playlists::{Kind, Playlist, Rule};
 
@@ -47,7 +47,7 @@ pub struct Playback {
     pub duration: f64,
     pub volume: f64,
     /// 队列循环模式（顺序 / 单曲 / 随机）。
-    pub loop_mode: crate::audio::LoopMode,
+    pub loop_mode: crate::engine::audio::LoopMode,
 }
 
 /// 当前曲目（换曲时变化）。
@@ -74,14 +74,14 @@ pub struct LibraryState {
     pub progress: ScanProgress,
     pub separators: Vec<String>,
     pub watching: bool,
-    pub watch: crate::watcher::WatchStatus,
+    pub watch: crate::provider::local::watcher::WatchStatus,
     /// 界面字体（`None`：系统字体）。
     pub font: Option<String>,
-    pub close_action: crate::library::CloseAction,
+    pub close_action: crate::config::CloseAction,
     pub fade_ms: u32,
-    pub lyrics_align: crate::library::LyricsAlign,
+    pub lyrics_align: crate::config::LyricsAlign,
     /// 界面外观（跟随系统 / 浅色 / 深色）。
-    pub appearance: crate::library::Appearance,
+    pub appearance: crate::config::Appearance,
 }
 
 fn library_state() -> LibraryState {
@@ -93,7 +93,7 @@ fn library_state() -> LibraryState {
         progress,
         separators: lib.separators(),
         watching: lib.watching(),
-        watch: crate::watcher::status(),
+        watch: crate::provider::local::watcher::status(),
         font: lib.font(),
         close_action: lib.close_action(),
         fade_ms: lib.fade_ms(),
@@ -314,9 +314,9 @@ pub fn install() -> Store {
             s.waveform.set(None);
             return;
         };
-        let floor = crate::waveform::WaveformOptions::default().min;
+        let floor = crate::metadata::waveform::WaveformOptions::default().min;
         s.waveform
-            .set(Some(Same(Arc::new(vec![floor; crate::waveform::BARS]))));
+            .set(Some(Same(Arc::new(vec![floor; crate::metadata::waveform::BARS]))));
         let still = move |stamp: &str| untracked(|| path.with(|p| p.as_deref() == Some(stamp)));
         let p = stamp.clone();
         spawn(async move {
@@ -345,7 +345,7 @@ pub fn install() -> Store {
             }
             let bars = blocking({
                 let p = p.clone();
-                move || crate::waveform::waveform(Path::new(&p))
+                move || crate::metadata::waveform::waveform(Path::new(&p))
             })
             .await;
             if still(&p) {
@@ -370,14 +370,14 @@ pub fn install() -> Store {
                     continue;
                 };
                 match known.insert(path.clone(), stamp) {
-                    Some(old) if old != stamp => crate::covers::request(&path),
+                    Some(old) if old != stamp => crate::metadata::covers::request(&path),
                     _ => {}
                 }
             }
         });
     });
 
-    crate::watcher::sync();
+    crate::provider::local::watcher::sync();
     crate::window::set_close_action(library_store().close_action());
     set_color_scheme(color_scheme(library_store().appearance()));
     player().set_fade_ms(library_store().fade_ms());
@@ -406,22 +406,22 @@ pub fn font_family() -> SharedString {
 }
 
 /// 全屏歌词的对齐方式（立即生效并保存）。
-pub fn set_lyrics_align(align: crate::library::LyricsAlign) {
+pub fn set_lyrics_align(align: crate::config::LyricsAlign) {
     store().library.update(|l| l.lyrics_align = align);
     std::thread::spawn(move || library_store().set_lyrics_align(align));
 }
 
 /// 持久化的外观 → NSH 的 `Appearance`（`set_color_scheme` 的参数）。
-fn color_scheme(mode: crate::library::Appearance) -> Appearance {
+fn color_scheme(mode: crate::config::Appearance) -> Appearance {
     match mode {
-        crate::library::Appearance::System => Appearance::System,
-        crate::library::Appearance::Light => Appearance::Light,
-        crate::library::Appearance::Dark => Appearance::Dark,
+        crate::config::Appearance::System => Appearance::System,
+        crate::config::Appearance::Light => Appearance::Light,
+        crate::config::Appearance::Dark => Appearance::Dark,
     }
 }
 
 /// 界面外观（立即生效并保存）。
-pub fn set_appearance(mode: crate::library::Appearance) {
+pub fn set_appearance(mode: crate::config::Appearance) {
     store().library.update(|l| l.appearance = mode);
     set_color_scheme(color_scheme(mode));
     std::thread::spawn(move || library_store().set_appearance(mode));
@@ -442,19 +442,19 @@ pub fn cycle_loop_mode() {
 }
 
 /// 关闭窗口时的行为（保存）。
-pub fn set_close_action(action: crate::library::CloseAction) {
+pub fn set_close_action(action: crate::config::CloseAction) {
     store().library.update(|l| l.close_action = action);
     std::thread::spawn(move || library_store().set_close_action(action));
 }
 
 /// 回答关闭询问：记住选择，然后照做。
-pub fn answer_close(action: crate::library::CloseAction) {
+pub fn answer_close(action: crate::config::CloseAction) {
     store().close_prompt.set(false);
     set_close_action(action);
     match action {
-        crate::library::CloseAction::Tray => crate::window::hide(),
-        crate::library::CloseAction::Quit => crate::window::quit(),
-        crate::library::CloseAction::Ask => {}
+        crate::config::CloseAction::Tray => crate::window::hide(),
+        crate::config::CloseAction::Quit => crate::window::quit(),
+        crate::config::CloseAction::Ask => {}
     }
 }
 
@@ -464,7 +464,7 @@ pub fn set_watch(on: bool) {
     std::thread::spawn(move || library_store().set_watch(on));
 }
 
-fn now_playing(snap: &crate::audio::Snapshot) -> NowPlaying {
+fn now_playing(snap: &crate::engine::audio::Snapshot) -> NowPlaying {
     NowPlaying {
         path: snap.path.clone(),
         title: snap.title.clone(),
@@ -740,7 +740,7 @@ pub fn rebuild() {
     std::thread::spawn(move || {
         library_store().rebuild();
         for path in known {
-            crate::covers::request(&path);
+            crate::metadata::covers::request(&path);
         }
     });
 }
@@ -804,7 +804,7 @@ pub fn cover_of(path: &str) -> Option<SharedString> {
             let owner = store().owner;
             let cover = owner.run(|| signal(None::<SharedString>));
             COVERS.with(|c| c.borrow_mut().insert(path.to_owned(), cover));
-            crate::covers::request(path);
+            crate::metadata::covers::request(path);
             cover
         }
     };
@@ -812,7 +812,7 @@ pub fn cover_of(path: &str) -> Option<SharedString> {
 }
 
 fn drain_covers() {
-    for (track, thumb) in crate::covers::take_done() {
+    for (track, thumb) in crate::metadata::covers::take_done() {
         if let Some(thumb) = thumb
             && let Some(cover) = COVERS.with(|c| c.borrow().get(&track).copied())
         {
@@ -831,6 +831,25 @@ pub fn format_time(seconds: f64) -> String {
         0
     };
     format!("{}:{:02}", total / 60, total % 60)
+}
+
+/// 当前播放进度（拖动时为预览）。
+pub fn shown_time() -> f64 {
+    let s = store();
+    s.seek_preview
+        .get()
+        .unwrap_or_else(|| s.playback.with(|p| p.time))
+}
+
+/// 当前进度比例。
+pub fn progress_fraction() -> f64 {
+    let s = store();
+    let duration = s.playback.with(|p| p.duration);
+    if duration > 0.0 {
+        (shown_time() / duration).min(1.0)
+    } else {
+        0.0
+    }
 }
 
 /// 总时长：1 小时 5 分钟 / 42 分钟。

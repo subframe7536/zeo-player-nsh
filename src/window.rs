@@ -13,7 +13,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
-use crate::library::CloseAction;
+use crate::config::CloseAction;
 
 /// 当前关闭行为（界面设置写入）。
 static MODE: AtomicU8 = AtomicU8::new(0);

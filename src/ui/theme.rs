@@ -41,7 +41,7 @@ pub fn sidebar_border() -> AdaptiveColor {
     theme().sidebar_border
 }
 /// 浮动播放条的底色：macOS 上半透明（下面有背景模糊）；Windows 上不透明
-/// 的 card 色，因为那里不做背景模糊（见 `bar::player_bar`），半透明会让
+/// 的 card 色，因为那里不做背景模糊（见 `frame::bar::player_bar`），半透明会让
 /// 底下的封面直接透出来。
 pub fn bar() -> AdaptiveColor {
     #[cfg(target_os = "windows")]
@@ -85,6 +85,6 @@ pub fn top_inset() -> f32 {
 pub fn controls_right() -> f32 {
     let system = nsh_core::element::desktop::title_bar().right.0;
     #[cfg(target_os = "windows")]
-    let system = system.max(super::caption::width());
+    let system = system.max(super::frame::caption::width());
     system
 }

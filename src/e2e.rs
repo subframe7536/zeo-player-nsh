@@ -8,10 +8,10 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::engine::{Library, Meta, Player};
-use crate::library::library_store;
-use crate::lyrics::{LyricOptions, parse_lyric};
+use crate::config::library_store;
+use crate::metadata::lyrics::{LyricOptions, parse_lyric};
 use crate::metadata::MetaCache;
-use crate::waveform::waveform;
+use crate::metadata::waveform::waveform;
 
 fn corpus() -> Option<std::path::PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".nsh/tmp/zeo-player-test-music");
@@ -94,7 +94,7 @@ fn end_to_end_playback() {
 
     // 4. 波形：56 根、归一化
     let bars = waveform(&root.join("sine.wav")).expect("waveform");
-    assert_eq!(bars.len(), crate::waveform::BARS);
+    assert_eq!(bars.len(), crate::metadata::waveform::BARS);
     // 音量恒定的正弦波：波形平、且偏高。2 秒只有约 2000 块、每块约 44 个
     // 样本，不到 440 Hz 的一个周期，块 RMS 随相位起伏；95 分位取到偏高的块，
     // 每根再平均约 40 块，于是稳定在 0.8 多一点而不是 0.9（参考实现同样如此）。

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use playwire::{Capabilities, Event, MediaControls, PlaybackState, PlayerConfig, Repeat, Track};
 
-use crate::audio::{EngineCmd, Snapshot};
+use crate::engine::audio::{EngineCmd, Snapshot};
 
 /// 指示媒体线程操作的内部消息。
 enum Op {
@@ -130,10 +130,10 @@ impl MediaSession {
             },
             volume: snapshot.volume,
             repeat: match snapshot.loop_mode {
-                crate::audio::LoopMode::Single => Repeat::One,
+                crate::engine::audio::LoopMode::Single => Repeat::One,
                 _ => Repeat::All,
             },
-            shuffle: snapshot.loop_mode == crate::audio::LoopMode::Random,
+            shuffle: snapshot.loop_mode == crate::engine::audio::LoopMode::Random,
             capabilities: Capabilities {
                 can_go_next: can_switch,
                 can_go_previous: can_switch,

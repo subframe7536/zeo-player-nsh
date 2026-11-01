@@ -11,8 +11,8 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rubato::Resampler;
 use serde::{Deserialize, Serialize};
 
-use crate::codec::Source;
-use crate::media::MediaSession;
+use crate::engine::codec::Source;
+use crate::engine::media::MediaSession;
 use crate::metadata::MetaCache;
 
 /// 环形缓冲的填充目标（秒）。CPU 忙时引擎线程可能几百毫秒排不上，
@@ -961,8 +961,8 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
         return;
     };
     let file = std::path::Path::new(&path);
-    let cover = crate::covers::large(file).map(|p| p.to_string_lossy().into_owned());
-    let backdrop = crate::covers::backdrop(file).map(|p| p.to_string_lossy().into_owned());
+    let cover = crate::metadata::covers::large(file).map(|p| p.to_string_lossy().into_owned());
+    let backdrop = crate::metadata::covers::backdrop(file).map(|p| p.to_string_lossy().into_owned());
     {
         let mut t = shared.track.lock().unwrap();
         if t.path.as_deref() != Some(path.as_str()) {

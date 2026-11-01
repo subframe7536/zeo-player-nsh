@@ -7,17 +7,20 @@ use std::rc::Rc;
 use nsh_base::{context_menu, menu, menu_item, menu_separator, submenu};
 use nsh_core::prelude::*;
 
-use super::Nav;
-use super::button::{Size, Variant, text_button};
-use super::form::{
+use super::super::Nav;
+use super::super::components::button::{
+    Size, Variant, icon_button, outline_button, pill_button, text_button,
+};
+use super::super::components::form::{
     dialog_content, dialog_footer, dialog_header, input_field, modal, select_trigger, tab_list,
     tab_trigger,
 };
-use super::icons::{Icon, icon};
-use super::parts::*;
-use super::store::{self, Draft, format_total, play_list, store};
-use super::theme::*;
-use crate::library::{TrackEntry, unix_now};
+use super::super::components::icons::{Icon, icon};
+use super::super::components::page::{empty_state, page_header};
+use super::super::components::tracks::{Columns, track_columns};
+use super::super::store::{self, Draft, format_total, play_list, store};
+use super::super::theme::*;
+use crate::config::{TrackEntry, unix_now};
 use crate::playlists::{Condition, Field, FieldType, Op, Playlist, Rule, Sort};
 
 // --- 菜单部件 -----------------------------------------------------------------
@@ -176,11 +179,11 @@ pub fn track_menu(
         }))
         .child(separator())
         .child(item(
-            super::full::REVEAL_LABEL,
+            super::super::now_playing::REVEAL_LABEL,
             Some(Icon::Reveal),
             move || {
                 if let Some(p) = path() {
-                    super::full::reveal(&p);
+                    super::super::now_playing::reveal(&p);
                 }
             },
         ))
@@ -221,7 +224,7 @@ pub fn sidebar_section() -> View {
                 .flex_row()
                 .items_center()
                 .px(px(10.0))
-                .child(super::section_label("歌单").px(px(10.0)).flex_1())
+                .child(super::super::frame::section_label("歌单").px(px(10.0)).flex_1())
                 .child(view().pt(px(10.0)).child(add)),
         )
         .child(
@@ -439,7 +442,7 @@ pub fn page(id: u64) -> View {
     });
     let from = untracked(|| list.with(|p| p.as_ref().filter(|p| !p.is_smart()).map(|p| p.id)));
     view().flex_1().child(
-        super::views::track_list_in(items, Columns::ALL, header.into_element(), from).empty(empty),
+        super::track_list_in(items, Columns::ALL, header.into_element(), from).empty(empty),
     )
 }
 

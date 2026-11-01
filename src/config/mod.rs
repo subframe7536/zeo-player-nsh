@@ -1,5 +1,11 @@
-//! 多根目录曲库：根目录持久化、扫盘建索引（带进度）、流派按自定义分隔符
-//! 切开并 trim。
+//! 配置与全局库：所有提供方共享的模型（[`TrackEntry`] 索引行、
+//! [`ScanProgress`] 同步进度）、全局库 [`LibraryStore`]（各源的曲目合成
+//! 一份索引）与持久化设置 [`LibraryConfig`]（`library.json`），外加流派
+//! 拆分等工具。
+//!
+//! 曲目来源（本地文件、jellyfin、YouTube Music…）的实现在
+//! `crate::provider` 下；本模块的 `scan`/`rebuild` 经 `crate::provider`
+//! 的门面把各源的曲目同步进索引。
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -7,14 +13,23 @@ use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::metadata::{CacheEntry, MetaCache};
+use crate::metadata::MetaCache;
 
-/// 基线音频扩展名（opus/ogg 暂缓，恢复时加回）。
-pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav"];
+/// 曲目来自哪个提供方。新源实现时加一个变体，并各自产出带自己 id 的
+/// `TrackEntry`。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderId {
+    /// 本地文件夹。
+    #[default]
+    Local,
+}
 
 /// 库索引里的一条曲目（TSX TrackInfo 的 Rust 侧形态）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct TrackEntry {
+    /// 来源提供方。
+    pub provider: ProviderId,
     pub path: String,
     pub file_name: String,
     pub title: String,
@@ -99,7 +114,7 @@ pub struct LibraryConfig {
     pub fade_ms: u32,
     /// 队列循环模式（顺序 / 单曲 / 随机）。
     #[serde(default)]
-    pub loop_mode: crate::audio::LoopMode,
+    pub loop_mode: crate::engine::audio::LoopMode,
     /// 全屏歌词的对齐方式。
     #[serde(default)]
     pub lyrics_align: LyricsAlign,
@@ -109,7 +124,7 @@ pub struct LibraryConfig {
 }
 
 fn default_fade_ms() -> u32 {
-    crate::audio::DEFAULT_FADE_MS
+    crate::engine::audio::DEFAULT_FADE_MS
 }
 
 impl Default for LibraryConfig {
@@ -122,7 +137,7 @@ impl Default for LibraryConfig {
             font: None,
             close_action: CloseAction::Ask,
             fade_ms: default_fade_ms(),
-            loop_mode: crate::audio::LoopMode::default(),
+            loop_mode: crate::engine::audio::LoopMode::default(),
             lyrics_align: LyricsAlign::default(),
             appearance: Appearance::default(),
         }
@@ -180,11 +195,12 @@ pub struct ScanProgress {
 pub struct LibraryStore {
     dir: PathBuf,
     config: std::sync::Mutex<LibraryConfig>,
-    tracks: std::sync::RwLock<Arc<Vec<TrackEntry>>>,
-    scanning: std::sync::atomic::AtomicBool,
-    done: std::sync::atomic::AtomicUsize,
-    total: std::sync::atomic::AtomicUsize,
-    current: std::sync::Mutex<String>,
+    // 索引与扫描进度由提供方（`crate::provider`）写；按惯例只经方法访问。
+    pub(crate) tracks: std::sync::RwLock<Arc<Vec<TrackEntry>>>,
+    pub(crate) scanning: std::sync::atomic::AtomicBool,
+    pub(crate) done: std::sync::atomic::AtomicUsize,
+    pub(crate) total: std::sync::atomic::AtomicUsize,
+    pub(crate) current: std::sync::Mutex<String>,
 }
 
 /// 应用数据目录（`ZEO_PLAYER_DATA_DIR` 可覆盖；开发构建写到仓库的
@@ -209,19 +225,8 @@ pub fn library_store() -> &'static LibraryStore {
         let dir = data_dir();
         let _ = std::fs::create_dir_all(&dir);
         let config = load_config(&dir);
-        // 先用数据库里上次的元数据建索引，界面马上有曲库；随后的扫描只重读变了的文件。
-        let mut tracks: Vec<TrackEntry> = MetaCache::global()
-            .entries()
-            .into_iter()
-            .filter(|(path, _)| {
-                config
-                    .roots
-                    .iter()
-                    .any(|root| Path::new(path).starts_with(root))
-            })
-            .map(|(path, entry)| track_entry(path, &entry, &config.genre_separators))
-            .collect();
-        sort_tracks(&mut tracks);
+        // 先用数据库里上次的元数据建索引，界面马上有曲库；随后的同步只重读变了的内容。
+        let tracks = crate::provider::initial_index(&config);
         LibraryStore {
             dir,
             config: std::sync::Mutex::new(config),
@@ -280,7 +285,7 @@ impl LibraryStore {
         let roots = config.roots.clone();
         self.save_config(&config);
         drop(config);
-        crate::watcher::sync();
+        crate::provider::local::watcher::sync();
         Ok(roots)
     }
 
@@ -291,7 +296,7 @@ impl LibraryStore {
         let roots = config.roots.clone();
         self.save_config(&config);
         drop(config);
-        crate::watcher::sync();
+        crate::provider::local::watcher::sync();
         roots
     }
 
@@ -337,11 +342,11 @@ impl LibraryStore {
         self.save_config(&config);
     }
 
-    pub fn loop_mode(&self) -> crate::audio::LoopMode {
+    pub fn loop_mode(&self) -> crate::engine::audio::LoopMode {
         self.config().loop_mode
     }
 
-    pub fn set_loop_mode(&self, mode: crate::audio::LoopMode) {
+    pub fn set_loop_mode(&self, mode: crate::engine::audio::LoopMode) {
         let mut config = self.config.lock().unwrap();
         config.loop_mode = mode;
         self.save_config(&config);
@@ -370,7 +375,7 @@ impl LibraryStore {
             config.watch = on;
             self.save_config(&config);
         }
-        crate::watcher::sync();
+        crate::provider::local::watcher::sync();
     }
 
     pub fn tracks(&self) -> Arc<Vec<TrackEntry>> {
@@ -417,130 +422,16 @@ impl LibraryStore {
         clean
     }
 
-    /// 扫描所有根目录并重建索引（在调用方的工作线程上运行）：先遍历目录
-    /// 得到总数，再逐个读标签，[`Self::progress`] 随之推进。
+    /// 同步所有源的曲目并重建索引（在调用方的工作线程上运行）。目前只有
+    /// `local`；多源时在这里逐个同步、合并写回，`progress` 随之推进。
     pub fn scan(&self) -> usize {
-        if self.scanning.swap(true, Ordering::AcqRel) {
-            return self.tracks().len();
-        }
-        self.done.store(0, Ordering::Relaxed);
-        self.total.store(0, Ordering::Relaxed);
-        let config = self.config();
-        let mut files: Vec<PathBuf> = Vec::new();
-        for root in &config.roots {
-            *self.current.lock().unwrap() = root.clone();
-            collect_audio_files(Path::new(root), &mut files);
-        }
-        self.total.store(files.len(), Ordering::Relaxed);
-        let cache = MetaCache::global();
-        cache.begin_batch();
-        let mut entries: Vec<TrackEntry> = Vec::with_capacity(files.len());
-        for (i, path) in files.iter().enumerate() {
-            if let Some(name) = path.file_name() {
-                *self.current.lock().unwrap() = name.to_string_lossy().into_owned();
-            }
-            if let Some(entry) = read_entry(path, &config.genre_separators) {
-                entries.push(entry);
-            }
-            self.done.store(i + 1, Ordering::Relaxed);
-        }
-        cache.end_batch();
-        // 不在任何根目录下的条目（文件删了、根目录移除了）从缓存和数据库里去掉。
-        cache.retain(&entries.iter().map(|t| t.path.clone()).collect());
-        sort_tracks(&mut entries);
-        let count = entries.len();
-        *self.tracks.write().unwrap() = Arc::new(entries);
-        self.current.lock().unwrap().clear();
-        self.scanning.store(false, Ordering::Release);
-        count
+        crate::provider::sync(self)
     }
 
     /// 重建：丢掉标签缓存与封面缩略图，从文件重新读取全部曲目。
     pub fn rebuild(&self) -> usize {
-        if self.is_scanning() {
-            return self.tracks().len();
-        }
-        MetaCache::global().clear();
-        crate::covers::clear_cache();
-        self.scan()
+        crate::provider::rebuild(self)
     }
-}
-
-fn collect_audio_files(root: &Path, out: &mut Vec<PathBuf>) {
-    for entry in walkdir::WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let ext = entry
-            .path()
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase());
-        if ext.is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.as_str())) {
-            out.push(entry.into_path());
-        }
-    }
-}
-
-/// 读一个文件的索引条目；读不出标签/属性的文件跳过。
-fn read_entry(path: &Path, separators: &[String]) -> Option<TrackEntry> {
-    let entry = MetaCache::global().entry(path).ok()?;
-    Some(track_entry(
-        path.to_string_lossy().into_owned(),
-        &entry,
-        separators,
-    ))
-}
-
-/// 缓存条目 → 索引条目。
-fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> TrackEntry {
-    let meta = &entry.value;
-    TrackEntry {
-        file_name: Path::new(&path)
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        path,
-        title: meta.title.clone(),
-        artist: meta.artist.clone(),
-        album: meta.album.clone(),
-        album_artist: {
-            let aa = meta.album_artist.trim();
-            if aa.is_empty() {
-                meta.artist.clone()
-            } else {
-                aa.to_owned()
-            }
-        },
-        genres: split_genres(&meta.genres, separators),
-        year: meta.year,
-        track: meta.track,
-        disk: meta.disk,
-        duration: meta.duration,
-        bit_rate: meta.bit_rate,
-        sample_rate: meta.sample_rate,
-        channels: meta.channels,
-        has_art: meta.has_art,
-        size_bytes: entry.size,
-        modified: entry.modified,
-        stamp: entry.stamp,
-    }
-}
-
-/// 索引顺序：歌手、专辑、碟号、音轨号、标题。
-fn sort_tracks(entries: &mut [TrackEntry]) {
-    entries.sort_by(|a, b| {
-        a.artist
-            .cmp(&b.artist)
-            .then(a.album.cmp(&b.album))
-            .then(a.disk.cmp(&b.disk))
-            .then(a.track.cmp(&b.track))
-            .then(a.title.cmp(&b.title))
-    });
 }
 
 /// 流派切分：任一分隔符处切开 → trim 每段 → 去空段、去重。
@@ -621,50 +512,3 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod real_library {
-    use super::*;
-
-    /// `cargo test -- --ignored scan_reports_progress`：用 ~/Music 真实曲库检查进度推进。
-    #[test]
-    #[ignore = "reads the real ~/Music library"]
-    fn scan_reports_progress() {
-        let music = dirs::audio_dir().expect("~/Music");
-        // SAFETY(测试): 只有本测试读写这个变量。
-        unsafe { std::env::set_var("ZEO_PLAYER_DATA_DIR", "/tmp/zeo-player-test-data-progress") };
-        let _ = std::fs::remove_dir_all("/tmp/zeo-player-test-data-progress");
-        let store = library_store();
-        store.add_root(&music.to_string_lossy()).unwrap();
-        let worker = std::thread::spawn(|| library_store().scan());
-        let mut seen = Vec::new();
-        while !worker.is_finished() {
-            let p = store.progress();
-            if p.scanning && p.total > 0 {
-                seen.push(p.done);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
-        let count = worker.join().unwrap();
-        let p = store.progress();
-        assert!(
-            !p.scanning && p.done == p.total && p.total >= count,
-            "{p:?} count={count}"
-        );
-        assert!(
-            seen.windows(2).all(|w| w[0] <= w[1]) && seen.len() >= 2,
-            "进度单调推进：{} 次采样",
-            seen.len()
-        );
-        let started = std::time::Instant::now();
-        assert_eq!(store.rebuild(), count, "重建后曲目数不变");
-        eprintln!(
-            "{count} 首，进度采样 {} 次，首个 {:?} 末个 {:?}，重建 {:?}",
-            seen.len(),
-            seen.first(),
-            seen.last(),
-            started.elapsed()
-        );
-        store.set_separators(&["/".into()]);
-        assert_eq!(store.separators(), vec!["/"]);
-    }
-}

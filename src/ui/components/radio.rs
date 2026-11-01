@@ -8,7 +8,7 @@ use nsh_base::{RadioElement, RadioGroupElement, radio, radio_group};
 use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
-use super::theme::*;
+use super::super::theme::*;
 
 /// 选项组（横排、可换行）。
 pub fn group_row() -> RadioGroupElement {

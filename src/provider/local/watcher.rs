@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
-use crate::library::{AUDIO_EXTENSIONS, library_store};
+use super::AUDIO_EXTENSIONS;
+use crate::config::library_store;
 
 /// 最后一次变化后等多久再扫描。
 pub const QUIET: Duration = Duration::from_millis(1500);
@@ -76,7 +77,7 @@ fn events() -> &'static Mutex<Sender<usize>> {
                     }
                     library_store().scan();
                     let mut st = state().lock().unwrap();
-                    st.status.last_rescan = Some(crate::library::unix_now());
+                    st.status.last_rescan = Some(crate::config::unix_now());
                     st.status.last_changes = changes;
                 }
             })

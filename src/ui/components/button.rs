@@ -7,7 +7,7 @@ use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
 use super::icons::{Icon, icon_dyn};
-use super::theme::*;
+use super::super::theme::*;
 
 /// shadcn 的 `variant`。
 #[allow(dead_code, reason = "shadcn 的完整变体集，部分暂未用到")]
@@ -194,3 +194,44 @@ pub fn on_dark(side: f32) -> ButtonElement {
 
 /// shadcn 的 `rounded-md`（`--radius` 0.625rem 减 2 px）。
 pub const RADIUS_MD: f32 = 8.0;
+
+/// 图标按钮（ghost，悬停才有底色）。`size` 是图标边长，按钮按它选
+/// shadcn 的尺寸：≤ 12 为 `icon-xs`（24），≤ 16 为 `icon-sm`（32），更大为
+/// `icon`（36）。
+pub fn icon_button(
+    name: impl Fn() -> Icon + 'static,
+    size: f32,
+    label: &'static str,
+    tint: impl Fn() -> AdaptiveColor + 'static,
+    on_press: impl Fn() + 'static,
+) -> ButtonElement {
+    let shape = if size <= 12.0 {
+        Size::IconXs
+    } else if size <= 16.0 {
+        Size::IconSm
+    } else {
+        Size::Icon
+    };
+    shell(Variant::Ghost, shape)
+        .accessibility_label(label)
+        .on_press(move |_: &()| on_press())
+        .child(icon_dyn(name, size, tint))
+}
+
+/// 主操作按钮（shadcn `default`）：「播放」。
+pub fn pill_button(
+    name: Icon,
+    label: &'static str,
+    on_press: impl Fn() + 'static,
+) -> ButtonElement {
+    text_button(Variant::Default, Size::Default, Some(name), label, on_press)
+}
+
+/// 次要按钮（shadcn `outline`）。
+pub fn outline_button(
+    name: Icon,
+    label: &'static str,
+    on_press: impl Fn() + 'static,
+) -> ButtonElement {
+    text_button(Variant::Outline, Size::Default, Some(name), label, on_press)
+}

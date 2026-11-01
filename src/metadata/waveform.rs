@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
-use crate::codec::Source;
+use crate::engine::codec::Source;
 
 pub const BARS: usize = 56;
 /// 预计算的 RMS 块数（目标值；实际为 `ceil(总样本 / 块大小)`）。

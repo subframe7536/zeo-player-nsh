@@ -60,7 +60,7 @@ fn db() -> Option<&'static Mutex<Connection>> {
         if cfg!(test) && std::env::var_os("ZEO_PLAYER_DATA_DIR").is_none() {
             return None;
         }
-        let dir = crate::library::data_dir();
+        let dir = crate::config::data_dir();
         let _ = std::fs::create_dir_all(&dir);
         match open(&dir.join("zeo-player.db")) {
             Ok(conn) => Some(Mutex::new(conn)),

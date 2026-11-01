@@ -6,12 +6,15 @@ use nsh_base::button;
 use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
-use super::button::{RADIUS_MD, Size, Variant, shell, tipped};
-use super::icons::Icon;
-use super::parts::{cover, icon_button, progress_fraction, shown_time, slider};
-use super::store::{format_time, player, seek_to, set_volume, store, toggle_mute};
-use super::theme::*;
-use crate::audio::LoopMode;
+use super::super::components::button::{RADIUS_MD, Size, Variant, icon_button, shell, tipped};
+use super::super::components::cover::cover;
+use super::super::components::icons::Icon;
+use super::super::components::slider::slider;
+use super::super::store::{
+    format_time, player, progress_fraction, seek_to, set_volume, shown_time, store, toggle_mute,
+};
+use super::super::theme::*;
+use crate::engine::audio::LoopMode;
 
 pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
     let s = store();
@@ -75,7 +78,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .transition_transform()
         .duration(120.0)
         .on_press(|_: &()| player().toggle())
-        .child(super::icons::play_pause(
+        .child(super::super::components::icons::play_pause(
             28.0,
             move || s.playback.with(|p| p.playing),
             fg,
@@ -104,7 +107,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                         primary()
                     }
                 },
-                super::store::cycle_loop_mode,
+                super::super::store::cycle_loop_mode,
             ),
             "循环模式",
         ))
@@ -126,7 +129,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .child(tipped(
             icon_button(
                 || {
-                    if super::store::current_liked() {
+                    if super::super::store::current_liked() {
                         Icon::HeartFilled
                     } else {
                         Icon::Heart
@@ -135,7 +138,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 14.0,
                 "喜欢",
                 like_red,
-                super::store::toggle_like_current,
+                super::super::store::toggle_like_current,
             ),
             "喜欢",
         ));

@@ -11,8 +11,8 @@ use nsh_core::desktop::TitleBarStyle;
 use nsh_core::element::desktop::set_title_bar;
 use nsh_core::prelude::*;
 
-use super::icons::{Icon, icon_dyn};
-use super::theme::*;
+use super::super::components::icons::{Icon, icon_dyn};
+use super::super::theme::*;
 
 /// 每个按钮的宽度（与系统按钮相同）。
 pub const BUTTON_W: f32 = 46.0;

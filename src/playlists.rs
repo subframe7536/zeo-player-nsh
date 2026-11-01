@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::library::{TrackEntry, unix_now};
+use crate::config::{TrackEntry, unix_now};
 
 /// 一个歌单。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -491,7 +491,7 @@ struct File {
 }
 
 fn file_path() -> PathBuf {
-    crate::library::data_dir().join("playlists.json")
+    crate::config::data_dir().join("playlists.json")
 }
 
 /// 读出全部歌单（文件不存在或损坏时为空）。
@@ -567,6 +567,7 @@ mod tests {
         duration: f64,
     ) -> TrackEntry {
         TrackEntry {
+            provider: crate::config::ProviderId::Local,
             path: path.to_owned(),
             file_name: Path::new(path)
                 .file_name()

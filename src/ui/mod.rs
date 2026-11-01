@@ -1,17 +1,10 @@
 //! Zeo Player 的界面（纯 Rust）：侧栏导航 + 内容区 + 浮动播放条；全屏播放为
 //! 带淡入的覆盖层。
 
-mod bar;
-mod button;
-#[cfg(target_os = "windows")]
-mod caption;
-mod form;
-mod full;
-mod icons;
-mod parts;
-mod playlists;
-mod queue;
-mod radio;
+mod frame;
+mod components;
+mod fonts;
+mod now_playing;
 pub mod store;
 mod theme;
 mod views;
@@ -19,13 +12,10 @@ mod views;
 use std::rc::Rc;
 
 use nsh_core::desktop::TitleBarStyle;
-use nsh_core::element::ElementRef;
 use nsh_core::element::desktop::set_title_bar;
-use nsh_core::element::input;
 use nsh_core::prelude::*;
-use nsh_core::{TouchEvent, TouchPhase};
+use nsh_core::TouchEvent;
 
-use icons::{Icon, icon};
 use theme::*;
 
 /// 侧栏的去处。
@@ -41,20 +31,13 @@ pub enum Nav {
     Playlist(u64),
 }
 
-const LIBRARY: [(Nav, &str, Icon); 4] = [
-    (Nav::Folders, "文件夹", Icon::Folder),
-    (Nav::Artists, "歌手", Icon::Mic),
-    (Nav::Albums, "专辑", Icon::Disc),
-    (Nav::Genres, "标签", Icon::Tag),
-];
-
 /// 应用根组件（`nsh.json` `"root"`）。
 #[component]
 pub fn App() -> impl IntoElement {
     let s = store::install();
     set_title_bar(TitleBarStyle::Hidden, Some(px(TITLE_BAR)));
     #[cfg(target_os = "windows")]
-    caption::install();
+    frame::caption::install();
     on_key("space", |_| store::player().toggle());
 
     let full_open = signal(false);
@@ -68,11 +51,11 @@ pub fn App() -> impl IntoElement {
             }
             full_closing.set(false);
             full_open.set(true);
-            global::<full::Reveal>().update(|r| r.0 = r.0.wrapping_add(1));
+            global::<now_playing::Reveal>().update(|r| r.0 = r.0.wrapping_add(1));
             if untracked(reduce_motion) {
                 fade.set(1.0);
             } else {
-                let _ = fade.timing(1.0, full::IN_MS, full::IN_EASE);
+                let _ = fade.timing(1.0, now_playing::IN_MS, now_playing::IN_EASE);
             }
         }) as Rc<dyn Fn()>
     };
@@ -88,7 +71,7 @@ pub fn App() -> impl IntoElement {
                 full_open.set(false);
                 return;
             }
-            let end = fade.timing(0.0, full::OUT_MS, full::OUT_EASE);
+            let end = fade.timing(0.0, now_playing::OUT_MS, now_playing::OUT_EASE);
             spawn(async move {
                 // 收起途中又打开了（动画被替换，返回 false）：保持打开。
                 if end.await && full_closing.get_untracked() {
@@ -104,7 +87,7 @@ pub fn App() -> impl IntoElement {
     let nav = global::<Nav>();
 
     let queue_open = signal(false);
-    let search = SearchFocus::new();
+    let search = frame::SearchFocus::new();
     // 窗口隐藏到托盘时整个界面拆掉（视图、图片、列表都释放），只留播放与
     // 状态轮询；再次显示时重建，导航位置在全局信号里，不丢。
     // 侧栏与内容区一直铺到窗口顶边，标题栏透明地浮在上面；全屏播放盖住
@@ -115,19 +98,23 @@ pub fn App() -> impl IntoElement {
         view()
             .flex_1()
             .child(
-                view().flex_1().flex_row().child(sidebar(search)).child(
-                    view()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .child(view().h(move || px(top_inset())).flex_shrink_0())
-                        .child(view().flex_1().child(content))
-                        .child(bar::player_bar(open, queue_open)),
-                ),
+                view()
+                    .flex_1()
+                    .flex_row()
+                    .child(frame::sidebar(search))
+                    .child(
+                        view()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(view().h(move || px(top_inset())).flex_shrink_0())
+                            .child(view().flex_1().child(content))
+                            .child(frame::bar::player_bar(open, queue_open)),
+                    ),
             )
-            .child(title_bar())
+            .child(frame::title_bar())
             .child(when(
                 move || full_open.get(),
-                move || full::full_player(fade, close.clone()),
+                move || now_playing::full_player(fade, close.clone()),
             ))
     };
 
@@ -147,140 +134,12 @@ pub fn App() -> impl IntoElement {
         ))
         .child(when(
             move || s.editor.with(Option::is_some),
-            playlists::editor_dialog,
+            views::playlists::editor_dialog,
         ));
     // Windows 的窗口按钮在最上层（盖过全屏播放与弹窗，和系统按钮一样）。
     #[cfg(target_os = "windows")]
-    let root = root.child(caption::buttons(move || full_open.get()));
+    let root = root.child(frame::caption::buttons(move || full_open.get()));
     root
-}
-
-/// 搜索框的焦点：点在框外时让它失焦。
-#[derive(Clone, Copy)]
-struct SearchFocus {
-    input: ElementRef,
-    focused: Signal<bool>,
-    /// 这次按下落在搜索框里（由搜索框自己的触摸处理记下）。
-    inside: Signal<bool>,
-}
-
-impl SearchFocus {
-    fn new() -> Self {
-        SearchFocus {
-            input: element_ref(),
-            focused: signal(false),
-            inside: signal(false),
-        }
-    }
-
-    fn outside_touch(self, e: &TouchEvent) {
-        if e.phase != TouchPhase::Start {
-            return;
-        }
-        // 同一次按下，搜索框与根视图都收到触摸，先后不定：等这次事件派发
-        // 完再看它是否落在框里。
-        spawn(async move {
-            let inside = self.inside.get_untracked();
-            self.inside.set(false);
-            if !inside && self.focused.get_untracked() {
-                self.input.blur();
-            }
-        });
-    }
-}
-
-/// 搜索框的高度。
-const SEARCH_H: f32 = 28.0;
-
-/// 标题栏：透明，浮在侧栏与内容区顶部，图标与名称相对整个窗口居中；
-/// 两侧留出同样宽的边距（取 macOS 交通灯与 Windows 窗口按钮里较宽的一侧），
-/// 窄窗口时也不会压到它们。其余区域拖动窗口。
-fn title_bar() -> View {
-    let inset = move || {
-        let bar = nsh_core::element::desktop::title_bar();
-        px(bar.left.0.max(controls_right()) + 12.0)
-    };
-    view()
-        .absolute()
-        .top(px(0.0))
-        .left(px(0.0))
-        .right(px(0.0))
-        .h(move || px(top_inset()))
-        .flex_row()
-        .items_center()
-        .justify_center()
-        .window_drag(true)
-        .px(inset)
-        .child(
-            view()
-                .flex_row()
-                .flex_shrink_0()
-                .items_center()
-                .gap(px(8.0))
-                .child(icons::logo(18.0))
-                .child(
-                    text("Zeo Player")
-                        .flex_shrink_0()
-                        .text_size(px(14.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(fg()),
-                ),
-        )
-}
-
-/// 侧栏顶部的搜索框。
-fn search_box(focus: SearchFocus) -> View {
-    let s = store::store();
-    let query_empty = move || s.search.with(|q| q.is_empty());
-    // 外框画边框与底色，里面一行：搜索图标、输入框（透明）、清除按钮。
-    // 原生输入框画在应用内容之上，图标不能叠在它下面。
-    view()
-        .h(px(SEARCH_H))
-        .flex_row()
-        .items_center()
-        .pl(px(10.0))
-        .pr(px(1.0))
-        .rounded(px(SEARCH_H / 2.0))
-        .border_1()
-        .border_color(border())
-        .bg(bg())
-        .on_touch(move |e: &TouchEvent| {
-            if e.phase == TouchPhase::Start {
-                focus.inside.set(true);
-            }
-        })
-        // 点在图标上也聚焦输入框。
-        .on_press(move || focus.input.focus())
-        .child(icon(Icon::Search, 13.0, faint).flex_shrink_0())
-        .child(
-            input()
-                .element_ref(&focus.input)
-                .flex_1()
-                .min_w(px(0.0))
-                .h(px(SEARCH_H - 2.0))
-                .px(px(6.0))
-                .text_size(px(13.0))
-                .text_color(fg())
-                .value(move || s.search.get())
-                .placeholder("搜索")
-                .label("搜索")
-                .on_focus(move || focus.focused.set(true))
-                .on_blur(move || focus.focused.set(false))
-                .on_change(move |t: &str| s.search.set(t.to_owned())),
-        )
-        .child(when(
-            move || !query_empty(),
-            move || {
-                parts::icon_button(
-                    || Icon::Close,
-                    10.0,
-                    "清除搜索",
-                    faint,
-                    || store::store().search.set(String::new()),
-                )
-                .flex_shrink_0()
-            },
-        ))
 }
 
 fn page(nav: Signal<Nav>) -> AnyElement {
@@ -295,7 +154,7 @@ fn page(nav: Signal<Nav>) -> AnyElement {
             Nav::Albums => views::albums().into_element(),
             Nav::Genres => views::genres().into_element(),
             Nav::Settings => views::settings().into_element(),
-            Nav::Playlist(id) => playlists::page(id).into_element(),
+            Nav::Playlist(id) => views::playlists::page(id).into_element(),
         }
     })
 }
@@ -304,17 +163,17 @@ fn page(nav: Signal<Nav>) -> AnyElement {
 /// shadcn AlertDialog 的外观）；选择会记住（设置里可改）。取消、Esc 或点
 /// 遮罩时不关窗口。
 fn close_prompt() -> AnyElement {
-    use crate::library::CloseAction;
-    use button::{Size, Variant, text_button};
+    use crate::config::CloseAction;
+    use components::button::{Size, Variant, text_button};
     let s = store::store();
     let cancel = move || s.close_prompt.set(false);
-    let content = form::dialog_content(440.0)
-        .child(form::dialog_header(
+    let content = components::form::dialog_content(440.0)
+        .child(components::form::dialog_header(
             "关闭窗口",
             Some("最小化到托盘后音乐继续播放，可以从托盘图标打开窗口、切歌或退出。这个选择会被记住，可以在「设置」里更改。"),
         ))
         .child(
-            form::dialog_footer()
+            components::form::dialog_footer()
                 .child(text_button(Variant::Outline, Size::Default, None, "取消", cancel))
                 .child(text_button(Variant::Secondary, Size::Default, None, "退出 Zeo Player", || {
                     store::answer_close(CloseAction::Quit)
@@ -323,98 +182,7 @@ fn close_prompt() -> AnyElement {
                     store::answer_close(CloseAction::Tray)
                 })),
         );
-    form::modal(content, cancel)
-}
-
-fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> View {
-    let nav = global::<Nav>();
-    let active = move || nav.get() == target;
-    view()
-        .h(px(34.0))
-        .flex_row()
-        .items_center()
-        .gap(px(10.0))
-        .px(px(10.0))
-        .rounded(px(8.0))
-        .role(AccessibilityRole::Button)
-        .label(label)
-        .accessibility_state(move || AccessibilityState {
-            selected: active(),
-            ..AccessibilityState::default()
-        })
-        .style_when(active, |s| s.bg(sidebar_accent()))
-        .hover(|s| s.bg(sidebar_accent()))
-        .active(|s| s.opacity(0.7))
-        .on_press(move || nav.set(target))
-        .child(icon(glyph, 17.0, move || {
-            if active() { primary() } else { sidebar_fg() }
-        }))
-        .child(
-            text(label)
-                .flex_1()
-                .text_size(px(14.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(move || if active() { theme::fg() } else { sidebar_fg() }),
-        )
-}
-
-pub(crate) fn section_label(label: &'static str) -> Text {
-    text(label)
-        .text_size(px(11.0))
-        .font_weight(FontWeight::SEMIBOLD)
-        .letter_spacing(px(0.6))
-        .text_color(faint())
-        .px(px(10.0))
-        .pt(px(16.0))
-        .pb(px(6.0))
-}
-
-fn sidebar(search: SearchFocus) -> View {
-    let s = store::store();
-    view()
-        .w(px(SIDEBAR))
-        .flex_shrink_0()
-        .bg(theme::sidebar())
-        .border_r_1()
-        .border_r_color(sidebar_border())
-        // 顶部让给标题栏（侧栏底色一直铺到窗口顶边，交通灯落在上面）。
-        .child(view().h(move || px(top_inset())).flex_shrink_0())
-        .child(view().px(px(10.0)).child(search_box(search)))
-        .child(
-            view()
-                .px(px(10.0))
-                .gap(px(2.0))
-                .child(section_label("曲库"))
-                .children(
-                    LIBRARY
-                        .iter()
-                        .map(|&(target, label, glyph)| nav_row(target, label, glyph)),
-                ),
-        )
-        .child(playlists::sidebar_section())
-        .child(
-            view()
-                .px(px(10.0))
-                .pb(px(12.0))
-                .gap(px(2.0))
-                .child(nav_row(Nav::Settings, "设置", Icon::Settings))
-                .child(
-                    text(move || {
-                        s.library.with(|l| {
-                            if l.scanning {
-                                "正在扫描曲库…".to_owned()
-                            } else {
-                                format!("{} 首曲目", s.tracks.with(|t| t.len()))
-                            }
-                        })
-                    })
-                    .text_size(px(12.0))
-                    .tabular_nums()
-                    .text_color(faint())
-                    .px(px(10.0))
-                    .pt(px(8.0)),
-                ),
-        )
+    components::form::modal(content, cancel)
 }
 
 thread_local! {
@@ -487,7 +255,7 @@ fn bench(open_full: Rc<dyn Fn()>) {
 
 /// `ZEO_PLAYER_BENCH=close`：点关闭 → 询问 → 最小化到托盘 → 从托盘显示 → 退出。
 fn bench_close() {
-    use crate::library::CloseAction;
+    use crate::config::CloseAction;
     spawn(async move {
         let s = store::store();
         let step = |name: &str| {

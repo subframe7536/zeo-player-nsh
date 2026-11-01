@@ -1,13 +1,18 @@
-//! 引擎门面：`Player`（解码/输出/系统媒体会话）、`Library`（多根曲库）、
-//! `Meta`（歌词与波形）。纯 Rust 接口，UI（`crate::ui`）与测试直接调用。
+//! 引擎：`mod.rs` 是门面（`Player` 解码/输出/系统媒体会话、`Library` 多根
+//! 曲库、`Meta` 歌词与波形），`audio` / `codec` / `media` 是引擎线程、解码
+//! 与系统媒体会话的实现。纯 Rust 接口，UI（`crate::ui`）与测试直接调用。
+
+pub(crate) mod audio;
+pub(crate) mod codec;
+mod media;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::audio::{EngineCmd, EngineHandle, Snapshot};
+use crate::engine::audio::{EngineCmd, EngineHandle, Snapshot};
 use crate::db::LastPlayed;
-use crate::library::{TrackEntry, library_store};
-use crate::lyrics::{LyricOptions, LyricsOutput, parse_lyric};
+use crate::config::{TrackEntry, library_store};
+use crate::metadata::lyrics::{LyricOptions, LyricsOutput, parse_lyric};
 use crate::metadata::MetaCache;
 
 /// 播放器引擎句柄。
@@ -180,7 +185,7 @@ impl Player {
     }
 
     /// 设置循环模式（队列按新模式重排，当前曲目不变）。
-    pub fn set_loop_mode(&self, mode: crate::audio::LoopMode) {
+    pub fn set_loop_mode(&self, mode: crate::engine::audio::LoopMode) {
         self.engine.send(EngineCmd::SetLoopMode(mode));
     }
 
@@ -190,7 +195,7 @@ impl Player {
     }
 
     /// 当前循环模式。
-    pub fn loop_mode(&self) -> crate::audio::LoopMode {
+    pub fn loop_mode(&self) -> crate::engine::audio::LoopMode {
         self.engine.shared.loop_mode()
     }
 

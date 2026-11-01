@@ -4,22 +4,15 @@
 
 use nsh_core::prelude::*;
 
-mod audio;
-mod codec;
-mod covers;
 mod db;
 #[cfg(test)]
 mod e2e;
 pub mod engine;
-mod fonts;
-mod library;
-mod lyrics;
-mod media;
+mod config;
 mod metadata;
 mod playlists;
+mod provider;
 mod ui;
-mod watcher;
-mod waveform;
 mod window;
 
 pub use ui::App;
