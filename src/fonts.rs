@@ -4,7 +4,9 @@
 /// 系统字体家族：得到的家族名就是渲染时能解析的名字。排序、去重，不含以
 /// `.` 开头的系统私有字体。在后台线程调用；不缓存，查询结果用完即释放。
 pub fn installed_families() -> Vec<String> {
-    let Ok(collection) = font_enumeration::Collection::new() else { return Vec::new() };
+    let Ok(collection) = font_enumeration::Collection::new() else {
+        return Vec::new();
+    };
     let mut list: Vec<String> = collection
         .take()
         .into_iter()

@@ -1,6 +1,7 @@
 //! 全屏播放（参照设计稿）：模糊封面铺底、整体压暗；左半区居中一列——
 //! 封面、曲名与「更多」、歌手 / 专辑、标签、细波形进度与音频信息、线框
 //! 控制按钮、音量；右半区居中的歌词，当前行亮、其余按距离变暗变模糊。
+//! 没有歌词时不显示歌词区，左列在整页居中。
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,12 +13,12 @@ use nsh_core::prelude::*;
 use nsh_core::element::ComponentBuilder;
 
 use super::button::{on_dark, tipped};
-use super::icons::{icon, icon_dyn, Icon};
-use crate::audio::LoopMode;
-use crate::library::LyricsAlign;
+use super::icons::{Icon, icon, icon_dyn};
 use super::parts::{progress_fraction, scrub, shown_time, slider};
 use super::store::{format_time, player, seek_to, set_volume, store, toggle_mute};
 use super::theme::*;
+use crate::audio::LoopMode;
+use crate::library::LyricsAlign;
 use crate::metadata::MetaInfo;
 
 /// 左列宽度（= 封面边长）。
@@ -49,23 +50,35 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
     on_key("escape", move |_| close());
     on_key("left", |_| player().seek_by(-5.0));
     on_key("right", |_| player().seek_by(5.0));
-    on_key("up", move |_| set_volume(s.playback.with_untracked(|p| p.volume) + 0.05));
-    on_key("down", move |_| set_volume(s.playback.with_untracked(|p| p.volume) - 0.05));
+    on_key("up", move |_| {
+        set_volume(s.playback.with_untracked(|p| p.volume) + 0.05)
+    });
+    on_key("down", move |_| {
+        set_volume(s.playback.with_untracked(|p| p.volume) - 0.05)
+    });
 
     let swap = Swap::install();
+    let lyrics_shown = lyrics_shown();
 
     // 底：深灰，封面放大模糊，再压一层暗色，保证白字对比。背景图是预先
     // 模糊好的 64 px 小图（covers::backdrop），拉伸铺满：解码后只有十几
     // KB，不在窗口尺寸上实时模糊。上下两层：`under` 是上一张，`top` 是
     // 当前这张（见 `Swap::backdrop`）。
     let layer = |path: Signal<Option<SharedString>>, alpha: &AnimatedValue| {
-        view().absolute().inset(px(0.0)).bind_opacity(alpha).child(when(move || path.with(Option::is_some), move || {
-            image(move || path.get().unwrap_or_default())
-                .absolute()
-                .inset(px(-40.0))
-                .resize_mode(ResizeMode::Cover)
-                .opacity(0.9)
-        }))
+        view()
+            .absolute()
+            .inset(px(0.0))
+            .bind_opacity(alpha)
+            .child(when(
+                move || path.with(Option::is_some),
+                move || {
+                    image(move || path.get().unwrap_or_default())
+                        .absolute()
+                        .inset(px(-40.0))
+                        .resize_mode(ResizeMode::Cover)
+                        .opacity(0.9)
+                },
+            ))
     };
     let backdrop = view()
         .absolute()
@@ -102,19 +115,38 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
             view()
                 .flex_1()
                 .flex_row()
-                .child(view().flex_1().items_center().justify_center().px(px(32.0)).child(left_column(&swap)))
                 .child(
                     view()
                         .flex_1()
                         .items_center()
-                        .pl(px(16.0))
-                        .pr(px(28.0))
-                        .pt(move || px(top_inset()))
-                        .pb(px(LYRICS_BOTTOM))
-                        .child(lyrics_column(&swap)),
-                ),
+                        .justify_center()
+                        .px(px(32.0))
+                        .child(left_column(&swap)),
+                )
+                // 没有歌词时不留歌词区，左列（封面、元数据、控制）在整页居中。
+                .child(when(
+                    move || lyrics_shown.get(),
+                    move || {
+                        view()
+                            .flex_1()
+                            .items_center()
+                            .pl(px(16.0))
+                            .pr(px(28.0))
+                            .pt(move || px(top_inset()))
+                            .pb(px(LYRICS_BOTTOM))
+                            .child(lyrics_column(&swap))
+                    },
+                )),
         )
-        .child(view().absolute().top(px(0.0)).left(px(0.0)).right(px(0.0)).h(move || px(top_inset())).window_drag(true))
+        .child(
+            view()
+                .absolute()
+                .top(px(0.0))
+                .left(px(0.0))
+                .right(px(0.0))
+                .h(move || px(top_inset()))
+                .window_drag(true),
+        )
         .child(close_button)
 }
 
@@ -127,6 +159,7 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
 /// `backdrop` 为 `None`，直接跟着走会露出底色，整页一瞬间变黑。所以等
 /// `covers_ready` 了再换：新图放在上层（`top`）淡入，旧图留在下层
 /// （`under`）垫底；新歌没有封面时旧图淡出。
+#[derive(Clone, Copy)]
 struct Swap {
     content: AnimatedValue,
     shift: AnimatedValue,
@@ -160,9 +193,12 @@ impl Swap {
             under: signal(None),
         };
         let (content, shift, lyrics_shift) = (swap.content, swap.shift, swap.lyrics_shift);
-        let (backdrop, under_alpha, top, under) = (swap.backdrop, swap.under_alpha, swap.top, swap.under);
+        let (backdrop, under_alpha, top, under) =
+            (swap.backdrop, swap.under_alpha, swap.top, swap.under);
         effect(move || {
-            let (ready, next) = s.track.with(|t| (t.covers_ready || t.error.is_some(), t.backdrop.clone()));
+            let (ready, next) = s
+                .track
+                .with(|t| (t.covers_ready || t.error.is_some(), t.backdrop.clone()));
             let current = top.get_untracked();
             if !ready || current == next {
                 return;
@@ -210,7 +246,9 @@ impl Swap {
 /// 质量标签：Hi-Res（无损且高于 16-bit / 48 kHz）、Lossless、HQ（有损 ≥ 256 kbps）。
 fn quality_tag(m: &MetaInfo) -> Option<String> {
     match m.quality.as_deref() {
-        Some("Lossless") if m.bit_depth.unwrap_or(16) > 16 || m.sample_rate.unwrap_or(44_100) > 48_000 => {
+        Some("Lossless")
+            if m.bit_depth.unwrap_or(16) > 16 || m.sample_rate.unwrap_or(44_100) > 48_000 =>
+        {
             Some("Hi-Res".into())
         }
         Some("Lossless") => Some("Lossless".into()),
@@ -227,7 +265,11 @@ fn audio_line(m: &MetaInfo) -> String {
     }
     if let Some(rate) = m.sample_rate {
         let khz = rate as f64 / 1000.0;
-        parts.push(if khz.fract() == 0.0 { format!("{khz:.0}kHz") } else { format!("{khz:.1}kHz") });
+        parts.push(if khz.fract() == 0.0 {
+            format!("{khz:.0}kHz")
+        } else {
+            format!("{khz:.1}kHz")
+        });
     }
     if let Some(rate) = m.bit_rate {
         parts.push(format!("{rate}kbps"));
@@ -254,12 +296,15 @@ fn left_column(swap: &Swap) -> View {
         .items_center()
         .justify_center()
         .child(icon(Icon::Note, 96.0, || white_a(0.3)))
-        .child(when(move || artwork().is_some(), move || {
-            image(move || artwork().unwrap_or_default())
-                .absolute()
-                .inset(px(0.0))
-                .resize_mode(ResizeMode::Cover)
-        }));
+        .child(when(
+            move || artwork().is_some(),
+            move || {
+                image(move || artwork().unwrap_or_default())
+                    .absolute()
+                    .inset(px(0.0))
+                    .resize_mode(ResizeMode::Cover)
+            },
+        ));
 
     let title_row = view()
         .h(px(28.0))
@@ -267,12 +312,20 @@ fn left_column(swap: &Swap) -> View {
         .items_center()
         .gap(px(8.0))
         .child(
-            text(move || s.track.with(|t| if t.title.is_empty() { "Zeo Player".into() } else { t.title.clone() }))
-                .flex_1()
-                .number_of_lines(1)
-                .text_size(px(20.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(white_a(0.95)),
+            text(move || {
+                s.track.with(|t| {
+                    if t.title.is_empty() {
+                        "Zeo Player".into()
+                    } else {
+                        t.title.clone()
+                    }
+                })
+            })
+            .flex_1()
+            .number_of_lines(1)
+            .text_size(px(20.0))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(white_a(0.95)),
         )
         .child(more_menu());
 
@@ -312,25 +365,28 @@ fn left_column(swap: &Swap) -> View {
             out
         });
         (!list.is_empty()).then(|| {
-            view().flex_row().gap(px(8.0)).children(list.into_iter().map(|(label, strong)| {
-                view()
-                    .h(px(20.0))
-                    .px(px(7.0))
-                    .justify_center()
-                    .rounded(px(4.0))
-                    .bg(if strong {
-                        AdaptiveColor::rgb(0x7fae8a, 0x7fae8a).opacity(0.45)
-                    } else {
-                        white_a(0.14)
-                    })
-                    .child(
-                        text(label)
-                            .number_of_lines(1)
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(white_a(0.85)),
-                    )
-            }))
+            view()
+                .flex_row()
+                .gap(px(8.0))
+                .children(list.into_iter().map(|(label, strong)| {
+                    view()
+                        .h(px(20.0))
+                        .px(px(7.0))
+                        .justify_center()
+                        .rounded(px(4.0))
+                        .bg(if strong {
+                            AdaptiveColor::rgb(0x7fae8a, 0x7fae8a).opacity(0.45)
+                        } else {
+                            white_a(0.14)
+                        })
+                        .child(
+                            text(label)
+                                .number_of_lines(1)
+                                .text_size(px(11.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(white_a(0.85)),
+                        )
+                }))
         })
     });
 
@@ -338,13 +394,23 @@ fn left_column(swap: &Swap) -> View {
     // 下一首，播放键最大。
     let skip = |glyph: Icon, label: &'static str, press: fn()| {
         tipped(
-            on_dark(44.0).accessibility_label(label).on_press(move |_: &()| press()).child(icon(glyph, 18.0, || white_a(0.85))),
+            on_dark(44.0)
+                .accessibility_label(label)
+                .on_press(move |_: &()| press())
+                .child(icon(glyph, 18.0, || white_a(0.85))),
             label,
         )
     };
-    let side = |glyph: Box<dyn Fn() -> Icon>, label: &'static str, tip: &'static str, tint: Box<dyn Fn() -> AdaptiveColor>, press: fn()| {
+    let side = |glyph: Box<dyn Fn() -> Icon>,
+                label: &'static str,
+                tip: &'static str,
+                tint: Box<dyn Fn() -> AdaptiveColor>,
+                press: fn()| {
         tipped(
-            on_dark(36.0).accessibility_label(label).on_press(move |_: &()| press()).child(icon_dyn(glyph, 16.0, tint)),
+            on_dark(36.0)
+                .accessibility_label(label)
+                .on_press(move |_: &()| press())
+                .child(icon_dyn(glyph, 16.0, tint)),
             tip,
         )
     };
@@ -354,7 +420,11 @@ fn left_column(swap: &Swap) -> View {
         .transition_transform()
         .duration(120.0)
         .on_press(|_: &()| player().toggle())
-        .child(super::icons::play_pause(34.0, move || s.playback.with(|p| p.playing), || white_a(0.95)));
+        .child(super::icons::play_pause(
+            34.0,
+            move || s.playback.with(|p| p.playing),
+            || white_a(0.95),
+        ));
     let mode_icon = move || match s.playback.with(|p| p.loop_mode) {
         LoopMode::List => Icon::Repeat,
         LoopMode::Single => Icon::RepeatOne,
@@ -369,14 +439,26 @@ fn left_column(swap: &Swap) -> View {
             Box::new(mode_icon),
             "循环模式（顺序 / 单曲 / 随机）",
             "循环模式",
-            Box::new(move || white_a(if s.playback.with(|p| p.loop_mode) == LoopMode::List { 0.55 } else { 0.95 })),
+            Box::new(move || {
+                white_a(if s.playback.with(|p| p.loop_mode) == LoopMode::List {
+                    0.55
+                } else {
+                    0.95
+                })
+            }),
             super::store::cycle_loop_mode,
         ))
         .child(skip(Icon::PrevLine, "上一首", || player().previous()))
         .child(play)
         .child(skip(Icon::NextLine, "下一首", || player().next()))
         .child(side(
-            Box::new(|| if super::store::current_liked() { Icon::HeartFilled } else { Icon::Heart }),
+            Box::new(|| {
+                if super::store::current_liked() {
+                    Icon::HeartFilled
+                } else {
+                    Icon::Heart
+                }
+            }),
             "喜欢",
             "喜欢",
             Box::new(like_red),
@@ -403,7 +485,13 @@ fn left_column(swap: &Swap) -> View {
                 )
                 // 标签只占一行（多了裁掉），没有标签时也留出这一行：下面的
                 // 进度条位置不随元数据载入而跳动。
-                .child(view().mt(px(14.0)).h(px(20.0)).overflow_hidden().child(tags)),
+                .child(
+                    view()
+                        .mt(px(14.0))
+                        .h(px(20.0))
+                        .overflow_hidden()
+                        .child(tags),
+                ),
         )
         .child(view().pt(px(28.0)).child(waveform_seek()))
         .child(view().pt(px(20.0)).child(controls))
@@ -450,7 +538,9 @@ fn more_menu() -> AnyElement {
                 .active(|st| st.opacity(0.6))
                 .child(icon(Icon::More, 18.0, || white_a(0.7))),
         )
-        .child(super::playlists::add_to_submenu(move || path().into_iter().collect()))
+        .child(super::playlists::add_to_submenu(move || {
+            path().into_iter().collect()
+        }))
         .child(menu_separator().h(px(1.0)).my(px(4.0)).bg(border()))
         .child(item(
             REVEAL_LABEL,
@@ -483,17 +573,26 @@ pub(super) const REVEAL_LABEL: &str = "在访达中显示";
 /// 在系统文件管理器里选中文件。
 pub(super) fn reveal(path: &str) {
     #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    let _ = std::process::Command::new("open")
+        .arg("-R")
+        .arg(path)
+        .spawn();
     // explorer 自己解析 `/select,"路径"`：带空格的路径须原样加引号，不能经
     // Rust 的参数转义。
     #[cfg(target_os = "windows")]
     let _ = {
         use std::os::windows::process::CommandExt;
-        std::process::Command::new("explorer").raw_arg(format!("/select,\"{path}\"")).spawn()
+        std::process::Command::new("explorer")
+            .raw_arg(format!("/select,\"{path}\""))
+            .spawn()
     };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = std::process::Command::new("xdg-open")
-        .arg(std::path::Path::new(path).parent().unwrap_or(std::path::Path::new("/")))
+        .arg(
+            std::path::Path::new(path)
+                .parent()
+                .unwrap_or(std::path::Path::new("/")),
+        )
         .spawn();
 }
 
@@ -530,10 +629,18 @@ fn waveform_seek() -> View {
                 // 已播部分的宽度：0（未到）、bar（已过）或两者之间（播放头上）。
                 let played = (head - x).clamp(0.0, bar);
                 if played < bar {
-                    p = std::mem::take(&mut p).fill_color(dim).begin_path().round_rect(rect, radius).fill();
+                    p = std::mem::take(&mut p)
+                        .fill_color(dim)
+                        .begin_path()
+                        .round_rect(rect, radius)
+                        .fill();
                 }
                 if played >= bar {
-                    p = std::mem::take(&mut p).fill_color(lit).begin_path().round_rect(rect, radius).fill();
+                    p = std::mem::take(&mut p)
+                        .fill_color(lit)
+                        .begin_path()
+                        .round_rect(rect, radius)
+                        .fill();
                 } else if played > 0.0 {
                     // 只亮到播放头：裁到左侧 `played` 宽，再画一根完整的亮条。
                     p = std::mem::take(&mut p)
@@ -551,7 +658,11 @@ fn waveform_seek() -> View {
         });
         p
     };
-    let small = |t: Text| t.text_size(px(12.0)).tabular_nums().text_color(white_a(0.75));
+    let small = |t: Text| {
+        t.text_size(px(12.0))
+            .tabular_nums()
+            .text_color(white_a(0.75))
+    };
     // 高度固定：波形 26 + 间距 10 + 时间行 16。
     view()
         .w_full()
@@ -573,14 +684,21 @@ fn waveform_seek() -> View {
                 .items_center()
                 .child(small(text(move || format_time(shown_time()))).w(px(48.0)))
                 .child(
-                    text(move || s.meta.with(|m| m.as_ref().map(|m| audio_line(m)).unwrap_or_default()))
-                        .flex_1()
-                        .text_center()
-                        .number_of_lines(1)
-                        .text_size(px(10.5))
-                        .text_color(white_a(0.45)),
+                    text(move || {
+                        s.meta
+                            .with(|m| m.as_ref().map(|m| audio_line(m)).unwrap_or_default())
+                    })
+                    .flex_1()
+                    .text_center()
+                    .number_of_lines(1)
+                    .text_size(px(10.5))
+                    .text_color(white_a(0.45)),
                 )
-                .child(small(text(move || format_time(duration()))).w(px(48.0)).text_right()),
+                .child(
+                    small(text(move || format_time(duration())))
+                        .w(px(48.0))
+                        .text_right(),
+                ),
         )
 }
 
@@ -595,10 +713,30 @@ fn volume_row() -> View {
             on_dark(28.0)
                 .accessibility_label("静音")
                 .on_press(|_: &()| toggle_mute())
-                .child(icon_dyn(move || if volume() <= 0.0 { Icon::Mute } else { Icon::Volume }, 15.0, || white_a(0.7))),
+                .child(icon_dyn(
+                    move || {
+                        if volume() <= 0.0 {
+                            Icon::Mute
+                        } else {
+                            Icon::Volume
+                        }
+                    },
+                    15.0,
+                    || white_a(0.7),
+                )),
             "静音",
         ))
-        .child(slider(volume, white_a(0.2), white_a(0.9), white_a(1.0), set_volume, set_volume).flex_1())
+        .child(
+            slider(
+                volume,
+                white_a(0.2),
+                white_a(0.9),
+                white_a(1.0),
+                set_volume,
+                set_volume,
+            )
+            .flex_1(),
+        )
         .child(
             text(move || format!("{}", (volume() * 100.0).round()))
                 .w(px(26.0))
@@ -611,12 +749,41 @@ fn volume_row() -> View {
 
 // --- 歌词 ---------------------------------------------------------------------
 
-/// 右半区：有歌词时滚动列表，否则一行提示。
+/// 是否显示歌词区：没在播放或这首没有歌词时不显示。换歌后歌词载入前
+/// （`lyrics` 为 `None`）保持上一首的结果，不在两种布局之间来回跳。
+fn lyrics_shown() -> Signal<bool> {
+    let s = store();
+    let decide = move || -> Option<bool> {
+        if s.track.with(|t| t.path.is_none()) {
+            return Some(false);
+        }
+        s.lyrics
+            .with(|l| l.as_ref().map(|l| !l.output.lines.is_empty()))
+    };
+    let shown = signal(untracked(decide).unwrap_or(true));
+    effect(move || {
+        if let Some(next) = decide()
+            && next != shown.get_untracked()
+        {
+            shown.set(next);
+        }
+    });
+    shown
+}
+
+/// 右半区：有歌词时滚动列表，载入中一行提示。
 fn lyrics_column(swap: &Swap) -> View {
     let s = store();
-    let has_lines = move || s.lyrics.with(|l| l.as_ref().is_some_and(|l| !l.output.lines.is_empty()));
-    view().w_full().h_full().bind_opacity(&swap.content).bind_translate_x(&swap.lyrics_shift).child(
-        when(has_lines, lyrics_scroller).otherwise(move || {
+    let has_lines = move || {
+        s.lyrics
+            .with(|l| l.as_ref().is_some_and(|l| !l.output.lines.is_empty()))
+    };
+    view()
+        .w_full()
+        .h_full()
+        .bind_opacity(&swap.content)
+        .bind_translate_x(&swap.lyrics_shift)
+        .child(when(has_lines, lyrics_scroller).otherwise(move || {
             view().flex_1().items_center().justify_center().child(
                 text(move || {
                     if s.lyrics.with(Option::is_none) && s.track.with(|t| t.path.is_some()) {
@@ -628,8 +795,7 @@ fn lyrics_column(swap: &Swap) -> View {
                 .text_size(px(15.0))
                 .text_color(white_a(0.4)),
             )
-        }),
-    )
+        }))
 }
 
 /// 行级歌词：跟随时间滚动（当前行停在 [`ANCHOR`] 处），用户滚动后 3 s
@@ -692,7 +858,11 @@ fn lyrics_scroller() -> View {
     let placed = signal(false);
     let offset_of = {
         let line_ys = line_ys.clone();
-        move |index: i64| usize::try_from(index).ok().and_then(|i| line_ys.borrow().get(i).copied())
+        move |index: i64| {
+            usize::try_from(index)
+                .ok()
+                .and_then(|i| line_ys.borrow().get(i).copied())
+        }
     };
     let scroll_to_line = {
         let target = target.clone();
@@ -834,9 +1004,19 @@ fn lyrics_scroller() -> View {
         let seekable = line.time >= 0.0;
         let time = line.time;
         let content = line.raw_content.trim().to_owned();
-        let content = if content.is_empty() { "· · ·".to_owned() } else { content };
+        let content = if content.is_empty() {
+            "· · ·".to_owned()
+        } else {
+            content
+        };
         let metadata = line.metadata;
-        let distance = move || if timed { (i - s.active_line.get()).unsigned_abs() as f32 } else { 0.0 };
+        let distance = move || {
+            if timed {
+                (i - s.active_line.get()).unsigned_abs() as f32
+            } else {
+                0.0
+            }
+        };
         let line_ys = line_ys.clone();
         let resume = resume.clone();
         let last_followed = last_followed.clone();
@@ -862,7 +1042,11 @@ fn lyrics_scroller() -> View {
                     .style_with(move |st| text_align(st, align()))
                     .text_size(px(if metadata { 16.0 } else { LYRIC_SIZE }))
                     .line_height(px(if metadata { 24.0 } else { LYRIC_SIZE * 1.3 }))
-                    .font_weight(if metadata { FontWeight::MEDIUM } else { FontWeight::BOLD })
+                    .font_weight(if metadata {
+                        FontWeight::MEDIUM
+                    } else {
+                        FontWeight::BOLD
+                    })
                     .text_color(move || original_color(timed, distance() == 0.0))
                     .transition_colors()
                     .duration(300.0),
@@ -882,7 +1066,13 @@ fn lyrics_scroller() -> View {
                 .absolute()
                 .top(px(0.0))
                 .bottom(px(0.0))
-                .style_with(move |st| if align() == LyricsAlign::Right { st.left(px(0.0)) } else { st.right(px(0.0)) })
+                .style_with(move |st| {
+                    if align() == LyricsAlign::Right {
+                        st.left(px(0.0))
+                    } else {
+                        st.right(px(0.0))
+                    }
+                })
                 .justify_center()
                 .pointer_events(PointerEvents::None)
                 .opacity(0.0)
@@ -908,14 +1098,22 @@ fn lyrics_scroller() -> View {
         let fade = move || {
             let viewport = viewport.get();
             let y = scroll_y.get();
-            rows_box.with(|b| b.get(index).map_or(1.0, |&(top, h)| edge_fade(viewport * ANCHOR + top + h / 2.0 - y, viewport)))
+            rows_box.with(|b| {
+                b.get(index).map_or(1.0, |&(top, h)| {
+                    edge_fade(viewport * ANCHOR + top + h / 2.0 - y, viewport)
+                })
+            })
         };
         view()
             .w_full()
             .group()
             .opacity(fade)
             .role(AccessibilityRole::Button)
-            .label(if seekable { format!("跳到 {}", format_time(time)) } else { String::new() })
+            .label(if seekable {
+                format!("跳到 {}", format_time(time))
+            } else {
+                String::new()
+            })
             // 当前行与前后一句清晰，再远越模糊（见 `lyric_blur`）。颜色
             // 在文字上：原文随高亮变化，译文始终不变。时间戳在这层之外，
             // 不跟着模糊。
@@ -995,9 +1193,9 @@ fn lyrics_scroller() -> View {
                     let y = e.offset.y.0;
                     scroll_y.set(y);
                     // 程序滚动：动画进行中（约 0.7 s 内）或已到目标附近。
-                    let ours = target
-                        .borrow()
-                        .is_some_and(|(t, at)| at.elapsed().as_millis() < 700 || (y - t).abs() < 64.0);
+                    let ours = target.borrow().is_some_and(|(t, at)| {
+                        at.elapsed().as_millis() < 700 || (y - t).abs() < 64.0
+                    });
                     if !ours && follow.get_untracked() {
                         user_scroll();
                     }
@@ -1016,7 +1214,11 @@ fn lyrics_scroller() -> View {
 /// 歌词行的模糊半径（点）：高亮行和前后一句清晰，再远每多一行加 1.5，
 /// 最多 8（与 ap-spec 的上限相同）。无时间轴的歌词不模糊。
 fn lyric_blur(timed: bool, distance: f32) -> f32 {
-    if timed { ((distance - 1.0) * 1.5).clamp(0.0, 8.0) } else { 0.0 }
+    if timed {
+        ((distance - 1.0) * 1.5).clamp(0.0, 8.0)
+    } else {
+        0.0
+    }
 }
 
 /// 歌词行在视口里的不透明度：行中心进入顶部 [`EDGE_TOP`] 或底部
@@ -1038,7 +1240,10 @@ const EDGE_BOTTOM: f32 = 0.28;
 /// 点击某行后，最多等这么久让高亮换到这一行（之后照常跟随）。
 const PENDING_WAIT: Duration = Duration::from_millis(1500);
 
-fn text_align(st: nsh_core::element::StyleRefinement, align: LyricsAlign) -> nsh_core::element::StyleRefinement {
+fn text_align(
+    st: nsh_core::element::StyleRefinement,
+    align: LyricsAlign,
+) -> nsh_core::element::StyleRefinement {
     match align {
         LyricsAlign::Left => st.text_left(),
         LyricsAlign::Center => st.text_center(),
@@ -1073,7 +1278,11 @@ fn original_color(timed: bool, active: bool) -> AdaptiveColor {
 }
 
 fn original_alpha(timed: bool, active: bool) -> f32 {
-    if active || !timed { ACTIVE_ALPHA } else { IDLE_ALPHA }
+    if active || !timed {
+        ACTIVE_ALPHA
+    } else {
+        IDLE_ALPHA
+    }
 }
 
 #[cfg(test)]
@@ -1086,15 +1295,24 @@ mod tests {
         assert_eq!(lyric_blur(true, 1.0), 0.0, "前后一句不模糊");
         let steps: Vec<f32> = (2..=10).map(|d| lyric_blur(true, d as f32)).collect();
         assert!(steps[0] > 0.0);
-        assert!(steps.windows(2).all(|w| w[0] < w[1] || w[1] == 8.0), "{steps:?}");
+        assert!(
+            steps.windows(2).all(|w| w[0] < w[1] || w[1] == 8.0),
+            "{steps:?}"
+        );
         assert_eq!(lyric_blur(true, 20.0), 8.0);
         assert_eq!(lyric_blur(false, 5.0), 0.0);
     }
 
     #[test]
     fn translation_sits_between_idle_and_active_originals() {
-        assert!(original_alpha(true, false) < TRANSLATION_ALPHA, "未高亮：原文比译文淡");
-        assert!(original_alpha(true, true) > TRANSLATION_ALPHA, "高亮：原文比译文亮");
+        assert!(
+            original_alpha(true, false) < TRANSLATION_ALPHA,
+            "未高亮：原文比译文淡"
+        );
+        assert!(
+            original_alpha(true, true) > TRANSLATION_ALPHA,
+            "高亮：原文比译文亮"
+        );
     }
 
     #[test]
@@ -1135,7 +1353,12 @@ mod tests {
     #[test]
     fn audio_line_matches_the_design() {
         assert_eq!(audio_line(&meta()), "44.1kHz / 160kbps / Stereo");
-        let hires = MetaInfo { bit_depth: Some(24), sample_rate: Some(96_000), bit_rate: Some(2304), ..meta() };
+        let hires = MetaInfo {
+            bit_depth: Some(24),
+            sample_rate: Some(96_000),
+            bit_rate: Some(2304),
+            ..meta()
+        };
         assert_eq!(audio_line(&hires), "24-bit / 96kHz / 2304kbps / Stereo");
     }
 
@@ -1149,10 +1372,24 @@ mod tests {
     #[test]
     fn quality_tags() {
         assert_eq!(quality_tag(&meta()), None, "160 kbps 有损不标");
-        assert_eq!(quality_tag(&MetaInfo { bit_rate: Some(320), ..meta() }).as_deref(), Some("HQ"));
-        let flac = MetaInfo { quality: Some("Lossless".into()), bit_depth: Some(16), ..meta() };
+        assert_eq!(
+            quality_tag(&MetaInfo {
+                bit_rate: Some(320),
+                ..meta()
+            })
+            .as_deref(),
+            Some("HQ")
+        );
+        let flac = MetaInfo {
+            quality: Some("Lossless".into()),
+            bit_depth: Some(16),
+            ..meta()
+        };
         assert_eq!(quality_tag(&flac).as_deref(), Some("Lossless"));
-        let hires = MetaInfo { bit_depth: Some(24), ..flac };
+        let hires = MetaInfo {
+            bit_depth: Some(24),
+            ..flac
+        };
         assert_eq!(quality_tag(&hires).as_deref(), Some("Hi-Res"));
     }
 }

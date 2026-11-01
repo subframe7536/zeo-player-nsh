@@ -159,16 +159,18 @@ fn install_tray_handlers() {
         };
         push_tray(action);
     }));
-    tray_icon::TrayIconEvent::set_event_handler(Some(|event: tray_icon::TrayIconEvent| match event {
-        // Windows：左键单击图标打开窗口（右键出菜单）。
-        tray_icon::TrayIconEvent::Click {
-            button: tray_icon::MouseButton::Left,
-            button_state: tray_icon::MouseButtonState::Up,
-            ..
-        } if cfg!(target_os = "windows") => push_tray(TrayAction::Show),
-        tray_icon::TrayIconEvent::DoubleClick { .. } => push_tray(TrayAction::Show),
-        _ => {}
-    }));
+    tray_icon::TrayIconEvent::set_event_handler(Some(
+        |event: tray_icon::TrayIconEvent| match event {
+            // Windows：左键单击图标打开窗口（右键出菜单）。
+            tray_icon::TrayIconEvent::Click {
+                button: tray_icon::MouseButton::Left,
+                button_state: tray_icon::MouseButtonState::Up,
+                ..
+            } if cfg!(target_os = "windows") => push_tray(TrayAction::Show),
+            tray_icon::TrayIconEvent::DoubleClick { .. } => push_tray(TrayAction::Show),
+            _ => {}
+        },
+    ));
 }
 
 /// 启动：挂上关闭拦截、创建托盘图标。可以多次调用（只做一次）。
@@ -250,7 +252,9 @@ mod tray {
     /// 应用图标缩到托盘尺寸（RGBA）。
     fn icon() -> Option<Icon> {
         let img = image::load_from_memory(include_bytes!("../icon.png")).ok()?;
-        let img = img.resize(64, 64, image::imageops::FilterType::Triangle).to_rgba8();
+        let img = img
+            .resize(64, 64, image::imageops::FilterType::Triangle)
+            .to_rgba8();
         let (w, h) = img.dimensions();
         Icon::from_rgba(img.into_raw(), w, h).ok()
     }
@@ -274,7 +278,9 @@ mod tray {
             &show,
             &quit,
         ]);
-        let mut builder = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip("Zeo Player");
+        let mut builder = TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_tooltip("Zeo Player");
         if let Some(icon) = icon() {
             builder = builder.with_icon(icon);
         }
@@ -283,7 +289,15 @@ mod tray {
             builder = builder.with_menu_on_left_click(false);
         }
         match builder.build() {
-            Ok(icon) => TRAY.with(|t| *t.borrow_mut() = Some(Tray { _icon: icon, now, toggle, prev, next })),
+            Ok(icon) => TRAY.with(|t| {
+                *t.borrow_mut() = Some(Tray {
+                    _icon: icon,
+                    now,
+                    toggle,
+                    prev,
+                    next,
+                })
+            }),
             Err(err) => eprintln!("zeo-player: 托盘图标创建失败：{err}"),
         }
     }
@@ -296,12 +310,22 @@ mod tray {
 
     pub fn apply(state: &TrayState) {
         TRAY.with(|t| {
-            let Some(t) = t.borrow().as_ref().map(|t| (t.now.clone(), t.toggle.clone(), t.prev.clone(), t.next.clone()))
-            else {
+            let Some(t) = t.borrow().as_ref().map(|t| {
+                (
+                    t.now.clone(),
+                    t.toggle.clone(),
+                    t.prev.clone(),
+                    t.next.clone(),
+                )
+            }) else {
                 return;
             };
             let (now, toggle, prev, next) = t;
-            now.set_text(if state.has_track { state.title.as_str() } else { "未在播放" });
+            now.set_text(if state.has_track {
+                state.title.as_str()
+            } else {
+                "未在播放"
+            });
             toggle.set_text(if state.playing { "暂停" } else { "播放" });
             for item in [&toggle, &prev, &next] {
                 item.set_enabled(state.has_track);
@@ -320,7 +344,7 @@ mod platform {
     use dispatch2::DispatchQueue;
     use objc2::rc::Retained;
     use objc2::runtime::{AnyObject, Bool, Imp, Sel};
-    use objc2::{msg_send, sel, MainThreadMarker};
+    use objc2::{MainThreadMarker, msg_send, sel};
     use objc2_app_kit::{NSApplication, NSWindow};
 
     use super::TrayState;
@@ -330,13 +354,19 @@ mod platform {
 
     type ShouldClose = unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> Bool;
 
-    unsafe extern "C-unwind" fn should_close(this: *mut AnyObject, cmd: Sel, window: *mut AnyObject) -> Bool {
+    unsafe extern "C-unwind" fn should_close(
+        this: *mut AnyObject,
+        cmd: Sel,
+        window: *mut AnyObject,
+    ) -> Bool {
         if !super::on_close_clicked() {
             return Bool::NO;
         }
         match ORIGINAL.get() {
             // SAFETY: 这是被替换下来的同签名实现。
-            Some(&imp) => unsafe { std::mem::transmute::<usize, ShouldClose>(imp)(this, cmd, window) },
+            Some(&imp) => unsafe {
+                std::mem::transmute::<usize, ShouldClose>(imp)(this, cmd, window)
+            },
             None => Bool::YES,
         }
     }
@@ -344,14 +374,22 @@ mod platform {
     /// NSH 原来的 `applicationShouldHandleReopen:hasVisibleWindows:` 实现。
     static ORIGINAL_REOPEN: OnceLock<usize> = OnceLock::new();
 
-    type ShouldReopen = unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, Bool) -> Bool;
+    type ShouldReopen =
+        unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, Bool) -> Bool;
 
     /// 点 Dock 图标：NSH 把窗口提到前面，这里先告诉界面窗口回来了。
-    unsafe extern "C-unwind" fn should_reopen(this: *mut AnyObject, cmd: Sel, app: *mut AnyObject, visible: Bool) -> Bool {
+    unsafe extern "C-unwind" fn should_reopen(
+        this: *mut AnyObject,
+        cmd: Sel,
+        app: *mut AnyObject,
+        visible: Bool,
+    ) -> Bool {
         super::shown_by_system();
         match ORIGINAL_REOPEN.get() {
             // SAFETY: 这是被替换下来的同签名实现。
-            Some(&imp) => unsafe { std::mem::transmute::<usize, ShouldReopen>(imp)(this, cmd, app, visible) },
+            Some(&imp) => unsafe {
+                std::mem::transmute::<usize, ShouldReopen>(imp)(this, cmd, app, visible)
+            },
             None => Bool::NO,
         }
     }
@@ -368,7 +406,10 @@ mod platform {
             return Some(window);
         }
         let app = NSApplication::sharedApplication(mtm);
-        let window = app.windows().iter().find(|w| w.delegate().is_some() && w.canBecomeMainWindow())?;
+        let window = app
+            .windows()
+            .iter()
+            .find(|w| w.delegate().is_some() && w.canBecomeMainWindow())?;
         MAIN.with(|m| *m.borrow_mut() = Some(window.clone()));
         Some(window)
     }
@@ -376,7 +417,9 @@ mod platform {
     /// 替换窗口代理类的 `windowShouldClose:`；窗口还没建好时稍后重试。
     fn hook(attempt: u32) {
         DispatchQueue::main().exec_async(move || {
-            let Some(mtm) = MainThreadMarker::new() else { return };
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
             let Some(window) = main_window(mtm) else {
                 if attempt < 100 {
                     std::thread::spawn(move || {
@@ -386,7 +429,9 @@ mod platform {
                 }
                 return;
             };
-            let Some(delegate) = window.delegate() else { return };
+            let Some(delegate) = window.delegate() else {
+                return;
+            };
             let object: &AnyObject = delegate.as_ref();
             let class = object.class();
             if let Some(method) = class.instance_method(sel!(windowShouldClose:)) {
@@ -396,7 +441,9 @@ mod platform {
                 let _ = ORIGINAL.set(old as usize);
             }
             // 应用代理与窗口代理是同一个对象（NSH 的 `Delegate`）。
-            if let Some(method) = class.instance_method(sel!(applicationShouldHandleReopen:hasVisibleWindows:)) {
+            if let Some(method) =
+                class.instance_method(sel!(applicationShouldHandleReopen:hasVisibleWindows:))
+            {
                 // SAFETY: 签名与 NSApplicationDelegate 的同名方法相同。
                 let imp: Imp = unsafe { std::mem::transmute::<ShouldReopen, Imp>(should_reopen) };
                 let old = unsafe { method.set_implementation(imp) };
@@ -412,7 +459,9 @@ mod platform {
 
     pub fn hide() {
         DispatchQueue::main().exec_async(|| {
-            let Some(mtm) = MainThreadMarker::new() else { return };
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
             if let Some(window) = main_window(mtm) {
                 window.orderOut(None);
             }
@@ -425,7 +474,9 @@ mod platform {
     /// `orderFrontRegardless` 保证激活被系统推迟时窗口也在最上层。
     pub fn show() {
         DispatchQueue::main().exec_async(|| {
-            let Some(mtm) = MainThreadMarker::new() else { return };
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
             let app = NSApplication::sharedApplication(mtm);
             let object: &AnyObject = app.as_ref();
             // SAFETY: -[NSApplication activate]（macOS 14+），先确认响应。
@@ -448,7 +499,9 @@ mod platform {
 
     pub fn quit() {
         DispatchQueue::main().exec_async(|| {
-            let Some(mtm) = MainThreadMarker::new() else { return };
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
             let app = NSApplication::sharedApplication(mtm);
             // SAFETY: -[NSApplication terminate:]，NSH 的应用代理负责收尾。
             let _: () = unsafe { msg_send![&app, terminate: Option::<&AnyObject>::None] };
@@ -473,26 +526,29 @@ mod platform {
 #[cfg(target_os = "windows")]
 mod platform {
     use std::sync::atomic::{AtomicIsize, Ordering};
-    use std::sync::mpsc::{channel, Sender};
+    use std::sync::mpsc::{Sender, channel};
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
 
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-    use windows_sys::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_VISIBLE_FRAME_BORDER_THICKNESS};
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_VISIBLE_FRAME_BORDER_THICKNESS, DwmGetWindowAttribute,
+    };
     use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
     use windows_sys::Win32::System::Threading::{
-        AttachThreadInput, GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId, SetProcessWorkingSetSize,
-        TerminateProcess,
+        AttachThreadInput, GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId,
+        SetProcessWorkingSetSize, TerminateProcess,
     };
     use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GetClassNameW, GetClientRect, GetWindow,
-        BringWindowToTop, GetForegroundWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic,
-        IsWindowVisible, IsZoomed, PeekMessageW, PostMessageW, SetForegroundWindow,
-        SetWindowLongPtrW, ShowWindowAsync, TranslateMessage, GWLP_WNDPROC, GWL_STYLE, GW_OWNER, HTTOP, HTTOPLEFT,
-        HTTOPRIGHT, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER,
-        SM_CYFRAME, SW_HIDE, SW_RESTORE, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST,
-        WM_SHOWWINDOW, WM_SYSCOMMAND, WNDPROC, WS_CAPTION, WS_THICKFRAME,
+        BringWindowToTop, CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GW_OWNER,
+        GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindow,
+        GetWindowLongPtrW, GetWindowThreadProcessId, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsIconic,
+        IsWindowVisible, IsZoomed, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW, PostMessageW,
+        SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME, SW_HIDE, SW_RESTORE,
+        SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, ShowWindowAsync, TranslateMessage,
+        WM_CLOSE, WM_DESTROY, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW,
+        WM_SYSCOMMAND, WNDPROC, WS_CAPTION, WS_THICKFRAME,
     };
 
     use super::TrayState;
@@ -527,7 +583,8 @@ mod platform {
         }
         // SAFETY: 原窗口过程，在子类化时保存。
         let result = unsafe {
-            let old: WNDPROC = std::mem::transmute::<isize, WNDPROC>(OLD_PROC.load(Ordering::Relaxed));
+            let old: WNDPROC =
+                std::mem::transmute::<isize, WNDPROC>(OLD_PROC.load(Ordering::Relaxed));
             CallWindowProcW(old, hwnd, msg, w, l)
         };
         if msg == WM_DESTROY {
@@ -581,7 +638,12 @@ mod platform {
             DefWindowProcW(hwnd, WM_NCCALCSIZE, w, l);
             // 最大化时窗口超出显示器一个边框厚度；否则让出 Windows 11 顶边
             // 那条边框，应用的标题栏完整可见。
-            params.rgrc[0].top = top + if zoomed(hwnd) { frame_thickness(hwnd) } else { top_border(hwnd) };
+            params.rgrc[0].top = top
+                + if zoomed(hwnd) {
+                    frame_thickness(hwnd)
+                } else {
+                    top_border(hwnd)
+                };
         }
         0
     }
@@ -591,8 +653,16 @@ mod platform {
         if !has_style(hwnd, WS_CAPTION | WS_THICKFRAME) || zoomed(hwnd) {
             return None;
         }
-        let mut p = POINT { x: (l & 0xFFFF) as i16 as i32, y: ((l >> 16) & 0xFFFF) as i16 as i32 };
-        let mut client = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut p = POINT {
+            x: (l & 0xFFFF) as i16 as i32,
+            y: ((l >> 16) & 0xFFFF) as i16 as i32,
+        };
+        let mut client = RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
         // SAFETY: 本地结构上的普通调用。
         unsafe {
             ScreenToClient(hwnd, &mut p);
@@ -638,7 +708,11 @@ mod platform {
     }
 
     pub fn toggle_maximize() {
-        sys_command(if is_maximized() { SC_RESTORE } else { SC_MAXIMIZE });
+        sys_command(if is_maximized() {
+            SC_RESTORE
+        } else {
+            SC_MAXIMIZE
+        });
     }
 
     /// 与点系统关闭按钮相同（经过 `WM_CLOSE` 拦截：询问 / 托盘 / 退出）。
@@ -700,7 +774,8 @@ mod platform {
             return false;
         }
         // SAFETY: 同进程的窗口；保存原过程后替换。
-        let old = unsafe { SetWindowLongPtrW(found, GWLP_WNDPROC, proc as *const () as usize as isize) };
+        let old =
+            unsafe { SetWindowLongPtrW(found, GWLP_WNDPROC, proc as *const () as usize as isize) };
         OLD_PROC.store(old, Ordering::Relaxed);
         let _ = HWND_VALUE.set(found as usize as u64);
         true
@@ -765,7 +840,16 @@ mod platform {
         let Some(h) = hwnd() else { return };
         let value = h as usize;
         // SAFETY: 异步显示命令，不等窗口线程。
-        unsafe { ShowWindowAsync(h, if IsIconic(h) != 0 { SW_RESTORE } else { SW_SHOW }) };
+        unsafe {
+            ShowWindowAsync(
+                h,
+                if IsIconic(h) != 0 {
+                    SW_RESTORE
+                } else {
+                    SW_SHOW
+                },
+            )
+        };
         std::thread::spawn(move || {
             let h = value as HWND;
             for _ in 0..25 {
@@ -778,8 +862,11 @@ mod platform {
             // SAFETY: 挂接只在本次调用内，结束时解除；各函数对无效句柄返回失败。
             unsafe {
                 let me = GetCurrentThreadId();
-                let foreground = GetWindowThreadProcessId(GetForegroundWindow(), std::ptr::null_mut());
-                let attached = foreground != 0 && foreground != me && AttachThreadInput(me, foreground, 1) != 0;
+                let foreground =
+                    GetWindowThreadProcessId(GetForegroundWindow(), std::ptr::null_mut());
+                let attached = foreground != 0
+                    && foreground != me
+                    && AttachThreadInput(me, foreground, 1) != 0;
                 BringWindowToTop(h);
                 SetForegroundWindow(h);
                 if attached {

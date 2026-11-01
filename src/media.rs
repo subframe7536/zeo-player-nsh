@@ -85,8 +85,7 @@ impl MediaSession {
                             if changed {
                                 let id = state.track.as_ref().unwrap().id.clone();
                                 if let Some(track) = state.track.as_mut() {
-                                    track.artwork_url =
-                                        artwork_file.clone().unwrap_or_default();
+                                    track.artwork_url = artwork_file.clone().unwrap_or_default();
                                 }
                                 last_track_id = Some(id);
                             }
@@ -108,7 +107,9 @@ impl MediaSession {
 
     /// 发布快照到系统媒体面。
     pub fn publish(&self, snapshot: &Snapshot) {
-        let Some(path) = snapshot.path.as_ref() else { return };
+        let Some(path) = snapshot.path.as_ref() else {
+            return;
+        };
         // 循环模式都在端点回绕（单曲是重播自己）：有多于一首就能切。
         let can_switch = snapshot.queue.len() > 1;
         let state = PlaybackState {
@@ -133,7 +134,11 @@ impl MediaSession {
                 _ => Repeat::All,
             },
             shuffle: snapshot.loop_mode == crate::audio::LoopMode::Random,
-            capabilities: Capabilities { can_go_next: can_switch, can_go_previous: can_switch, can_seek: true },
+            capabilities: Capabilities {
+                can_go_next: can_switch,
+                can_go_previous: can_switch,
+                can_seek: true,
+            },
         };
         let _ = self.tx.send(Op::Publish(Box::new(state)));
     }

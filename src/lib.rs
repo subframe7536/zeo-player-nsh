@@ -19,8 +19,8 @@ mod metadata;
 mod playlists;
 mod ui;
 mod watcher;
-mod window;
 mod waveform;
+mod window;
 
 pub use ui::App;
 

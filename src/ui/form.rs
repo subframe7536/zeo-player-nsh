@@ -2,12 +2,12 @@
 //! 分段。行为来自 nsh-core 的 `input` 与 nsh-base 的 `tabs` / `tab` /
 //! `dialog`；尺寸、间距、圆角同 shadcn，颜色取自主题（浅色 / 深色）。
 
-use nsh_base::{tab, tabs, TabElement, TabsElement};
-use nsh_core::element::{input, Input};
+use nsh_base::{TabElement, TabsElement, tab, tabs};
+use nsh_core::element::{Input, input};
 use nsh_core::prelude::*;
 
 use super::button::RADIUS_MD;
-use super::icons::{icon, Icon};
+use super::icons::{Icon, icon};
 use super::theme::*;
 
 /// shadcn 的 `rounded-lg`。
@@ -29,12 +29,20 @@ pub fn input_field(small: bool) -> Input {
         .text_size(px(14.0))
         .text_color(fg())
         .dark(move |st| st.bg(input_c.opacity(0.3)))
-        .focus(move |st| st.border_color(ring).ring(px(3.0)).ring_color(ring.opacity(0.5)))
+        .focus(move |st| {
+            st.border_color(ring)
+                .ring(px(3.0))
+                .ring_color(ring.opacity(0.5))
+        })
 }
 
 /// shadcn SelectTrigger（`size="sm"`）：`h-8 rounded-md border border-input
 /// px-3 text-sm shadow-xs`，右侧 16 pt chevron 半透明。
-pub fn select_trigger(current: impl Fn() -> String + 'static, label: &'static str, width: f32) -> View {
+pub fn select_trigger(
+    current: impl Fn() -> String + 'static,
+    label: &'static str,
+    width: f32,
+) -> View {
     let input_c = nsh_base::theme().input;
     view()
         .w(px(width))
@@ -52,8 +60,18 @@ pub fn select_trigger(current: impl Fn() -> String + 'static, label: &'static st
         .hover(move |st| st.bg(hover()))
         .role(AccessibilityRole::Button)
         .label(label)
-        .child(text(current).flex_1().number_of_lines(1).text_size(px(14.0)).text_color(fg()))
-        .child(view().opacity(0.5).child(icon(Icon::ChevronDown, 16.0, muted_fg)))
+        .child(
+            text(current)
+                .flex_1()
+                .number_of_lines(1)
+                .text_size(px(14.0))
+                .text_color(fg()),
+        )
+        .child(
+            view()
+                .opacity(0.5)
+                .child(icon(Icon::ChevronDown, 16.0, muted_fg)),
+        )
 }
 
 /// shadcn DialogContent：`rounded-lg border bg-background p-6 gap-4
@@ -79,7 +97,13 @@ pub fn dialog_content(width: f32) -> View {
 pub fn dialog_header(title: &'static str, description: Option<&'static str>) -> View {
     view()
         .gap(px(8.0))
-        .child(text(title).text_size(px(18.0)).line_height(px(18.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg()))
+        .child(
+            text(title)
+                .text_size(px(18.0))
+                .line_height(px(18.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(fg()),
+        )
         .child(description.map(|d| text(d).text_size(px(14.0)).text_color(muted_fg())))
 }
 
@@ -109,12 +133,21 @@ pub fn modal(content: View, on_close: impl Fn() + Copy + 'static) -> AnyElement 
 
 /// shadcn TabsList：`h-9 rounded-lg bg-muted p-[3px]`。
 pub fn tab_list() -> TabsElement {
-    tabs().flex_row().h(px(36.0)).p(px(3.0)).rounded(px(RADIUS_LG)).bg(muted())
+    tabs()
+        .flex_row()
+        .h(px(36.0))
+        .p(px(3.0))
+        .rounded(px(RADIUS_LG))
+        .bg(muted())
 }
 
 /// shadcn TabsTrigger：`rounded-md px-2 py-1 text-sm font-medium`，选中时
 /// `bg-background shadow-sm`（深色时背景色本身就比 `bg-muted` 暗，不另加描边）。
-pub fn tab_trigger(on: impl Fn() -> bool + Copy + 'static, label: &'static str, press: impl Fn() + 'static) -> TabElement {
+pub fn tab_trigger(
+    on: impl Fn() -> bool + Copy + 'static,
+    label: &'static str,
+    press: impl Fn() + 'static,
+) -> TabElement {
     tab()
         .selected(on)
         .accessibility_label(label)
@@ -128,12 +161,11 @@ pub fn tab_trigger(on: impl Fn() -> bool + Copy + 'static, label: &'static str, 
         .border_color(AdaptiveColor::TRANSPARENT)
         .transition_colors()
         .duration(150.0)
-        .style_with(move |st| {
-            if on() {
-                st.bg(bg()).shadow_sm()
-            } else {
-                st
-            }
-        })
-        .child(text(label).text_size(px(14.0)).font_weight(FontWeight::MEDIUM).text_color(move || if on() { fg() } else { muted_fg() }))
+        .style_with(move |st| if on() { st.bg(bg()).shadow_sm() } else { st })
+        .child(
+            text(label)
+                .text_size(px(14.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(move || if on() { fg() } else { muted_fg() }),
+        )
 }

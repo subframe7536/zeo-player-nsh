@@ -6,7 +6,7 @@ use nsh_base::button;
 use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
-use super::button::{shell, tipped, Size, Variant, RADIUS_MD};
+use super::button::{RADIUS_MD, Size, Variant, shell, tipped};
 use super::icons::Icon;
 use super::parts::{cover, icon_button, progress_fraction, shown_time, slider};
 use super::store::{format_time, player, seek_to, set_volume, store, toggle_mute};
@@ -39,11 +39,19 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 .min_w(px(0.0))
                 .gap(px(2.0))
                 .child(
-                    text(move || s.track.with(|t| if t.path.is_some() { t.title.clone() } else { "未在播放".into() }))
-                        .number_of_lines(1)
-                        .text_size(px(14.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(fg()),
+                    text(move || {
+                        s.track.with(|t| {
+                            if t.path.is_some() {
+                                t.title.clone()
+                            } else {
+                                "未在播放".into()
+                            }
+                        })
+                    })
+                    .number_of_lines(1)
+                    .text_size(px(14.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(fg()),
                 )
                 .child(
                     text(move || {
@@ -62,13 +70,16 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
     // 与全屏页的控制一致：线框的上一首 / 下一首，播放键没有底色、图标在
     // 播放与暂停之间形变（`icons::play_pause`）。
     let play = shell(Variant::Ghost, Size::IconLg)
-        .rounded_full()
         .accessibility_label("播放/暂停")
         .active(|st| st.scale(0.92))
         .transition_transform()
         .duration(120.0)
         .on_press(|_: &()| player().toggle())
-        .child(super::icons::play_pause(28.0, move || s.playback.with(|p| p.playing), fg));
+        .child(super::icons::play_pause(
+            28.0,
+            move || s.playback.with(|p| p.playing),
+            fg,
+        ));
 
     let mode_icon = move || match s.playback.with(|p| p.loop_mode) {
         LoopMode::List => Icon::Repeat,
@@ -86,17 +97,41 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 mode_icon,
                 14.0,
                 "循环模式（顺序 / 单曲 / 随机）",
-                move || if s.playback.with(|p| p.loop_mode) == LoopMode::List { muted_fg() } else { primary() },
+                move || {
+                    if s.playback.with(|p| p.loop_mode) == LoopMode::List {
+                        muted_fg()
+                    } else {
+                        primary()
+                    }
+                },
                 super::store::cycle_loop_mode,
             ),
             "循环模式",
         ))
-        .child(tipped(icon_button(|| Icon::PrevLine, 15.0, "上一首", fg, || player().previous()), "上一首"))
-        .child(play)
-        .child(tipped(icon_button(|| Icon::NextLine, 15.0, "下一首", fg, || player().next()), "下一首"))
         .child(tipped(
             icon_button(
-                || if super::store::current_liked() { Icon::HeartFilled } else { Icon::Heart },
+                || Icon::PrevLine,
+                15.0,
+                "上一首",
+                fg,
+                || player().previous(),
+            ),
+            "上一首",
+        ))
+        .child(play)
+        .child(tipped(
+            icon_button(|| Icon::NextLine, 15.0, "下一首", fg, || player().next()),
+            "下一首",
+        ))
+        .child(tipped(
+            icon_button(
+                || {
+                    if super::store::current_liked() {
+                        Icon::HeartFilled
+                    } else {
+                        Icon::Heart
+                    }
+                },
                 14.0,
                 "喜欢",
                 like_red,
@@ -161,14 +196,35 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .justify_end()
         .gap(px(6.0))
         .child(tipped(
-            icon_button(move || if volume() <= 0.0 { Icon::Mute } else { Icon::Volume }, 16.0, "静音", muted_fg, toggle_mute),
+            icon_button(
+                move || {
+                    if volume() <= 0.0 {
+                        Icon::Mute
+                    } else {
+                        Icon::Volume
+                    }
+                },
+                16.0,
+                "静音",
+                muted_fg,
+                toggle_mute,
+            ),
             "静音",
         ))
         .child(slider(volume, muted(), muted_fg(), fg(), set_volume, set_volume).w(px(96.0)))
         .child(tipped(super::queue::queue_button(queue_open), "播放队列"))
-        .child(tipped(icon_button(|| Icon::Expand, 14.0, "全屏播放", muted_fg, move || on_expand()), "全屏播放"));
+        .child(tipped(
+            icon_button(
+                || Icon::Expand,
+                14.0,
+                "全屏播放",
+                muted_fg,
+                move || on_expand(),
+            ),
+            "全屏播放",
+        ));
 
-    view()
+    let bar_view = view()
         .absolute()
         .left(px(16.0))
         .right(px(16.0))
@@ -182,9 +238,12 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .bg(bar())
         .border_1()
         .border_color(border())
-        .shadow_lg()
-        .backdrop_blur(px(24.0))
-        .child(now)
-        .child(center)
-        .child(right)
+        .shadow_lg();
+    // Windows 上不加背景模糊：nsh-platform-windows 0.3.0 的局部重绘只清空并
+    // 重画变化的区域，背景模糊却会采样区域外上一帧的像素（已经盖着播放条
+    // 自己的半透明底色），于是进度、时间、按钮悬停等每次局部重绘都在条上
+    // 留下一块更亮的矩形。见 README「待上游」。
+    #[cfg(not(target_os = "windows"))]
+    let bar_view = bar_view.backdrop_blur(px(24.0));
+    bar_view.child(now).child(center).child(right)
 }

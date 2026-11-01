@@ -11,7 +11,7 @@ use nsh_core::desktop::TitleBarStyle;
 use nsh_core::element::desktop::set_title_bar;
 use nsh_core::prelude::*;
 
-use super::icons::{icon_dyn, Icon};
+use super::icons::{Icon, icon_dyn};
 use super::theme::*;
 
 /// 每个按钮的宽度（与系统按钮相同）。
@@ -66,15 +66,33 @@ pub fn buttons(on_dark: impl Fn() -> bool + Copy + 'static) -> impl IntoElement 
             .flex_row()
             .z_index(200)
             .window_drag(false)
-            .child(button(move || Icon::WinMinimize, || "最小化", false, on_dark, crate::window::minimize))
             .child(button(
-                move || if maximized() { Icon::WinRestore } else { Icon::WinMaximize },
+                move || Icon::WinMinimize,
+                || "最小化",
+                false,
+                on_dark,
+                crate::window::minimize,
+            ))
+            .child(button(
+                move || {
+                    if maximized() {
+                        Icon::WinRestore
+                    } else {
+                        Icon::WinMaximize
+                    }
+                },
                 move || if maximized() { "还原" } else { "最大化" },
                 false,
                 on_dark,
                 crate::window::toggle_maximize,
             ))
-            .child(button(move || Icon::WinClose, || "关闭", true, on_dark, crate::window::close))
+            .child(button(
+                move || Icon::WinClose,
+                || "关闭",
+                true,
+                on_dark,
+                crate::window::close,
+            ))
     })
 }
 

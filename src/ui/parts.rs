@@ -6,19 +6,28 @@ use nsh_core::prelude::*;
 
 use nsh_base::ButtonElement;
 
-use super::button::{text_button, Size, Variant};
-use super::icons::{icon, icon_dyn, Icon};
+use super::button::{Size, Variant, text_button};
+use super::icons::{Icon, icon, icon_dyn};
 use super::store::{format_time, store};
 use super::theme::*;
 use crate::library::TrackEntry;
 
 /// 封面：图片或占位（音符 + 柔和底色）。`size` 为 `None` 时铺满宽度、正方形。
-pub fn cover(src: impl Fn() -> Option<SharedString> + Copy + 'static, size: Option<f32>, radius: f32) -> View {
+pub fn cover(
+    src: impl Fn() -> Option<SharedString> + Copy + 'static,
+    size: Option<f32>,
+    radius: f32,
+) -> View {
     cover_frame(src, size, radius, Icon::Note)
 }
 
 /// 固定大小的封面，占位图标为 `placeholder`。
-pub fn cover_with(src: impl Fn() -> Option<SharedString> + Copy + 'static, size: f32, radius: f32, placeholder: Icon) -> View {
+pub fn cover_with(
+    src: impl Fn() -> Option<SharedString> + Copy + 'static,
+    size: f32,
+    radius: f32,
+    placeholder: Icon,
+) -> View {
     cover_frame(src, Some(size), radius, placeholder)
 }
 
@@ -39,14 +48,15 @@ fn cover_frame(
         None => frame.w_full().aspect_square(),
     };
     let glyph = size.map_or(40.0, |s| (s * 0.38).clamp(14.0, 96.0));
-    frame
-        .child(icon(placeholder, glyph, faint))
-        .child(when(move || src().is_some(), move || {
+    frame.child(icon(placeholder, glyph, faint)).child(when(
+        move || src().is_some(),
+        move || {
             image(move || src().unwrap_or_default())
                 .absolute()
                 .inset(px(0.0))
                 .resize_mode(ResizeMode::Cover)
-        }))
+        },
+    ))
 }
 
 /// 图标按钮（ghost，悬停才有底色）。`size` 是图标边长，按钮按它选
@@ -73,12 +83,20 @@ pub fn icon_button(
 }
 
 /// 主操作按钮（shadcn `default`）：「播放」。
-pub fn pill_button(name: Icon, label: &'static str, on_press: impl Fn() + 'static) -> ButtonElement {
+pub fn pill_button(
+    name: Icon,
+    label: &'static str,
+    on_press: impl Fn() + 'static,
+) -> ButtonElement {
     text_button(Variant::Default, Size::Default, Some(name), label, on_press)
 }
 
 /// 次要按钮（shadcn `outline`）。
-pub fn outline_button(name: Icon, label: &'static str, on_press: impl Fn() + 'static) -> ButtonElement {
+pub fn outline_button(
+    name: Icon,
+    label: &'static str,
+    on_press: impl Fn() + 'static,
+) -> ButtonElement {
     text_button(Variant::Outline, Size::Default, Some(name), label, on_press)
 }
 
@@ -98,7 +116,12 @@ pub fn page_header(
                 .accessibility_label("返回")
                 .on_press(move |_: &()| back())
                 .child(icon(Icon::ChevronLeft, 16.0, muted_fg))
-                .child(text("返回").text_size(px(13.0)).font_weight(FontWeight::MEDIUM).text_color(muted_fg())),
+                .child(
+                    text("返回")
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(muted_fg()),
+                ),
         )
     });
     view()
@@ -122,7 +145,12 @@ pub fn page_header(
                         .font_weight(FontWeight::BOLD)
                         .text_color(fg()),
                 )
-                .child(text(subtitle).number_of_lines(1).text_size(px(13.0)).text_color(muted_fg())),
+                .child(
+                    text(subtitle)
+                        .number_of_lines(1)
+                        .text_size(px(13.0))
+                        .text_color(muted_fg()),
+                ),
         )
         .child(actions.map(|a| view().flex_row().gap(px(8.0)).window_drag(false).child(a)))
 }
@@ -146,8 +174,19 @@ pub fn empty_state(name: Icon, title: &'static str, body: &'static str) -> View 
                 .mb(px(8.0))
                 .child(icon(name, 28.0, muted_fg)),
         )
-        .child(text(title).text_size(px(16.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg()))
-        .child(text(body).text_size(px(13.0)).text_color(muted_fg()).text_center().max_w(px(360.0)))
+        .child(
+            text(title)
+                .text_size(px(16.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(fg()),
+        )
+        .child(
+            text(body)
+                .text_size(px(13.0))
+                .text_color(muted_fg())
+                .text_center()
+                .max_w(px(360.0)),
+        )
 }
 
 /// 曲目列表显示哪些列。
@@ -161,7 +200,12 @@ pub struct Columns {
 }
 
 impl Columns {
-    pub const ALL: Columns = Columns { cover: true, album: true, size: false, format: false };
+    pub const ALL: Columns = Columns {
+        cover: true,
+        album: true,
+        size: false,
+        format: false,
+    };
 }
 
 /// 列宽（列头、曲目行、文件夹行共用，保证对齐）。
@@ -199,22 +243,25 @@ pub fn audio_format(path: &str) -> String {
 
 /// 格式小标签（定宽列内左对齐）；值为空时不画框。
 pub fn format_cell(value: impl Fn() -> String + Copy + 'static) -> View {
-    view().w(px(W_FORMAT)).items_start().child(when(move || !value().is_empty(), move || {
-        view()
-            .h(px(18.0))
-            .px(px(5.0))
-            .justify_center()
-            .rounded(px(4.0))
-            .border_1()
-            .border_color(border())
-            .child(
-                text(value)
-                    .text_size(px(10.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .letter_spacing(px(0.4))
-                    .text_color(muted_fg()),
-            )
-    }))
+    view().w(px(W_FORMAT)).items_start().child(when(
+        move || !value().is_empty(),
+        move || {
+            view()
+                .h(px(18.0))
+                .px(px(5.0))
+                .justify_center()
+                .rounded(px(4.0))
+                .border_1()
+                .border_color(border())
+                .child(
+                    text(value)
+                        .text_size(px(10.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .letter_spacing(px(0.4))
+                        .text_color(muted_fg()),
+                )
+        },
+    ))
 }
 
 /// 字节数 → 1.2 GB / 34.5 MB / 820 KB。
@@ -258,12 +305,26 @@ pub fn track_columns(cols: Columns) -> View {
         .mx(px(20.0))
         .border_b_1()
         .border_b_color(border())
-        .child(when(fits_number, move || view().w(px(W_NUMBER)).items_center().child(label("#"))))
+        .child(when(fits_number, move || {
+            view().w(px(W_NUMBER)).items_center().child(label("#"))
+        }))
         .child(cols.cover.then(|| view().w(px(W_COVER))))
         .child(view().flex_1().min_w(px(60.0)).child(label("标题")))
-        .child(cols.album.then(|| when(fits_album, move || view().w(px(W_ALBUM)).child(label("专辑")))))
-        .child(cols.format.then(|| when(fits_size, move || view().w(px(W_FORMAT)).child(label("格式")))))
-        .child(cols.size.then(|| when(fits_size, move || view().w(px(W_SIZE)).items_end().child(label("大小")))))
+        .child(cols.album.then(|| {
+            when(fits_album, move || {
+                view().w(px(W_ALBUM)).child(label("专辑"))
+            })
+        }))
+        .child(cols.format.then(|| {
+            when(fits_size, move || {
+                view().w(px(W_FORMAT)).child(label("格式"))
+            })
+        }))
+        .child(cols.size.then(|| {
+            when(fits_size, move || {
+                view().w(px(W_SIZE)).items_end().child(label("大小"))
+            })
+        }))
         .child(view().w(px(W_TIME)).items_end().child(label("时长")))
 }
 
@@ -282,11 +343,14 @@ pub fn track_row(
     let current = computed(move || {
         track.with(|t| {
             let Some(t) = t else { return false };
-            s.track.with(|now| now.path.as_deref() == Some(t.path.as_str()))
+            s.track
+                .with(|now| now.path.as_deref() == Some(t.path.as_str()))
         })
     });
     let playing = move || current.get() && s.playback.with(|p| p.playing);
-    let field = move |f: fn(&TrackEntry) -> String| move || track.with(|t| t.as_ref().map(f).unwrap_or_default());
+    let field = move |f: fn(&TrackEntry) -> String| {
+        move || track.with(|t| t.as_ref().map(f).unwrap_or_default())
+    };
     view()
         .h(px(ROW))
         .flex_row()
@@ -306,9 +370,16 @@ pub fn track_row(
                 .items_center()
                 .justify_center()
                 .child(
-                    when(move || current.get(), move || {
-                        icon_dyn(move || if playing() { Icon::Wave } else { Icon::Play }, 14.0, primary)
-                    })
+                    when(
+                        move || current.get(),
+                        move || {
+                            icon_dyn(
+                                move || if playing() { Icon::Wave } else { Icon::Play },
+                                14.0,
+                                primary,
+                            )
+                        },
+                    )
                     .otherwise(move || {
                         text(move || number.get())
                             .text_size(px(13.0))
@@ -318,7 +389,8 @@ pub fn track_row(
                 )
         }))
         .child(cols.cover.then(|| {
-            let src = move || track.with(|t| t.as_ref().and_then(|t| super::store::cover_of(&t.path)));
+            let src =
+                move || track.with(|t| t.as_ref().and_then(|t| super::store::cover_of(&t.path)));
             cover(src, Some(40.0), 6.0)
         }))
         .child(
@@ -340,16 +412,26 @@ pub fn track_row(
                         .text_color(muted_fg()),
                 ),
         )
-        .child(cols.album.then(|| when(fits_album, move || {
-            view().w(px(W_ALBUM)).child(
-                text(field(|t| t.album.clone()))
-                    .number_of_lines(1)
-                    .text_size(px(13.0))
-                    .text_color(muted_fg()),
-            )
-        })))
-        .child(cols.format.then(|| when(fits_size, move || format_cell(field(|t| audio_format(&t.path))))))
-        .child(cols.size.then(|| when(fits_size, move || value_cell(W_SIZE, field(|t| format_bytes(t.size_bytes))))))
+        .child(cols.album.then(|| {
+            when(fits_album, move || {
+                view().w(px(W_ALBUM)).child(
+                    text(field(|t| t.album.clone()))
+                        .number_of_lines(1)
+                        .text_size(px(13.0))
+                        .text_color(muted_fg()),
+                )
+            })
+        }))
+        .child(cols.format.then(|| {
+            when(fits_size, move || {
+                format_cell(field(|t| audio_format(&t.path)))
+            })
+        }))
+        .child(cols.size.then(|| {
+            when(fits_size, move || {
+                value_cell(W_SIZE, field(|t| format_bytes(t.size_bytes)))
+            })
+        }))
         .child(value_cell(W_TIME, field(|t| format_time(t.duration))))
 }
 
@@ -362,7 +444,11 @@ pub fn scrub(
     let width = signal(1.0_f32);
     let fraction = move |x: f32| {
         let w = width.get_untracked();
-        if w > 0.0 { (x / w).clamp(0.0, 1.0) as f64 } else { 0.0 }
+        if w > 0.0 {
+            (x / w).clamp(0.0, 1.0) as f64
+        } else {
+            0.0
+        }
     };
     let on_move = Rc::new(on_move);
     let grant = on_move.clone();
@@ -417,7 +503,12 @@ pub fn slider(
         .style_when(move || dragging.get(), |st| st.opacity(1.0))
         .transition_opacity()
         .duration(120.0);
-    let area = view().h(px(SLIDER_H)).justify_center().group().child(pill).child(knob);
+    let area = view()
+        .h(px(SLIDER_H))
+        .justify_center()
+        .group()
+        .child(pill)
+        .child(knob);
     scrub(
         area,
         move |f| {
@@ -434,12 +525,18 @@ pub fn slider(
 /// 当前播放进度（拖动时为预览）。
 pub fn shown_time() -> f64 {
     let s = store();
-    s.seek_preview.get().unwrap_or_else(|| s.playback.with(|p| p.time))
+    s.seek_preview
+        .get()
+        .unwrap_or_else(|| s.playback.with(|p| p.time))
 }
 
 /// 当前进度比例。
 pub fn progress_fraction() -> f64 {
     let s = store();
     let duration = s.playback.with(|p| p.duration);
-    if duration > 0.0 { (shown_time() / duration).min(1.0) } else { 0.0 }
+    if duration > 0.0 {
+        (shown_time() / duration).min(1.0)
+    } else {
+        0.0
+    }
 }

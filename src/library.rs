@@ -174,7 +174,11 @@ pub struct LibraryStore {
 pub fn data_dir() -> PathBuf {
     std::env::var_os("ZEO_PLAYER_DATA_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("Zeo Player"))
+        .unwrap_or_else(|| {
+            dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("ZeoPlayer")
+        })
 }
 
 pub fn library_store() -> &'static LibraryStore {
@@ -187,7 +191,12 @@ pub fn library_store() -> &'static LibraryStore {
         let mut tracks: Vec<TrackEntry> = MetaCache::global()
             .entries()
             .into_iter()
-            .filter(|(path, _)| config.roots.iter().any(|root| Path::new(path).starts_with(root)))
+            .filter(|(path, _)| {
+                config
+                    .roots
+                    .iter()
+                    .any(|root| Path::new(path).starts_with(root))
+            })
             .map(|(path, entry)| track_entry(path, &entry, &config.genre_separators))
             .collect();
         sort_tracks(&mut tracks);
@@ -425,11 +434,19 @@ impl LibraryStore {
 }
 
 fn collect_audio_files(root: &Path, out: &mut Vec<PathBuf>) {
-    for entry in walkdir::WalkDir::new(root).follow_links(false).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         if !entry.file_type().is_file() {
             continue;
         }
-        let ext = entry.path().extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase());
+        let ext = entry
+            .path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
         if ext.is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.as_str())) {
             out.push(entry.into_path());
         }
@@ -439,21 +456,32 @@ fn collect_audio_files(root: &Path, out: &mut Vec<PathBuf>) {
 /// 读一个文件的索引条目；读不出标签/属性的文件跳过。
 fn read_entry(path: &Path, separators: &[String]) -> Option<TrackEntry> {
     let entry = MetaCache::global().entry(path).ok()?;
-    Some(track_entry(path.to_string_lossy().into_owned(), &entry, separators))
+    Some(track_entry(
+        path.to_string_lossy().into_owned(),
+        &entry,
+        separators,
+    ))
 }
 
 /// 缓存条目 → 索引条目。
 fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> TrackEntry {
     let meta = &entry.value;
     TrackEntry {
-        file_name: Path::new(&path).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+        file_name: Path::new(&path)
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         path,
         title: meta.title.clone(),
         artist: meta.artist.clone(),
         album: meta.album.clone(),
         album_artist: {
             let aa = meta.album_artist.trim();
-            if aa.is_empty() { meta.artist.clone() } else { aa.to_owned() }
+            if aa.is_empty() {
+                meta.artist.clone()
+            } else {
+                aa.to_owned()
+            }
         },
         genres: split_genres(&meta.genres, separators),
         year: meta.year,
@@ -488,7 +516,10 @@ pub fn split_genres(raw: &[String], separators: &[String]) -> Vec<String> {
     for value in raw {
         let mut parts = vec![value.as_str()];
         for sep in separators.iter().filter(|s| !s.is_empty()) {
-            parts = parts.into_iter().flat_map(|p| p.split(sep.as_str())).collect();
+            parts = parts
+                .into_iter()
+                .flat_map(|p| p.split(sep.as_str()))
+                .collect();
         }
         for part in parts {
             let part = part.trim();
@@ -507,7 +538,10 @@ mod tests {
     #[test]
     fn genre_split() {
         let raw = vec!["Rock; Indie; Dream Pop".to_owned(), " Rock ".to_owned()];
-        assert_eq!(split_genres(&raw, &[";".into()]), vec!["Rock", "Indie", "Dream Pop"]);
+        assert_eq!(
+            split_genres(&raw, &[";".into()]),
+            vec!["Rock", "Indie", "Dream Pop"]
+        );
     }
 
     #[test]
@@ -521,20 +555,36 @@ mod tests {
         let raw = vec!["J-Pop / Anime, Game".to_owned()];
         let seps = vec!["/".to_owned(), ",".to_owned()];
         assert_eq!(split_genres(&raw, &seps), vec!["J-Pop", "Anime", "Game"]);
-        assert_eq!(split_genres(&raw, &[]), vec!["J-Pop / Anime, Game"], "没有分隔符时整段保留");
+        assert_eq!(
+            split_genres(&raw, &[]),
+            vec!["J-Pop / Anime, Game"],
+            "没有分隔符时整段保留"
+        );
     }
 
     #[test]
     fn old_config_migrates() {
-        let old: LibraryConfig = serde_json::from_str(r#"{"roots":["/m"],"genre_separator":"/"}"#).unwrap();
+        let old: LibraryConfig =
+            serde_json::from_str(r#"{"roots":["/m"],"genre_separator":"/"}"#).unwrap();
         let config = old.normalized();
         assert_eq!(config.genre_separators, vec!["/"]);
         let json = serde_json::to_string(&config).unwrap();
-        assert!(!json.contains("genre_separator\""), "旧字段不再写出：{json}");
+        assert!(
+            !json.contains("genre_separator\""),
+            "旧字段不再写出：{json}"
+        );
         let fresh: LibraryConfig = serde_json::from_str(r#"{"roots":[]}"#).unwrap();
-        assert_eq!(fresh.normalized().genre_separators, vec![";"], "缺字段用出厂值");
-        let none: LibraryConfig = serde_json::from_str(r#"{"roots":[],"genre_separators":[]}"#).unwrap();
-        assert!(none.normalized().genre_separators.is_empty(), "显式清空时不拆分");
+        assert_eq!(
+            fresh.normalized().genre_separators,
+            vec![";"],
+            "缺字段用出厂值"
+        );
+        let none: LibraryConfig =
+            serde_json::from_str(r#"{"roots":[],"genre_separators":[]}"#).unwrap();
+        assert!(
+            none.normalized().genre_separators.is_empty(),
+            "显式清空时不拆分"
+        );
     }
 }
 
@@ -563,11 +613,24 @@ mod real_library {
         }
         let count = worker.join().unwrap();
         let p = store.progress();
-        assert!(!p.scanning && p.done == p.total && p.total >= count, "{p:?} count={count}");
-        assert!(seen.windows(2).all(|w| w[0] <= w[1]) && seen.len() >= 2, "进度单调推进：{} 次采样", seen.len());
+        assert!(
+            !p.scanning && p.done == p.total && p.total >= count,
+            "{p:?} count={count}"
+        );
+        assert!(
+            seen.windows(2).all(|w| w[0] <= w[1]) && seen.len() >= 2,
+            "进度单调推进：{} 次采样",
+            seen.len()
+        );
         let started = std::time::Instant::now();
         assert_eq!(store.rebuild(), count, "重建后曲目数不变");
-        eprintln!("{count} 首，进度采样 {} 次，首个 {:?} 末个 {:?}，重建 {:?}", seen.len(), seen.first(), seen.last(), started.elapsed());
+        eprintln!(
+            "{count} 首，进度采样 {} 次，首个 {:?} 末个 {:?}，重建 {:?}",
+            seen.len(),
+            seen.first(),
+            seen.last(),
+            started.elapsed()
+        );
         store.set_separators(&["/".into()]);
         assert_eq!(store.separators(), vec!["/"]);
     }

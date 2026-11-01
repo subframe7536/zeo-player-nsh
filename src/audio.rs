@@ -3,7 +3,7 @@
 //! UI 通过快照 + 轮询任务读取状态（PlayerState 等价字段）。
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -47,24 +47,36 @@ pub struct Ring {
 
 impl Ring {
     pub fn new() -> Ring {
-        Ring { slots: OnceLock::new(), write: AtomicU64::new(0), read: AtomicU64::new(0), discard: AtomicU64::new(0) }
+        Ring {
+            slots: OnceLock::new(),
+            write: AtomicU64::new(0),
+            read: AtomicU64::new(0),
+            discard: AtomicU64::new(0),
+        }
     }
 
     /// 分配容量（样本数）；只在第一次调用时生效。
     fn init(&self, capacity: usize) {
-        let _ = self.slots.set((0..capacity.max(1)).map(|_| AtomicU32::new(0)).collect());
+        let _ = self
+            .slots
+            .set((0..capacity.max(1)).map(|_| AtomicU32::new(0)).collect());
     }
 
     /// 待播的样本数。
     pub fn len(&self) -> usize {
         let w = self.write.load(Ordering::Acquire);
-        let r = self.read.load(Ordering::Acquire).max(self.discard.load(Ordering::Acquire));
+        let r = self
+            .read
+            .load(Ordering::Acquire)
+            .max(self.discard.load(Ordering::Acquire));
         w.saturating_sub(r) as usize
     }
 
     /// 生产者：写入放得下的整帧，返回写入的样本数。
     fn push(&self, data: &[f32], channels: usize) -> usize {
-        let Some(slots) = self.slots.get() else { return 0 };
+        let Some(slots) = self.slots.get() else {
+            return 0;
+        };
         let cap = slots.len() as u64;
         let free = (cap as usize).saturating_sub(self.len());
         let n = data.len().min(free);
@@ -79,18 +91,27 @@ impl Ring {
 
     /// 生产者：作废还没播放的样本。
     fn clear(&self) {
-        self.discard.store(self.write.load(Ordering::Relaxed), Ordering::Release);
+        self.discard
+            .store(self.write.load(Ordering::Relaxed), Ordering::Release);
     }
 
     /// 消费者：按顺序取最多 `max` 个样本交给 `sink(序号, 样本)`，返回取出的数量。
     fn pop(&self, max: usize, mut sink: impl FnMut(usize, f32)) -> usize {
-        let Some(slots) = self.slots.get() else { return 0 };
+        let Some(slots) = self.slots.get() else {
+            return 0;
+        };
         let cap = slots.len() as u64;
         let w = self.write.load(Ordering::Acquire);
-        let r = self.read.load(Ordering::Relaxed).max(self.discard.load(Ordering::Acquire));
+        let r = self
+            .read
+            .load(Ordering::Relaxed)
+            .max(self.discard.load(Ordering::Acquire));
         let n = (w.saturating_sub(r) as usize).min(max);
         for i in 0..n {
-            sink(i, f32::from_bits(slots[((r + i as u64) % cap) as usize].load(Ordering::Relaxed)));
+            sink(
+                i,
+                f32::from_bits(slots[((r + i as u64) % cap) as usize].load(Ordering::Relaxed)),
+            );
         }
         self.read.store(r + n as u64, Ordering::Release);
         n
@@ -141,9 +162,16 @@ impl LoopMode {
 }
 
 pub enum EngineCmd {
-    Load { path: PathBuf, queue: Vec<String> },
+    Load {
+        path: PathBuf,
+        queue: Vec<String>,
+    },
     /// 装载但不播放，停在 `time` 秒（启动时恢复上次的曲目）。
-    Cue { path: PathBuf, queue: Vec<String>, time: f64 },
+    Cue {
+        path: PathBuf,
+        queue: Vec<String>,
+        time: f64,
+    },
     /// 跳到当前队列的第 `n` 首。
     Jump(i64),
     Play,
@@ -309,8 +337,8 @@ impl EngineHandle {
 struct Loaded {
     source: Source,
     resampler: Option<ResamplerState>,
-    carry: Vec<f32>,           // 通道转换后的输入暂存（交错、dev 声道数）
-    out: Vec<f32>,             // 重采样产出暂存
+    carry: Vec<f32>, // 通道转换后的输入暂存（交错、dev 声道数）
+    out: Vec<f32>,   // 重采样产出暂存
     /// 缓冲放不下的已解码样本（下一轮先送这些）。
     backlog: Vec<f32>,
     src_channels: usize,
@@ -351,9 +379,20 @@ pub(crate) struct ResamplerState {
 
 impl ResamplerState {
     pub(crate) fn new(from: u32, to: u32, channels: usize) -> Result<Self, String> {
-        let fft = rubato::Fft::<f32>::new(from as usize, to as usize, 1024, channels, rubato::FixedSync::Input)
-            .map_err(|e| e.to_string())?;
-        Ok(ResamplerState { fft, channels, pending: Vec::new(), output_scratch: Vec::new() })
+        let fft = rubato::Fft::<f32>::new(
+            from as usize,
+            to as usize,
+            1024,
+            channels,
+            rubato::FixedSync::Input,
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(ResamplerState {
+            fft,
+            channels,
+            pending: Vec::new(),
+            output_scratch: Vec::new(),
+        })
     }
 
     /// 清空延迟线与暂存（seek 后）。
@@ -375,11 +414,15 @@ impl ResamplerState {
             let out_max = self.fft.output_frames_max();
             self.output_scratch.resize(out_max * ch, 0.0);
             let chunk = &self.pending[start..start + needed * ch];
-            let input = rubato::audioadapter_buffers::direct::InterleavedSlice::new(chunk, ch, needed)
-                .map_err(|e| format!("重采样输入错误: {e}"))?;
-            let mut output =
-                rubato::audioadapter_buffers::direct::InterleavedSlice::new_mut(&mut self.output_scratch, ch, out_max)
-                    .map_err(|e| format!("重采样输出错误: {e}"))?;
+            let input =
+                rubato::audioadapter_buffers::direct::InterleavedSlice::new(chunk, ch, needed)
+                    .map_err(|e| format!("重采样输入错误: {e}"))?;
+            let mut output = rubato::audioadapter_buffers::direct::InterleavedSlice::new_mut(
+                &mut self.output_scratch,
+                ch,
+                out_max,
+            )
+            .map_err(|e| format!("重采样输出错误: {e}"))?;
             let (_, written) = self
                 .fft
                 .process_into_buffer(&input, &mut output, None)
@@ -426,7 +469,9 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
         None => set_error(&shared, "没有可用的音频输出设备"),
     }
     shared.dev_rate.store(dev_rate, Ordering::Relaxed);
-    shared.ring.init(dev_rate as usize * RING_CAPACITY_SECS * dev_channels);
+    shared
+        .ring
+        .init(dev_rate as usize * RING_CAPACITY_SECS * dev_channels);
     let target = ring_target(dev_rate, dev_channels);
     let has_output = _stream.is_some();
     raise_thread_priority();
@@ -460,7 +505,15 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
             if interrupts {
                 fade_out(&shared, &mut loaded, target, dev_channels);
             }
-            handle_cmd(&shared, &media, &mut loaded, &mut base_queue, cmd, dev_rate, dev_channels);
+            handle_cmd(
+                &shared,
+                &media,
+                &mut loaded,
+                &mut base_queue,
+                cmd,
+                dev_rate,
+                dev_channels,
+            );
             if !shared.playing.load(Ordering::Relaxed) {
                 // 停着：下次开始从静音淡入。
                 shared.gain.store(0f32.to_bits(), Ordering::Relaxed);
@@ -483,7 +536,12 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
                     }
                 }
                 match result {
-                    Ok(true) => l.drain = Some(Drain { len: shared.ring.len(), since: Instant::now() }),
+                    Ok(true) => {
+                        l.drain = Some(Drain {
+                            len: shared.ring.len(),
+                            since: Instant::now(),
+                        })
+                    }
                     Ok(false) => {}
                     Err(err) => {
                         set_error(&shared, &err);
@@ -493,7 +551,8 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
             }
             // 封面等缓冲有了一半再生成（第一次要读标签、缩放、模糊，CPU 忙时
             // 可能要几百毫秒）。
-            if l.cover_pending && (!playing || l.drain.is_some() || shared.ring.len() >= target / 2) {
+            if l.cover_pending && (!playing || l.drain.is_some() || shared.ring.len() >= target / 2)
+            {
                 l.cover_pending = false;
                 load_covers(&shared, &media);
             }
@@ -505,7 +564,8 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
                     drain.len = len;
                     drain.since = Instant::now();
                 }
-                track_done = playing && (len == 0 || !has_output || drain.since.elapsed() > Duration::from_secs(1));
+                track_done = playing
+                    && (len == 0 || !has_output || drain.since.elapsed() > Duration::from_secs(1));
             }
         }
         if track_done {
@@ -514,8 +574,19 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
                 (t.queue.clone(), t.queue_index)
             };
             let next = advance(index, queue.len(), shared.loop_mode(), true);
-            if let Some((next_index, next_path)) = next.and_then(|i| queue.get(i as usize).cloned().map(|p| (i, p))) {
-                load_track(&shared, &media, &mut loaded, PathBuf::from(next_path), queue, next_index, dev_rate, dev_channels);
+            if let Some((next_index, next_path)) =
+                next.and_then(|i| queue.get(i as usize).cloned().map(|p| (i, p)))
+            {
+                load_track(
+                    &shared,
+                    &media,
+                    &mut loaded,
+                    PathBuf::from(next_path),
+                    queue,
+                    next_index,
+                    dev_rate,
+                    dev_channels,
+                );
                 shared.playing.store(true, Ordering::Relaxed);
             } else {
                 shared.playing.store(false, Ordering::Relaxed);
@@ -569,7 +640,9 @@ fn raise_thread_priority() {
     }
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST};
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+        };
         // SAFETY: GetCurrentThread 返回当前线程的伪句柄，无需关闭。
         unsafe {
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
@@ -595,7 +668,16 @@ fn handle_cmd(
                 .position(|p| p.as_str() == path.to_string_lossy().as_ref())
                 .map(|i| i as i64)
                 .unwrap_or(0);
-            load_track(shared, media, loaded, path, queue, index, dev_rate, dev_channels);
+            load_track(
+                shared,
+                media,
+                loaded,
+                path,
+                queue,
+                index,
+                dev_rate,
+                dev_channels,
+            );
             shared.playing.store(true, Ordering::Relaxed);
             publish_media(shared, media, true);
         }
@@ -608,7 +690,16 @@ fn handle_cmd(
                 .map(|i| i as i64)
                 .unwrap_or(0);
             shared.playing.store(false, Ordering::Relaxed);
-            load_track(shared, media, loaded, path, queue, index, dev_rate, dev_channels);
+            load_track(
+                shared,
+                media,
+                loaded,
+                path,
+                queue,
+                index,
+                dev_rate,
+                dev_channels,
+            );
             if time > 0.0
                 && let Some(l) = loaded.as_mut()
                 && let Ok(actual) = l.source.seek(time)
@@ -660,7 +751,15 @@ fn handle_cmd(
         }
         EngineCmd::SeekBy(delta) => {
             let target = shared.current_time() + delta;
-            handle_cmd(shared, media, loaded, base_queue, EngineCmd::Seek(target), dev_rate, dev_channels);
+            handle_cmd(
+                shared,
+                media,
+                loaded,
+                base_queue,
+                EngineCmd::Seek(target),
+                dev_rate,
+                dev_channels,
+            );
         }
         EngineCmd::SetVolume(volume) => {
             let clamped = volume.clamp(0.0, 1.0) as f32;
@@ -669,8 +768,21 @@ fn handle_cmd(
         }
         EngineCmd::Jump(target) => {
             let queue = shared.track.lock().unwrap().queue.clone();
-            if let Some(path) = usize::try_from(target).ok().and_then(|i| queue.get(i)).cloned() {
-                load_track(shared, media, loaded, PathBuf::from(path), queue, target, dev_rate, dev_channels);
+            if let Some(path) = usize::try_from(target)
+                .ok()
+                .and_then(|i| queue.get(i))
+                .cloned()
+            {
+                load_track(
+                    shared,
+                    media,
+                    loaded,
+                    PathBuf::from(path),
+                    queue,
+                    target,
+                    dev_rate,
+                    dev_channels,
+                );
                 shared.playing.store(true, Ordering::Relaxed);
                 publish_media(shared, media, true);
             }
@@ -685,7 +797,16 @@ fn handle_cmd(
             if let Some(target) = target
                 && let Some(path) = queue.get(target as usize).cloned()
             {
-                load_track(shared, media, loaded, PathBuf::from(path), queue, target, dev_rate, dev_channels);
+                load_track(
+                    shared,
+                    media,
+                    loaded,
+                    PathBuf::from(path),
+                    queue,
+                    target,
+                    dev_rate,
+                    dev_channels,
+                );
                 shared.playing.store(true, Ordering::Relaxed);
                 publish_media(shared, media, true);
             }
@@ -836,7 +957,9 @@ fn load_track(
 /// 给当前曲目生成封面：缩到 720 px 的 JPEG 缓存文件（界面与系统媒体会话
 /// 共用）和全屏背景小图。
 fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
-    let Some(path) = shared.track.lock().unwrap().path.clone() else { return };
+    let Some(path) = shared.track.lock().unwrap().path.clone() else {
+        return;
+    };
     let file = std::path::Path::new(&path);
     let cover = crate::covers::large(file).map(|p| p.to_string_lossy().into_owned());
     let backdrop = crate::covers::backdrop(file).map(|p| p.to_string_lossy().into_owned());
@@ -856,15 +979,20 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
 /// 本地路径 → `file://` URL（Windows 盘符路径同样处理）。
 fn file_url(path: &str) -> String {
     let path = path.replace('\\', "/");
-    if path.starts_with('/') { format!("file://{path}") } else { format!("file:///{path}") }
+    if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file:///{path}")
+    }
 }
 
 /// 作废缓冲里还没播的样本，并把位置基线设为 `seconds`。
 fn reset_ring(shared: &Arc<Shared>, seconds: f64, dev_rate: u32) {
     shared.ring.clear();
-    shared
-        .played
-        .store((seconds * dev_rate as f64).round() as u64, Ordering::Relaxed);
+    shared.played.store(
+        (seconds * dev_rate as f64).round() as u64,
+        Ordering::Relaxed,
+    );
 }
 
 fn set_error(shared: &Arc<Shared>, message: &str) {
@@ -967,7 +1095,11 @@ fn fade_curve(gain: f32) -> f32 {
 
 /// 每帧增益步长（`ms` 毫秒内从 0 到 1）。
 fn fade_step(ms: u32, rate: u32) -> f32 {
-    if ms == 0 { 1.0 } else { 1000.0 / (ms as f32 * rate.max(1) as f32) }
+    if ms == 0 {
+        1.0
+    } else {
+        1000.0 / (ms as f32 * rate.max(1) as f32)
+    }
 }
 
 fn output_callback(shared: &Shared, data: &mut [f32], channels: usize) {
@@ -976,13 +1108,20 @@ fn output_callback(shared: &Shared, data: &mut [f32], channels: usize) {
     let mut taken_samples = 0usize;
     if playing && !data.is_empty() {
         let target = f32::from_bits(shared.fade_target.load(Ordering::Relaxed));
-        let step = fade_step(shared.fade_ms.load(Ordering::Relaxed), shared.dev_rate.load(Ordering::Relaxed));
+        let step = fade_step(
+            shared.fade_ms.load(Ordering::Relaxed),
+            shared.dev_rate.load(Ordering::Relaxed),
+        );
         let mut gain = f32::from_bits(shared.gain.load(Ordering::Relaxed));
         let ch = channels.max(1);
         let take = shared.ring.pop(data.len(), |i, sample| {
             // 每帧（而不是每个样本）推进一次增益，各声道一致。
             if i % ch == 0 && gain != target {
-                gain = if gain < target { (gain + step).min(target) } else { (gain - step).max(target) };
+                gain = if gain < target {
+                    (gain + step).min(target)
+                } else {
+                    (gain - step).max(target)
+                };
             }
             data[i] = sample * volume * fade_curve(gain);
         });
@@ -1045,7 +1184,11 @@ mod tests {
         // 100 ms 后到一半（smoothstep(0.5) = 0.5），200 ms 后满。
         let mut buf = vec![0.0_f32; 4800 * 2];
         output_callback(&shared, &mut buf, 2);
-        assert!((buf[buf.len() - 1] - 0.5).abs() < 0.01, "{}", buf[buf.len() - 1]);
+        assert!(
+            (buf[buf.len() - 1] - 0.5).abs() < 0.01,
+            "{}",
+            buf[buf.len() - 1]
+        );
         assert!(buf.windows(2).all(|w| w[1] >= w[0] - 1e-6), "淡入单调");
         output_callback(&shared, &mut buf, 2);
         assert!((buf[buf.len() - 1] - 1.0).abs() < 1e-3);
@@ -1053,7 +1196,10 @@ mod tests {
         shared.fade_target.store(0f32.to_bits(), Ordering::Relaxed);
         let mut long = vec![0.0_f32; 9600 * 2];
         output_callback(&shared, &mut long, 2);
-        assert!(long[long.len() - 1].abs() < 1e-6 && f32::from_bits(shared.gain.load(Ordering::Relaxed)) == 0.0);
+        assert!(
+            long[long.len() - 1].abs() < 1e-6
+                && f32::from_bits(shared.gain.load(Ordering::Relaxed)) == 0.0
+        );
     }
 
     /// 环形缓冲：按序取出、绕回、只写整帧、`clear` 作废未播样本。
@@ -1093,7 +1239,8 @@ mod tests {
             std::thread::spawn(move || {
                 let mut next = 0usize;
                 while next < TOTAL {
-                    let chunk: Vec<f32> = (next..(next + 100).min(TOTAL)).map(|v| v as f32).collect();
+                    let chunk: Vec<f32> =
+                        (next..(next + 100).min(TOTAL)).map(|v| v as f32).collect();
                     next += ring.push(&chunk, 1);
                     std::thread::yield_now();
                 }
@@ -1135,11 +1282,17 @@ mod tests {
         }
         let frames = out.len() / ch;
         let expected = total as f64 * to as f64 / from as f64;
-        assert!((frames as f64) > expected - 3000.0 && (frames as f64) <= expected + 10.0, "{frames} vs {expected}");
+        assert!(
+            (frames as f64) > expected - 3000.0 && (frames as f64) <= expected + 10.0,
+            "{frames} vs {expected}"
+        );
         // 跳过开头的滤波器延迟，此后相邻样本的差不超过正弦的最大斜率（加余量）。
         let max_step = 0.5 * freq * std::f32::consts::TAU / to as f32 * 1.3;
         let left: Vec<f32> = out.iter().step_by(ch).copied().collect();
-        let worst = left[2048..].windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0_f32, f32::max);
+        let worst = left[2048..]
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0_f32, f32::max);
         assert!(worst < max_step, "跳变 {worst} ≥ {max_step}");
     }
 }

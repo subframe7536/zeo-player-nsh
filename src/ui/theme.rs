@@ -43,8 +43,13 @@ pub fn sidebar_accent() -> AdaptiveColor {
 pub fn sidebar_border() -> AdaptiveColor {
     theme().sidebar_border
 }
-/// 浮动播放条的半透明底色。
+/// 浮动播放条的底色：macOS 上半透明（下面有背景模糊）；Windows 上不透明
+/// 的 card 色，因为那里不做背景模糊（见 `bar::player_bar`），半透明会让
+/// 底下的封面直接透出来。
 pub fn bar() -> AdaptiveColor {
+    #[cfg(target_os = "windows")]
+    return theme().card;
+    #[cfg(not(target_os = "windows"))]
     theme().color("bar").unwrap_or(theme().card)
 }
 /// 最弱一级文字（列头、占位）。

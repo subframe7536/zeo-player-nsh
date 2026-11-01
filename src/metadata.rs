@@ -57,7 +57,11 @@ fn joined(tag: &Tag, keys: &[ItemKey]) -> Option<String> {
             }
         }
     }
-    if all.is_empty() { None } else { Some(all.join("; ")) }
+    if all.is_empty() {
+        None
+    } else {
+        Some(all.join("; "))
+    }
 }
 
 fn number(tag: &Tag, key: ItemKey) -> Option<u32> {
@@ -175,10 +179,15 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
 pub fn read_artwork(path: &Path) -> Option<(Vec<u8>, Option<String>)> {
     let tagged = lofty::read_from_path(path).ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
-    let picture = tag.pictures().first().or_else(|| tagged.tags().iter().flat_map(|t| t.pictures()).next())?;
-    Some((picture.data().to_vec(), picture.mime_type().map(|m| m.as_str().to_owned())))
+    let picture = tag
+        .pictures()
+        .first()
+        .or_else(|| tagged.tags().iter().flat_map(|t| t.pictures()).next())?;
+    Some((
+        picture.data().to_vec(),
+        picture.mime_type().map(|m| m.as_str().to_owned()),
+    ))
 }
-
 
 /// 文件指纹：修改时间（纳秒）、大小，再加 Unix 的 inode 与 ctime 或
 /// Windows 的创建时间。复制时保留修改时间的工具（Finder、`cp -p`、
@@ -201,12 +210,18 @@ pub fn file_stamp(meta: &std::fs::Metadata) -> u64 {
     {
         use std::os::unix::fs::MetadataExt;
         parts.push(meta.ino());
-        parts.push((meta.ctime() as u64).wrapping_mul(1_000_000_000).wrapping_add(meta.ctime_nsec() as u64));
+        parts.push(
+            (meta.ctime() as u64)
+                .wrapping_mul(1_000_000_000)
+                .wrapping_add(meta.ctime_nsec() as u64),
+        );
     }
     parts
         .iter()
         .flat_map(|p| p.to_le_bytes())
-        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
+        .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+            (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3)
+        })
 }
 
 // --- 元数据缓存（按 path + 文件指纹，持久化到 SQLite） -----------------------
@@ -245,7 +260,12 @@ impl MetaCache {
 
     /// 全部条目（启动时据此先显示上次的曲库）。
     pub fn entries(&self) -> Vec<(String, CacheEntry)> {
-        self.entries.lock().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+        self.entries
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
     }
 
     /// 丢掉全部缓存，数据库里的也删掉（重建曲库）。
@@ -258,7 +278,10 @@ impl MetaCache {
     /// 只留下 `keep` 里的路径（扫描后去掉已不存在的文件）。
     pub fn retain(&self, keep: &HashSet<String>) {
         self.flush();
-        self.entries.lock().unwrap().retain(|path, _| keep.contains(path));
+        self.entries
+            .lock()
+            .unwrap()
+            .retain(|path, _| keep.contains(path));
         crate::db::retain_meta(keep);
     }
 
@@ -303,7 +326,10 @@ impl MetaCache {
                 .map_or(0, |d| d.as_secs()),
             value: Arc::new(read_meta(path)?),
         };
-        self.entries.lock().unwrap().insert(key.clone(), entry.clone());
+        self.entries
+            .lock()
+            .unwrap()
+            .insert(key.clone(), entry.clone());
         let flush = {
             let mut pending = self.pending.lock().unwrap();
             pending.push((key, entry.clone()));

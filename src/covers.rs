@@ -1,9 +1,10 @@
 //! 封面缩略图：内嵌封面解码、缩放到 [`THUMB`] 像素、存为 JPEG 缓存文件
-//! （`~/Library/Caches/Zeo Player/covers`，按 路径 + 修改时间 + 大小 + 文件指纹 命名）。
+//! （数据目录下的 `covers`：macOS `~/Library/Application Support/Zeo Player/covers`，
+//! Windows `%APPDATA%\Zeo Player\covers`；按 路径 + 修改时间 + 大小 + 文件指纹 命名）。
 //! 后台线程池处理请求，结果由 UI 轮询取走。
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::metadata::MetaCache;
@@ -35,15 +36,21 @@ fn pool() -> &'static Pool {
             let done = done.clone();
             std::thread::Builder::new()
                 .name(format!("zeo-player-cover-{i}"))
-                .spawn(move || loop {
-                    let next = rx.lock().unwrap().recv();
-                    let Ok(path) = next else { return };
-                    let thumb = thumbnail(Path::new(&path)).map(|p| p.to_string_lossy().into_owned());
-                    done.lock().unwrap().push((path, thumb));
+                .spawn(move || {
+                    loop {
+                        let next = rx.lock().unwrap().recv();
+                        let Ok(path) = next else { return };
+                        let thumb =
+                            thumbnail(Path::new(&path)).map(|p| p.to_string_lossy().into_owned());
+                        done.lock().unwrap().push((path, thumb));
+                    }
                 })
                 .expect("spawn cover worker");
         }
-        Pool { tx: Mutex::new(tx), done }
+        Pool {
+            tx: Mutex::new(tx),
+            done,
+        }
     })
 }
 
@@ -57,11 +64,13 @@ pub fn take_done() -> Vec<(String, Option<String>)> {
     std::mem::take(&mut *pool().done.lock().unwrap())
 }
 
+/// 缩略图目录：数据目录下的 `covers`（与 `library.json`、`zeo-player.db`
+/// 同处）。`ZEO_PLAYER_CACHE_DIR` 可单独覆盖（单元测试用）。
 fn cache_dir() -> PathBuf {
-    std::env::var_os("ZEO_PLAYER_CACHE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("Zeo Player"))
-        .join("covers")
+    if let Some(dir) = std::env::var_os("ZEO_PLAYER_CACHE_DIR") {
+        return PathBuf::from(dir).join("covers");
+    }
+    crate::library::data_dir().join("covers")
 }
 
 /// 删除全部缩略图（重建曲库）。
@@ -71,7 +80,9 @@ pub fn clear_cache() {
 
 /// FNV-1a（跨版本稳定的文件名）。
 fn fnv(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ *b as u64).wrapping_mul(0x0000_0100_0000_01b3))
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ *b as u64).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 /// `path` 的封面缩略图文件（[`THUMB`] 像素）；没有封面为 `None`。
@@ -94,16 +105,25 @@ pub fn backdrop(path: &Path) -> Option<PathBuf> {
         return Some(out);
     }
     let small = image::open(cover_file(path, THUMB)?).ok()?;
-    let img = small.resize_to_fill(BACKDROP, BACKDROP, image::imageops::FilterType::Triangle).blur(BACKDROP as f32 / 10.0);
+    let img = small
+        .resize_to_fill(BACKDROP, BACKDROP, image::imageops::FilterType::Triangle)
+        .blur(BACKDROP as f32 / 10.0);
     let tmp = out.with_extension("tmp");
-    img.to_rgb8().save_with_format(&tmp, image::ImageFormat::Jpeg).ok()?;
+    img.to_rgb8()
+        .save_with_format(&tmp, image::ImageFormat::Jpeg)
+        .ok()?;
     std::fs::rename(&tmp, &out).ok()?;
     Some(out)
 }
 
 fn cache_key(path: &Path) -> Option<u64> {
     let meta = std::fs::metadata(path).ok()?;
-    Some(fnv(format!("{}|{}", path.display(), crate::metadata::file_stamp(&meta)).as_bytes()))
+    Some(fnv(format!(
+        "{}|{}",
+        path.display(),
+        crate::metadata::file_stamp(&meta)
+    )
+    .as_bytes()))
 }
 
 /// `path` 的封面缩到 `side` 像素以内、存为 JPEG（已缓存则直接返回）。
@@ -130,7 +150,9 @@ fn cover_file(path: &Path, side: u32) -> Option<PathBuf> {
             let rgb = image::DynamicImage::ImageRgb8(img.to_rgb8());
             let file = std::fs::File::create(&tmp).ok()?;
             let mut writer = std::io::BufWriter::new(file);
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 85).encode_image(&rgb).ok()?;
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 85)
+                .encode_image(&rgb)
+                .ok()?;
         }
         // 解不开的格式：原样写出，交给系统解码。
         Err(_) => std::fs::write(&tmp, &bytes).ok()?,
@@ -171,6 +193,12 @@ mod tests {
         let size = std::fs::metadata(&thumb).unwrap().len();
         let again = std::time::Instant::now();
         assert_eq!(thumbnail(&file), Some(thumb.clone()));
-        eprintln!("{} → {}×{} {size} B，首次 {first:?}，缓存 {:?}", file.display(), img.width(), img.height(), again.elapsed());
+        eprintln!(
+            "{} → {}×{} {size} B，首次 {first:?}，缓存 {:?}",
+            file.display(),
+            img.width(),
+            img.height(),
+            again.elapsed()
+        );
     }
 }

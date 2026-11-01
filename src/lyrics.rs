@@ -36,7 +36,10 @@ pub struct LyricOptions {
 
 impl Default for LyricOptions {
     fn default() -> Self {
-        LyricOptions { ignore_short_empty_lines: true, min_empty_line_duration: 3.0 }
+        LyricOptions {
+            ignore_short_empty_lines: true,
+            min_empty_line_duration: 3.0,
+        }
     }
 }
 
@@ -65,7 +68,10 @@ pub fn parse_lyric(text: &str, options: LyricOptions) -> LyricsOutput {
         // 无时间戳回退：单行 → time=0；多行 → time=-1、index=-1（仅展示）。
         let texts: Vec<String> = untimed.into_iter().filter(|c| !c.is_empty()).collect();
         return match texts.len() {
-            0 => LyricsOutput { lines: Vec::new(), timed: false },
+            0 => LyricsOutput {
+                lines: Vec::new(),
+                timed: false,
+            },
             1 => LyricsOutput {
                 lines: vec![LrcLine {
                     index: 0,
@@ -98,7 +104,12 @@ pub fn parse_lyric(text: &str, options: LyricOptions) -> LyricsOutput {
     // 中间夹带的无时间行属于噪声，丢弃（有带时间行的文件里）。
     let mut entries: Vec<Entry> = timed_entries
         .into_iter()
-        .map(|(time, content)| Entry { time, content, trans: None, metadata: false })
+        .map(|(time, content)| Entry {
+            time,
+            content,
+            trans: None,
+            metadata: false,
+        })
         .collect();
 
     merge_leading_metadata(&mut entries);
@@ -138,7 +149,9 @@ fn split_timestamps(line: &str) -> (Vec<f64>, String) {
         }
         // '[' 与 ']' 均为 ASCII，边界安全。
         let inner = &rest[1..tag_end];
-        let Some(seconds) = parse_time_tag(inner) else { break };
+        let Some(seconds) = parse_time_tag(inner) else {
+            break;
+        };
         times.push(seconds);
         rest = &rest[tag_end + 1..];
     }
@@ -200,8 +213,12 @@ fn clean_content(content: &str) -> String {
 
 /// `[ti:…]` `[ar:…]` 等 LRC 元数据头标签行。
 fn is_meta_tag_line(line: &str) -> bool {
-    let Some(rest) = line.strip_prefix('[') else { return false };
-    let Some((key, value)) = rest.split_once(':') else { return false };
+    let Some(rest) = line.strip_prefix('[') else {
+        return false;
+    };
+    let Some((key, value)) = rest.split_once(':') else {
+        return false;
+    };
     if !value.ends_with(']') || value.len() < 2 {
         return false;
     }
@@ -229,7 +246,12 @@ fn merge_leading_metadata(entries: &mut Vec<Entry>) {
         .join("\n");
     entries.splice(
         0..run,
-        Some(Entry { time, content: joined, trans: None, metadata: true }),
+        Some(Entry {
+            time,
+            content: joined,
+            trans: None,
+            metadata: true,
+        }),
     );
 }
 
@@ -264,7 +286,10 @@ fn apply_empty_line_policy(entries: &mut Vec<Entry>, options: LyricOptions) {
         }
         // 一段连续空行：时长从第一条量到下一个非空行。
         let start = i;
-        let run_end = entries[i..].iter().position(|e| !e.content.is_empty()).map_or(entries.len(), |n| i + n);
+        let run_end = entries[i..]
+            .iter()
+            .position(|e| !e.content.is_empty())
+            .map_or(entries.len(), |n| i + n);
         let next_time = entries.get(run_end).map(|e| e.time);
         let keep = match next_time {
             Some(next) => next - entries[start].time >= options.min_empty_line_duration,
@@ -316,7 +341,10 @@ mod tests {
 
     #[test]
     fn karaoke_fragments_removed() {
-        let out = parse_lyric("[00:01.00]你<00:01.50>好[00:02.00]呀", LyricOptions::default());
+        let out = parse_lyric(
+            "[00:01.00]你<00:01.50>好[00:02.00]呀",
+            LyricOptions::default(),
+        );
         assert_eq!(out.lines[0].raw_content, "你好呀");
     }
 
@@ -390,13 +418,22 @@ mod tests {
 
     #[test]
     fn meta_tag_lines_dropped() {
-        let out = parse_lyric("[ti:Song]\n[ar:Artist]\n[00:01.00]a", LyricOptions::default());
+        let out = parse_lyric(
+            "[ti:Song]\n[ar:Artist]\n[00:01.00]a",
+            LyricOptions::default(),
+        );
         assert_eq!(out.lines.len(), 1);
     }
 
     #[test]
     fn indexes_sequential() {
-        let out = parse_lyric("[00:01.00]a\n[00:02.00]b\n[00:03.00]c", LyricOptions::default());
-        assert_eq!(out.lines.iter().map(|l| l.index).collect::<Vec<_>>(), vec![0, 1, 2]);
+        let out = parse_lyric(
+            "[00:01.00]a\n[00:02.00]b\n[00:03.00]c",
+            LyricOptions::default(),
+        );
+        assert_eq!(
+            out.lines.iter().map(|l| l.index).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
     }
 }

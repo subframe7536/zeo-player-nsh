@@ -6,14 +6,17 @@ use std::rc::Rc;
 use nsh_base::{context_menu, menu, menu_item, menu_separator, submenu};
 use nsh_core::prelude::*;
 
-use super::button::{text_button, Size, Variant};
-use super::form::{dialog_content, dialog_footer, dialog_header, input_field, modal, select_trigger, tab_list, tab_trigger};
-use super::icons::{icon, Icon};
-use super::parts::*;
-use super::store::{self, format_total, play_list, store, Draft};
-use super::theme::*;
 use super::Nav;
-use crate::library::{unix_now, TrackEntry};
+use super::button::{Size, Variant, text_button};
+use super::form::{
+    dialog_content, dialog_footer, dialog_header, input_field, modal, select_trigger, tab_list,
+    tab_trigger,
+};
+use super::icons::{Icon, icon};
+use super::parts::*;
+use super::store::{self, Draft, format_total, play_list, store};
+use super::theme::*;
+use crate::library::{TrackEntry, unix_now};
 use crate::playlists::{Condition, Field, FieldType, Op, Playlist, Rule, Sort};
 
 // --- 菜单部件 -----------------------------------------------------------------
@@ -50,11 +53,21 @@ fn row_content(glyph: Option<Icon>, label: impl Fn() -> String + 'static) -> Vie
         .hover(|st| st.bg(hover()))
         .active(|st| st.bg(hover()))
         .child(glyph.map(|g| icon(g, 15.0, muted_fg)))
-        .child(text(label).flex_1().number_of_lines(1).text_size(px(13.0)).text_color(fg()))
+        .child(
+            text(label)
+                .flex_1()
+                .number_of_lines(1)
+                .text_size(px(13.0))
+                .text_color(fg()),
+        )
 }
 
 /// 一个菜单项。
-pub fn item(label: impl Into<String>, glyph: Option<Icon>, on_select: impl Fn() + 'static) -> AnyElement {
+pub fn item(
+    label: impl Into<String>,
+    glyph: Option<Icon>,
+    on_select: impl Fn() + 'static,
+) -> AnyElement {
     let label: String = label.into();
     let shown = label.clone();
     menu_item()
@@ -65,7 +78,11 @@ pub fn item(label: impl Into<String>, glyph: Option<Icon>, on_select: impl Fn() 
 }
 
 fn separator() -> AnyElement {
-    menu_separator().h(px(1.0)).my(px(4.0)).bg(border()).into_element()
+    menu_separator()
+        .h(px(1.0))
+        .my(px(4.0))
+        .bg(border())
+        .into_element()
 }
 
 /// 菜单里的分组小标题（不可选）。
@@ -97,12 +114,21 @@ pub fn add_to_submenu(paths: impl Fn() -> Vec<String> + Clone + 'static) -> AnyE
                 .label("添加到歌单")
                 .hover(|st| st.bg(hover()))
                 .child(icon(Icon::Plus, 15.0, muted_fg))
-                .child(text("添加到歌单").flex_1().text_size(px(13.0)).text_color(fg()))
+                .child(
+                    text("添加到歌单")
+                        .flex_1()
+                        .text_size(px(13.0))
+                        .text_color(fg()),
+                )
                 .child(icon(Icon::ChevronRight, 12.0, faint)),
         )
-        .child(item("新建歌单…", Some(Icon::Plus), move || store::new_playlist(false, create())))
+        .child(item("新建歌单…", Some(Icon::Plus), move || {
+            store::new_playlist(false, create())
+        }))
         .child(dynamic(move || {
-            let manual: Vec<Playlist> = s.playlists.with(|l| l.iter().filter(|p| !p.is_smart()).cloned().collect());
+            let manual: Vec<Playlist> = s
+                .playlists
+                .with(|l| l.iter().filter(|p| !p.is_smart()).cloned().collect());
             let mut out = Vec::new();
             if !manual.is_empty() {
                 out.push(separator());
@@ -110,8 +136,14 @@ pub fn add_to_submenu(paths: impl Fn() -> Vec<String> + Clone + 'static) -> AnyE
             for p in manual {
                 let paths = paths.clone();
                 let id = p.id;
-                let glyph = if p.favorite { Icon::Heart } else { Icon::Playlist };
-                out.push(item(p.name, Some(glyph), move || store::add_to_playlist(id, paths())));
+                let glyph = if p.favorite {
+                    Icon::Heart
+                } else {
+                    Icon::Playlist
+                };
+                out.push(item(p.name, Some(glyph), move || {
+                    store::add_to_playlist(id, paths())
+                }));
             }
             out
         }))
@@ -120,7 +152,12 @@ pub fn add_to_submenu(paths: impl Fn() -> Vec<String> + Clone + 'static) -> AnyE
 
 /// 曲目的右键菜单（包着 `row`）：播放、添加到歌单、从歌单移除（`from`：
 /// 当前所在的手动歌单）、在访达中显示。
-pub fn track_menu(row: View, track: Memo<Option<TrackEntry>>, from: Option<u64>, play: impl Fn() + 'static) -> AnyElement {
+pub fn track_menu(
+    row: View,
+    track: Memo<Option<TrackEntry>>,
+    from: Option<u64>,
+    play: impl Fn() + 'static,
+) -> AnyElement {
     let path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
     let paths = move || path().into_iter().collect::<Vec<_>>();
     let menu = context_menu().trigger(row);
@@ -137,11 +174,15 @@ pub fn track_menu(row: View, track: Memo<Option<TrackEntry>>, from: Option<u64>,
             })
         }))
         .child(separator())
-        .child(item(super::full::REVEAL_LABEL, Some(Icon::Reveal), move || {
-            if let Some(p) = path() {
-                super::full::reveal(&p);
-            }
-        }))
+        .child(item(
+            super::full::REVEAL_LABEL,
+            Some(Icon::Reveal),
+            move || {
+                if let Some(p) = path() {
+                    super::full::reveal(&p);
+                }
+            },
+        ))
         .into_element()
 }
 
@@ -164,8 +205,12 @@ pub fn sidebar_section() -> View {
             .child(icon(Icon::Plus, 14.0, faint)),
     );
     let add = popup!(add, 200.0)
-        .child(item("新建歌单", Some(Icon::Playlist), || store::new_playlist(false, Vec::new())))
-        .child(item("新建智能歌单", Some(Icon::Smart), || store::new_playlist(true, Vec::new())));
+        .child(item("新建歌单", Some(Icon::Playlist), || {
+            store::new_playlist(false, Vec::new())
+        }))
+        .child(item("新建智能歌单", Some(Icon::Smart), || {
+            store::new_playlist(true, Vec::new())
+        }));
     view()
         .flex_1()
         .min_h(px(0.0))
@@ -179,25 +224,31 @@ pub fn sidebar_section() -> View {
                 .child(view().pt(px(10.0)).child(add)),
         )
         .child(
-            scroll().flex_1().child(
-                view().px(px(10.0)).pb(px(8.0)).gap(px(2.0)).child(dynamic(move || {
-                    let lists = s.playlists.get();
-                    // 「我喜欢」固定在最前（`ensure_favorites`），其余按创建顺序。
-                    let mut rows: Vec<AnyElement> = lists.iter().map(sidebar_row).collect();
-                    if lists.iter().all(|p| p.favorite) {
-                        rows.push(
-                            text("点 + 新建歌单，或在曲目上点右键添加。")
-                                .text_size(px(12.0))
-                                .line_height(px(18.0))
-                                .text_color(faint())
-                                .px(px(10.0))
-                                .py(px(4.0))
-                                .into_element(),
-                        );
-                    }
-                    rows
-                })),
-            ),
+            scroll()
+                .flex_1()
+                .child(
+                    view()
+                        .px(px(10.0))
+                        .pb(px(8.0))
+                        .gap(px(2.0))
+                        .child(dynamic(move || {
+                            let lists = s.playlists.get();
+                            // 「我喜欢」固定在最前（`ensure_favorites`），其余按创建顺序。
+                            let mut rows: Vec<AnyElement> = lists.iter().map(sidebar_row).collect();
+                            if lists.iter().all(|p| p.favorite) {
+                                rows.push(
+                                    text("点 + 新建歌单，或在曲目上点右键添加。")
+                                        .text_size(px(12.0))
+                                        .line_height(px(18.0))
+                                        .text_color(faint())
+                                        .px(px(10.0))
+                                        .py(px(4.0))
+                                        .into_element(),
+                                );
+                            }
+                            rows
+                        })),
+                ),
         )
 }
 
@@ -222,7 +273,10 @@ fn sidebar_row(p: &Playlist) -> AnyElement {
         .window_drag(false)
         .role(AccessibilityRole::Button)
         .label(name.clone())
-        .accessibility_state(move || AccessibilityState { selected: active(), ..AccessibilityState::default() })
+        .accessibility_state(move || AccessibilityState {
+            selected: active(),
+            ..AccessibilityState::default()
+        })
         .style_when(active, |st| st.bg(sidebar_accent()))
         .hover(|st| st.bg(sidebar_accent()))
         .active(|st| st.opacity(0.7))
@@ -246,9 +300,19 @@ fn sidebar_row(p: &Playlist) -> AnyElement {
     }
     let menu = context_menu().trigger(row);
     popup!(menu, 180.0)
-        .child(item(if smart { "编辑条件…" } else { "重命名…" }, Some(Icon::Edit), move || store::edit_playlist(id)))
+        .child(item(
+            if smart {
+                "编辑条件…"
+            } else {
+                "重命名…"
+            },
+            Some(Icon::Edit),
+            move || store::edit_playlist(id),
+        ))
         .child(separator())
-        .child(item("删除歌单", Some(Icon::Trash), move || confirm_delete(id)))
+        .child(item("删除歌单", Some(Icon::Trash), move || {
+            confirm_delete(id)
+        }))
         .into_element()
 }
 
@@ -290,7 +354,11 @@ pub fn page(id: u64) -> View {
         let kind = if smart() { "智能歌单" } else { "歌单" };
         items.with(|v| {
             let total: f64 = v.iter().map(|t| t.duration).sum();
-            if v.is_empty() { kind.to_owned() } else { format!("{kind} · {} 首 · {}", v.len(), format_total(total)) }
+            if v.is_empty() {
+                kind.to_owned()
+            } else {
+                format!("{kind} · {} 首 · {}", v.len(), format_total(total))
+            }
         })
     };
     // 「我喜欢」只有「播放」，不能改名或删除。
@@ -298,37 +366,80 @@ pub fn page(id: u64) -> View {
         .flex_row()
         .items_center()
         .gap(px(8.0))
-        .child(when(move || items.with(|v| !v.is_empty()), move || {
-            pill_button(Icon::Play, "播放", move || items.with_untracked(|v| play_list(v, 0)))
-        }))
-        .child(when(move || !favorite(), move || {
-            view()
-                .flex_row()
-                .items_center()
-                .gap(px(8.0))
-                .child(
-                    when(smart, move || outline_button(Icon::Edit, "编辑条件", move || store::edit_playlist(id)))
-                        .otherwise(move || outline_button(Icon::Edit, "重命名", move || store::edit_playlist(id))),
-                )
-                .child(icon_button(|| Icon::Trash, 16.0, "删除歌单", muted_fg, move || confirm_delete(id)))
-        }));
+        .child(when(
+            move || items.with(|v| !v.is_empty()),
+            move || {
+                pill_button(Icon::Play, "播放", move || {
+                    items.with_untracked(|v| play_list(v, 0))
+                })
+            },
+        ))
+        .child(when(
+            move || !favorite(),
+            move || {
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        when(smart, move || {
+                            outline_button(Icon::Edit, "编辑条件", move || {
+                                store::edit_playlist(id)
+                            })
+                        })
+                        .otherwise(move || {
+                            outline_button(Icon::Edit, "重命名", move || {
+                                store::edit_playlist(id)
+                            })
+                        }),
+                    )
+                    .child(icon_button(
+                        || Icon::Trash,
+                        16.0,
+                        "删除歌单",
+                        muted_fg,
+                        move || confirm_delete(id),
+                    ))
+            },
+        ));
     let header = view()
-        .child(page_header(title, subtitle, None, Some(actions.into_element())))
+        .child(page_header(
+            title,
+            subtitle,
+            None,
+            Some(actions.into_element()),
+        ))
         .child(track_columns(Columns::ALL));
     let empty = dynamic(move || {
         if smart() {
-            empty_state(Icon::Smart, "没有符合条件的曲目", "调整条件后，符合的曲目会自动出现在这里。")
-                .child(view().mt(px(12.0)).child(outline_button(Icon::Edit, "编辑条件", move || store::edit_playlist(id))))
+            empty_state(
+                Icon::Smart,
+                "没有符合条件的曲目",
+                "调整条件后，符合的曲目会自动出现在这里。",
+            )
+            .child(view().mt(px(12.0)).child(outline_button(
+                Icon::Edit,
+                "编辑条件",
+                move || store::edit_playlist(id),
+            )))
         } else if favorite() {
-            empty_state(Icon::Heart, "还没有喜欢的曲目", "点播放条上的心形按钮，喜欢的曲目会出现在这里。")
+            empty_state(
+                Icon::Heart,
+                "还没有喜欢的曲目",
+                "点播放条上的心形按钮，喜欢的曲目会出现在这里。",
+            )
         } else {
-            empty_state(Icon::Playlist, "歌单是空的", "在任意曲目上点右键，选「添加到歌单」。")
+            empty_state(
+                Icon::Playlist,
+                "歌单是空的",
+                "在任意曲目上点右键，选「添加到歌单」。",
+            )
         }
     });
     let from = untracked(|| list.with(|p| p.as_ref().filter(|p| !p.is_smart()).map(|p| p.id)));
-    view()
-        .flex_1()
-        .child(super::views::track_list_in(items, Columns::ALL, header.into_element(), from).empty(empty))
+    view().flex_1().child(
+        super::views::track_list_in(items, Columns::ALL, header.into_element(), from).empty(empty),
+    )
 }
 
 // --- 编辑弹窗 -----------------------------------------------------------------
@@ -336,7 +447,12 @@ pub fn page(id: u64) -> View {
 /// 新建 / 编辑歌单的弹窗（`store().editor` 有草稿时显示）。
 pub fn editor_dialog() -> AnyElement {
     let s = store();
-    let draft = signal(s.editor.get_untracked().unwrap_or(Draft { id: None, name: String::new(), rule: None, add: Vec::new() }));
+    let draft = signal(s.editor.get_untracked().unwrap_or(Draft {
+        id: None,
+        name: String::new(),
+        rule: None,
+        add: Vec::new(),
+    }));
     let close = move || s.editor.set(None);
     let save = move || {
         store::save_draft(draft.get_untracked());
@@ -356,15 +472,35 @@ pub fn editor_dialog() -> AnyElement {
         .placeholder("歌单名称")
         .on_change(move |t: &str| draft.update(|d| d.name = t.to_owned()))
         .on_submit(move |_: &str| save());
-    let description = if smart { Some("按条件从曲库自动聚合，曲库变化时跟着更新。") } else { None };
+    let description = if smart {
+        Some("按条件从曲库自动聚合，曲库变化时跟着更新。")
+    } else {
+        None
+    };
     let content = dialog_content(if smart { 640.0 } else { 425.0 })
         .child(dialog_header(heading, description))
         .child(name_input)
         .child(smart.then(|| rule_editor(draft)))
         .child(
             dialog_footer()
-                .child(text_button(Variant::Outline, Size::Default, None, "取消", close))
-                .child(text_button(Variant::Default, Size::Default, None, if heading.starts_with("新建") { "创建" } else { "保存" }, save)),
+                .child(text_button(
+                    Variant::Outline,
+                    Size::Default,
+                    None,
+                    "取消",
+                    close,
+                ))
+                .child(text_button(
+                    Variant::Default,
+                    Size::Default,
+                    None,
+                    if heading.starts_with("新建") {
+                        "创建"
+                    } else {
+                        "保存"
+                    },
+                    save,
+                )),
         );
     modal(content, close)
 }
@@ -372,7 +508,9 @@ pub fn editor_dialog() -> AnyElement {
 /// 智能规则编辑：全部 / 任一、条件行、添加条件、排序、数量上限、实时匹配数。
 fn rule_editor(draft: Signal<Draft>) -> View {
     let s = store();
-    let rule = move |f: &dyn Fn(&Rule) -> String| draft.with(|d| d.rule.as_ref().map(f).unwrap_or_default());
+    let rule = move |f: &dyn Fn(&Rule) -> String| {
+        draft.with(|d| d.rule.as_ref().map(f).unwrap_or_default())
+    };
     let change = move |f: Box<dyn FnOnce(&mut Rule)>| {
         draft.update(|d| {
             if let Some(r) = d.rule.as_mut() {
@@ -380,21 +518,35 @@ fn rule_editor(draft: Signal<Draft>) -> View {
             }
         })
     };
-    let count = computed(move || draft.with(|d| d.rule.as_ref().map(|r| r.conditions.len()).unwrap_or(0)));
+    let count =
+        computed(move || draft.with(|d| d.rule.as_ref().map(|r| r.conditions.len()).unwrap_or(0)));
     let matched = computed(move || {
         let tracks = s.tracks.get();
-        draft.with(|d| d.rule.as_ref().map(|r| r.select(&tracks, unix_now()).len()).unwrap_or(0))
+        draft.with(|d| {
+            d.rule
+                .as_ref()
+                .map(|r| r.select(&tracks, unix_now()).len())
+                .unwrap_or(0)
+        })
     });
     let match_all = move || draft.with(|d| d.rule.as_ref().is_none_or(|r| r.match_all));
     let chip = move |label: &'static str, all: bool| {
-        tab_trigger(move || match_all() == all, label, move || change(Box::new(move |r| r.match_all = all)))
+        tab_trigger(
+            move || match_all() == all,
+            label,
+            move || change(Box::new(move |r| r.match_all = all)),
+        )
     };
     let mode = view()
         .flex_row()
         .items_center()
         .gap(px(8.0))
         .child(text("符合以下").text_size(px(14.0)).text_color(muted_fg()))
-        .child(tab_list().child(chip("全部", true)).child(chip("任一", false)))
+        .child(
+            tab_list()
+                .child(chip("全部", true))
+                .child(chip("任一", false)),
+        )
         .child(text("条件").text_size(px(14.0)).text_color(muted_fg()))
         .child(view().flex_1())
         .child(
@@ -405,21 +557,40 @@ fn rule_editor(draft: Signal<Draft>) -> View {
                 .text_color(primary()),
         );
     // 行数变化（添加 / 删除）时整组重建；改字段、条件、值只更新所在行。
-    let rows = dynamic(move || (0..count.get()).map(|i| condition_row(draft, i).into_element()).collect::<Vec<_>>());
-    let add = view().self_start().child(text_button(Variant::Ghost, Size::Sm, Some(Icon::Plus), "添加条件", move || {
-        change(Box::new(|r| r.conditions.push(Condition::default())))
-    }));
+    let rows = dynamic(move || {
+        (0..count.get())
+            .map(|i| condition_row(draft, i).into_element())
+            .collect::<Vec<_>>()
+    });
+    let add = view().self_start().child(text_button(
+        Variant::Ghost,
+        Size::Sm,
+        Some(Icon::Plus),
+        "添加条件",
+        move || change(Box::new(|r| r.conditions.push(Condition::default()))),
+    ));
     let sort = select(
         move || rule(&|r| r.sort.label().to_owned()),
         "排序",
-        Sort::ALL.iter().map(|&o| (None, o.label(), Box::new(move || change(Box::new(move |r| r.sort = o))) as Box<dyn Fn()>)).collect(),
+        Sort::ALL
+            .iter()
+            .map(|&o| {
+                (
+                    None,
+                    o.label(),
+                    Box::new(move || change(Box::new(move |r| r.sort = o))) as Box<dyn Fn()>,
+                )
+            })
+            .collect(),
         170.0,
     );
     let limit = input_field(true)
         .w(px(80.0))
         .label("数量上限")
         .keyboard_type(KeyboardType::Number)
-        .default_value(untracked(|| rule(&|r| r.limit.map(|n| n.to_string()).unwrap_or_default())))
+        .default_value(untracked(|| {
+            rule(&|r| r.limit.map(|n| n.to_string()).unwrap_or_default())
+        }))
         .placeholder("不限")
         .on_change(move |t: &str| {
             let limit = t.trim().parse::<usize>().ok().filter(|n| *n > 0);
@@ -440,7 +611,12 @@ fn rule_editor(draft: Signal<Draft>) -> View {
         .flex_shrink(1.0)
         .min_h(px(0.0))
         .child(mode)
-        .child(scroll().flex_shrink(1.0).max_h(px(300.0)).child(view().gap(px(8.0)).child(rows)))
+        .child(
+            scroll()
+                .flex_shrink(1.0)
+                .max_h(px(300.0))
+                .child(view().gap(px(8.0)).child(rows)),
+        )
         .child(add)
         .child(view().h(px(1.0)).bg(border()))
         .child(footer)
@@ -448,7 +624,14 @@ fn rule_editor(draft: Signal<Draft>) -> View {
 
 /// 一行条件：字段、比较方式、值、单位、删除。
 fn condition_row(draft: Signal<Draft>, index: usize) -> View {
-    let get = move || draft.with(|d| d.rule.as_ref().and_then(|r| r.conditions.get(index).cloned()).unwrap_or_default());
+    let get = move || {
+        draft.with(|d| {
+            d.rule
+                .as_ref()
+                .and_then(|r| r.conditions.get(index).cloned())
+                .unwrap_or_default()
+        })
+    };
     let change = move |f: Box<dyn FnOnce(&mut Condition)>| {
         draft.update(|d| {
             if let Some(c) = d.rule.as_mut().and_then(|r| r.conditions.get_mut(index)) {
@@ -476,14 +659,25 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
             (heading, f.label(), pick)
         })
         .collect();
-    let field_select = select(move || get().field.label().to_owned(), "字段", field_options, 120.0);
+    let field_select = select(
+        move || get().field.label().to_owned(),
+        "字段",
+        field_options,
+        120.0,
+    );
     // 比较方式随字段变：字段换了整个下拉重建。
     let op_select = dynamic(move || {
         let options = field
             .get()
             .ops()
             .iter()
-            .map(|&o: &Op| (None, o.label(), Box::new(move || change(Box::new(move |c| c.op = o))) as Box<dyn Fn()>))
+            .map(|&o: &Op| {
+                (
+                    None,
+                    o.label(),
+                    Box::new(move || change(Box::new(move |c| c.op = o))) as Box<dyn Fn()>,
+                )
+            })
             .collect();
         select(move || get().op.label().to_owned(), "条件", options, 110.0)
     });
@@ -527,21 +721,39 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
         .child(op_select)
         .child(view().flex_1().flex_row().items_center().child(value_input))
         .child(
-            text(move || if invalid() { "无效".to_owned() } else { unit() })
-                .w(px(70.0))
-                .number_of_lines(1)
-                .text_size(px(12.0))
-                .text_color(move || if invalid() { nsh_base::theme().destructive } else { faint() }),
-        )
-        .child(icon_button(|| Icon::Close, 16.0, "删除条件", muted_fg, move || {
-            draft.update(|d| {
-                if let Some(r) = d.rule.as_mut()
-                    && index < r.conditions.len()
-                {
-                    r.conditions.remove(index);
+            text(move || {
+                if invalid() {
+                    "无效".to_owned()
+                } else {
+                    unit()
                 }
             })
-        }))
+            .w(px(70.0))
+            .number_of_lines(1)
+            .text_size(px(12.0))
+            .text_color(move || {
+                if invalid() {
+                    nsh_base::theme().destructive
+                } else {
+                    faint()
+                }
+            }),
+        )
+        .child(icon_button(
+            || Icon::Close,
+            16.0,
+            "删除条件",
+            muted_fg,
+            move || {
+                draft.update(|d| {
+                    if let Some(r) = d.rule.as_mut()
+                        && index < r.conditions.len()
+                    {
+                        r.conditions.remove(index);
+                    }
+                })
+            },
+        ))
 }
 
 /// 下拉弹层的最大高度：比右键菜单矮，弹窗里的下拉在常见窗口高度下
@@ -572,4 +784,3 @@ fn select(
         .child(scroll().max_h(px(SELECT_POPUP_H - 10.0)).child(items))
         .into_element()
 }
-

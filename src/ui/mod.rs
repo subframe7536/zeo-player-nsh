@@ -19,13 +19,13 @@ mod views;
 use std::rc::Rc;
 
 use nsh_core::desktop::TitleBarStyle;
+use nsh_core::element::ElementRef;
 use nsh_core::element::desktop::set_title_bar;
 use nsh_core::element::input;
-use nsh_core::element::ElementRef;
-use nsh_core::{TouchEvent, TouchPhase};
 use nsh_core::prelude::*;
+use nsh_core::{TouchEvent, TouchPhase};
 
-use icons::{icon, Icon};
+use icons::{Icon, icon};
 use theme::*;
 
 /// 侧栏的去处。
@@ -115,21 +115,20 @@ pub fn App() -> impl IntoElement {
         view()
             .flex_1()
             .child(
-                view()
-                    .flex_1()
-                    .flex_row()
-                    .child(sidebar(search))
-                    .child(
-                        view()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .child(view().h(move || px(top_inset())).flex_shrink_0())
-                            .child(view().flex_1().child(content))
-                            .child(bar::player_bar(open, queue_open)),
-                    ),
+                view().flex_1().flex_row().child(sidebar(search)).child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .child(view().h(move || px(top_inset())).flex_shrink_0())
+                        .child(view().flex_1().child(content))
+                        .child(bar::player_bar(open, queue_open)),
+                ),
             )
             .child(title_bar())
-            .child(when(move || full_open.get(), move || full::full_player(fade, close.clone())))
+            .child(when(
+                move || full_open.get(),
+                move || full::full_player(fade, close.clone()),
+            ))
     };
 
     let root = view()
@@ -142,8 +141,14 @@ pub fn App() -> impl IntoElement {
         // Space 等快捷键也被它吃掉）。
         .on_touch(move |e: &TouchEvent| search.outside_touch(e))
         .child(when(move || !s.hidden.get(), shell))
-        .child(when(move || s.close_prompt.get() && !s.hidden.get(), close_prompt))
-        .child(when(move || s.editor.with(Option::is_some), playlists::editor_dialog));
+        .child(when(
+            move || s.close_prompt.get() && !s.hidden.get(),
+            close_prompt,
+        ))
+        .child(when(
+            move || s.editor.with(Option::is_some),
+            playlists::editor_dialog,
+        ));
     // Windows 的窗口按钮在最上层（盖过全屏播放与弹窗，和系统按钮一样）。
     #[cfg(target_os = "windows")]
     let root = root.child(caption::buttons(move || full_open.get()));
@@ -161,7 +166,11 @@ struct SearchFocus {
 
 impl SearchFocus {
     fn new() -> Self {
-        SearchFocus { input: element_ref(), focused: signal(false), inside: signal(false) }
+        SearchFocus {
+            input: element_ref(),
+            focused: signal(false),
+            inside: signal(false),
+        }
     }
 
     fn outside_touch(self, e: &TouchEvent) {
@@ -209,7 +218,13 @@ fn title_bar() -> View {
                 .items_center()
                 .gap(px(8.0))
                 .child(icons::logo(18.0))
-                .child(text("Zeo Player").flex_shrink_0().text_size(px(14.0)).font_weight(FontWeight::SEMIBOLD).text_color(fg())),
+                .child(
+                    text("Zeo Player")
+                        .flex_shrink_0()
+                        .text_size(px(14.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(fg()),
+                ),
         )
 }
 
@@ -253,10 +268,19 @@ fn search_box(focus: SearchFocus) -> View {
                 .on_blur(move || focus.focused.set(false))
                 .on_change(move |t: &str| s.search.set(t.to_owned())),
         )
-        .child(when(move || !query_empty(), move || {
-            parts::icon_button(|| Icon::Close, 10.0, "清除搜索", faint, || store::store().search.set(String::new()))
+        .child(when(
+            move || !query_empty(),
+            move || {
+                parts::icon_button(
+                    || Icon::Close,
+                    10.0,
+                    "清除搜索",
+                    faint,
+                    || store::store().search.set(String::new()),
+                )
                 .flex_shrink_0()
-        }))
+            },
+        ))
 }
 
 fn page(nav: Signal<Nav>) -> AnyElement {
@@ -281,7 +305,7 @@ fn page(nav: Signal<Nav>) -> AnyElement {
 /// 遮罩时不关窗口。
 fn close_prompt() -> AnyElement {
     use crate::library::CloseAction;
-    use button::{text_button, Size, Variant};
+    use button::{Size, Variant, text_button};
     let s = store::store();
     let cancel = move || s.close_prompt.set(false);
     let content = form::dialog_content(440.0)
@@ -314,12 +338,17 @@ fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> View {
         .rounded(px(8.0))
         .role(AccessibilityRole::Button)
         .label(label)
-        .accessibility_state(move || AccessibilityState { selected: active(), ..AccessibilityState::default() })
+        .accessibility_state(move || AccessibilityState {
+            selected: active(),
+            ..AccessibilityState::default()
+        })
         .style_when(active, |s| s.bg(sidebar_accent()))
         .hover(|s| s.bg(sidebar_accent()))
         .active(|s| s.opacity(0.7))
         .on_press(move || nav.set(target))
-        .child(icon(glyph, 17.0, move || if active() { primary() } else { sidebar_fg() }))
+        .child(icon(glyph, 17.0, move || {
+            if active() { primary() } else { sidebar_fg() }
+        }))
         .child(
             text(label)
                 .flex_1()
@@ -356,7 +385,11 @@ fn sidebar(search: SearchFocus) -> View {
                 .px(px(10.0))
                 .gap(px(2.0))
                 .child(section_label("曲库"))
-                .children(LIBRARY.iter().map(|&(target, label, glyph)| nav_row(target, label, glyph))),
+                .children(
+                    LIBRARY
+                        .iter()
+                        .map(|&(target, label, glyph)| nav_row(target, label, glyph)),
+                ),
         )
         .child(playlists::sidebar_section())
         .child(
@@ -404,18 +437,27 @@ fn bench(open_full: Rc<dyn Fn()>) {
         let step = |name: &str| eprintln!("ZEO_PLAYER_BENCH step {name}");
         let wait = |s: u64| timer(std::time::Duration::from_secs(s));
         // 等扫描结束。
-        while store::store().library.with_untracked(|l| l.scanning) || store::store().tracks.with_untracked(|t| t.is_empty()) {
+        while store::store().library.with_untracked(|l| l.scanning)
+            || store::store().tracks.with_untracked(|t| t.is_empty())
+        {
             wait(1).await;
         }
         step("idle");
         wait(6).await;
-        for (target, name) in [(Nav::Artists, "artists"), (Nav::Genres, "genres"), (Nav::Albums, "albums")] {
+        for (target, name) in [
+            (Nav::Artists, "artists"),
+            (Nav::Genres, "genres"),
+            (Nav::Albums, "albums"),
+        ] {
             nav.set(target);
             step(name);
             wait(6).await;
         }
         // 专辑网格从头滚到底：每张封面都解码一遍（最坏情况）。
-        if let Some(grid) = BENCH_GRID.with(|g| g.get()).filter(|_| std::env::var_os("ZEO_PLAYER_BENCH_NO_SCROLL").is_none()) {
+        if let Some(grid) = BENCH_GRID
+            .with(|g| g.get())
+            .filter(|_| std::env::var_os("ZEO_PLAYER_BENCH_NO_SCROLL").is_none())
+        {
             for i in 0..120 {
                 grid.scroll_to_offset(px(i as f32 * 400.0), false);
                 timer(std::time::Duration::from_millis(150)).await;
@@ -448,7 +490,13 @@ fn bench_close() {
     use crate::library::CloseAction;
     spawn(async move {
         let s = store::store();
-        let step = |name: &str| eprintln!("ZEO_PLAYER_BENCH step {name} hidden={} prompt={}", crate::window::is_hidden(), s.close_prompt.get_untracked());
+        let step = |name: &str| {
+            eprintln!(
+                "ZEO_PLAYER_BENCH step {name} hidden={} prompt={}",
+                crate::window::is_hidden(),
+                s.close_prompt.get_untracked()
+            )
+        };
         let wait = |ms: u64| timer(std::time::Duration::from_millis(ms));
         while s.tracks.with_untracked(|t| t.is_empty()) {
             wait(500).await;
@@ -464,9 +512,17 @@ fn bench_close() {
         store::answer_close(CloseAction::Tray);
         wait(4000).await;
         step("tray");
-        eprintln!("ZEO_PLAYER_BENCH playing={} time={:.1}", s.playback.with_untracked(|p| p.playing), s.playback.with_untracked(|p| p.time));
+        eprintln!(
+            "ZEO_PLAYER_BENCH playing={} time={:.1}",
+            s.playback.with_untracked(|p| p.playing),
+            s.playback.with_untracked(|p| p.time)
+        );
         wait(6000).await;
-        eprintln!("ZEO_PLAYER_BENCH playing={} time={:.1}", s.playback.with_untracked(|p| p.playing), s.playback.with_untracked(|p| p.time));
+        eprintln!(
+            "ZEO_PLAYER_BENCH playing={} time={:.1}",
+            s.playback.with_untracked(|p| p.playing),
+            s.playback.with_untracked(|p| p.time)
+        );
         crate::window::simulate_close();
         wait(500).await;
         step("closed-again-while-hidden");

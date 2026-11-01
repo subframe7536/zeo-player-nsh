@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::audio::{EngineCmd, EngineHandle, Snapshot};
 use crate::db::LastPlayed;
-use crate::library::{library_store, TrackEntry};
-use crate::lyrics::{parse_lyric, LyricOptions, LyricsOutput};
+use crate::library::{TrackEntry, library_store};
+use crate::lyrics::{LyricOptions, LyricsOutput, parse_lyric};
 use crate::metadata::MetaCache;
 
 /// 播放器引擎句柄。
@@ -30,7 +30,10 @@ impl Player {
     // 不实现 Default：新建会启动线程与系统媒体会话，不该隐式发生。
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Player { engine: EngineHandle::start(), memory: Mutex::new(Memory::default()) }
+        Player {
+            engine: EngineHandle::start(),
+            memory: Mutex::new(Memory::default()),
+        }
     }
 
     /// 进程内唯一的播放器（UI 用）。
@@ -41,12 +44,19 @@ impl Player {
 
     /// 打开并播放 `path`；`queue` 为所在列表（上一首/下一首）。
     pub fn open(&self, path: String, queue: Vec<String>) {
-        self.engine.send(EngineCmd::Load { path: PathBuf::from(path), queue });
+        self.engine.send(EngineCmd::Load {
+            path: PathBuf::from(path),
+            queue,
+        });
     }
 
     /// 装载 `path` 但不播放，停在 `time` 秒。
     pub fn cue(&self, path: String, queue: Vec<String>, time: f64) {
-        self.engine.send(EngineCmd::Cue { path: PathBuf::from(path), queue, time });
+        self.engine.send(EngineCmd::Cue {
+            path: PathBuf::from(path),
+            queue,
+            time,
+        });
     }
 
     /// 恢复上次播放的曲目（暂停在上次的位置）：还没有曲目、文件还在时才做。
@@ -55,7 +65,9 @@ impl Player {
         if self.state().path.is_some() {
             return false;
         }
-        let Some((last, mut queue)) = crate::db::last_played() else { return false };
+        let Some((last, mut queue)) = crate::db::last_played() else {
+            return false;
+        };
         if !Path::new(&last.path).is_file() {
             return false;
         }
@@ -70,15 +82,27 @@ impl Player {
     /// 恢复。界面轮询时传入快照；换曲、播放 / 暂停、位置变了 2 秒以上或
     /// 队列变了才写（数据库写线程）。退出时不另外保存，最多丢 2 秒进度。
     pub fn remember(&self, snap: &Snapshot) {
-        let Some(path) = snap.path.clone() else { return };
+        let Some(path) = snap.path.clone() else {
+            return;
+        };
         if snap.is_loading {
             return;
         }
-        let last = LastPlayed { path, time: snap.current_time };
+        let last = LastPlayed {
+            path,
+            time: snap.current_time,
+        };
         let mut memory = self.memory.lock().unwrap();
         let moved = memory.playing != snap.is_playing
-            || memory.last.as_ref().is_none_or(|old| old.path != last.path || (old.time - last.time).abs() >= 2.0);
-        let queue = (!memory.queue.as_ref().is_some_and(|q| Arc::ptr_eq(q, &snap.queue))).then(|| snap.queue.clone());
+            || memory
+                .last
+                .as_ref()
+                .is_none_or(|old| old.path != last.path || (old.time - last.time).abs() >= 2.0);
+        let queue = (!memory
+            .queue
+            .as_ref()
+            .is_some_and(|q| Arc::ptr_eq(q, &snap.queue)))
+        .then(|| snap.queue.clone());
         if !moved && queue.is_none() {
             return;
         }
@@ -127,10 +151,10 @@ impl Player {
     /// 设置音量：立即写入共享状态（输出回调下一块就生效），再通知引擎线程。
     pub fn set_volume(&self, volume: f64) {
         let volume = volume.clamp(0.0, 1.0);
-        self.engine
-            .shared
-            .volume
-            .store((volume as f32).to_bits(), std::sync::atomic::Ordering::Relaxed);
+        self.engine.shared.volume.store(
+            (volume as f32).to_bits(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         self.engine.send(EngineCmd::SetVolume(volume));
     }
 
@@ -149,7 +173,10 @@ impl Player {
 
     /// 淡入淡出时长（毫秒；0 关闭），用于播放 / 暂停 / 跳转 / 切歌。
     pub fn set_fade_ms(&self, ms: u32) {
-        self.engine.shared.fade_ms.store(ms.min(5000), std::sync::atomic::Ordering::Relaxed);
+        self.engine
+            .shared
+            .fade_ms
+            .store(ms.min(5000), std::sync::atomic::Ordering::Relaxed);
     }
 
     /// 设置循环模式（队列按新模式重排，当前曲目不变）。
@@ -219,14 +246,26 @@ impl Meta {
         if let Some(lrc) = find_external_lrc(path)
             && let Ok(text) = std::fs::read_to_string(&lrc)
         {
-            return (parse_lyric(&text, LyricOptions::default()), LyricsSource::External);
+            return (
+                parse_lyric(&text, LyricOptions::default()),
+                LyricsSource::External,
+            );
         }
         if let Ok(meta) = MetaCache::global().get(path)
             && let Some(text) = meta.lyrics.as_deref()
         {
-            return (parse_lyric(text, LyricOptions::default()), LyricsSource::Embedded);
+            return (
+                parse_lyric(text, LyricOptions::default()),
+                LyricsSource::Embedded,
+            );
         }
-        (LyricsOutput { lines: Vec::new(), timed: false }, LyricsSource::None)
+        (
+            LyricsOutput {
+                lines: Vec::new(),
+                timed: false,
+            },
+            LyricsSource::None,
+        )
     }
 
     /// 曲目的外置歌词文件路径（同名 `.lrc`）。

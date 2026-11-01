@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::library::{unix_now, TrackEntry};
+use crate::library::{TrackEntry, unix_now};
 
 /// 一个歌单。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -43,8 +43,12 @@ impl Playlist {
     pub fn tracks(&self, library: &[TrackEntry]) -> Vec<TrackEntry> {
         match &self.kind {
             Kind::Manual { tracks } => {
-                let by_path: HashMap<&str, &TrackEntry> = library.iter().map(|t| (t.path.as_str(), t)).collect();
-                tracks.iter().filter_map(|p| by_path.get(p.as_str()).map(|t| (*t).clone())).collect()
+                let by_path: HashMap<&str, &TrackEntry> =
+                    library.iter().map(|t| (t.path.as_str(), t)).collect();
+                tracks
+                    .iter()
+                    .filter_map(|p| by_path.get(p.as_str()).map(|t| (*t).clone()))
+                    .collect()
             }
             Kind::Smart { rule } => rule.select(library, unix_now()),
         }
@@ -72,7 +76,12 @@ fn yes() -> bool {
 
 impl Default for Rule {
     fn default() -> Self {
-        Rule { match_all: true, conditions: vec![Condition::default()], sort: Sort::default(), limit: None }
+        Rule {
+            match_all: true,
+            conditions: vec![Condition::default()],
+            sort: Sort::default(),
+            limit: None,
+        }
     }
 }
 
@@ -87,7 +96,11 @@ pub struct Condition {
 
 impl Default for Condition {
     fn default() -> Self {
-        Condition { field: Field::Artist, op: Op::Contains, value: String::new() }
+        Condition {
+            field: Field::Artist,
+            op: Op::Contains,
+            value: String::new(),
+        }
     }
 }
 
@@ -167,17 +180,29 @@ impl Field {
     /// 分组名（选择器里的小标题）。
     pub fn group(self) -> &'static str {
         match self {
-            Field::Title | Field::Artist | Field::Album | Field::AlbumArtist | Field::Genre | Field::Year => "标签",
-            Field::Format | Field::Duration | Field::SampleRate | Field::BitRate | Field::Channels => "音频",
+            Field::Title
+            | Field::Artist
+            | Field::Album
+            | Field::AlbumArtist
+            | Field::Genre
+            | Field::Year => "标签",
+            Field::Format
+            | Field::Duration
+            | Field::SampleRate
+            | Field::BitRate
+            | Field::Channels => "音频",
             Field::Folder | Field::FileName | Field::Size | Field::Modified => "文件",
         }
     }
 
     pub fn kind(self) -> FieldType {
         match self {
-            Field::Year | Field::Duration | Field::SampleRate | Field::BitRate | Field::Channels | Field::Size => {
-                FieldType::Number
-            }
+            Field::Year
+            | Field::Duration
+            | Field::SampleRate
+            | Field::BitRate
+            | Field::Channels
+            | Field::Size => FieldType::Number,
             Field::Modified => FieldType::Date,
             _ => FieldType::Text,
         }
@@ -199,7 +224,14 @@ impl Field {
     pub fn ops(self) -> &'static [Op] {
         match self.kind() {
             FieldType::Text if self == Field::Format => &[Op::Is, Op::IsNot],
-            FieldType::Text => &[Op::Contains, Op::NotContains, Op::Is, Op::IsNot, Op::StartsWith, Op::EndsWith],
+            FieldType::Text => &[
+                Op::Contains,
+                Op::NotContains,
+                Op::Is,
+                Op::IsNot,
+                Op::StartsWith,
+                Op::EndsWith,
+            ],
             FieldType::Number => &[Op::Is, Op::IsNot, Op::Greater, Op::Less],
             FieldType::Date => &[Op::InLast, Op::NotInLast],
         }
@@ -214,7 +246,12 @@ impl Field {
             Field::AlbumArtist => vec![t.album_artist.clone()],
             Field::Genre => t.genres.clone(),
             Field::Format => vec![extension(&t.path)],
-            Field::Folder => vec![Path::new(&t.path).parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()],
+            Field::Folder => vec![
+                Path::new(&t.path)
+                    .parent()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+            ],
             Field::FileName => vec![t.file_name.clone()],
             _ => Vec::new(),
         }
@@ -316,7 +353,10 @@ impl Sort {
 }
 
 fn extension(path: &str) -> String {
-    Path::new(path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
+    Path::new(path)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
 }
 
 /// 解析数值条件的值：时长接受 `m:ss` / `h:mm:ss` 或秒数，其余为十进制数。
@@ -346,7 +386,12 @@ impl Condition {
         match self.field.kind() {
             FieldType::Text => {
                 let want = self.value.trim().to_lowercase();
-                let values: Vec<String> = self.field.texts(t).into_iter().map(|v| v.to_lowercase()).collect();
+                let values: Vec<String> = self
+                    .field
+                    .texts(t)
+                    .into_iter()
+                    .map(|v| v.to_lowercase())
+                    .collect();
                 let any = |f: &dyn Fn(&str) -> bool| values.iter().any(|v| f(v));
                 match self.op {
                     Op::Contains => any(&|v| v.contains(&want)),
@@ -359,7 +404,9 @@ impl Condition {
                 }
             }
             FieldType::Number => {
-                let (Some(want), Some(have)) = (parse_number(self.field, &self.value), self.field.number(t)) else {
+                let (Some(want), Some(have)) =
+                    (parse_number(self.field, &self.value), self.field.number(t))
+                else {
                     return false;
                 };
                 // 「是」按显示精度比较：时长差 1 秒内、其它差 0.5% 内都算相等
@@ -378,7 +425,9 @@ impl Condition {
                 }
             }
             FieldType::Date => {
-                let Some(days) = parse_number(self.field, &self.value) else { return false };
+                let Some(days) = parse_number(self.field, &self.value) else {
+                    return false;
+                };
                 let age = now.saturating_sub(t.modified) as f64 / 86_400.0;
                 match self.op {
                     Op::InLast => age <= days,
@@ -462,7 +511,10 @@ fn save_to(path: &Path, playlists: &[Playlist]) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let bytes = serde_json::to_vec_pretty(&File { playlists: playlists.to_vec() }).map_err(|e| e.to_string())?;
+    let bytes = serde_json::to_vec_pretty(&File {
+        playlists: playlists.to_vec(),
+    })
+    .map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
@@ -488,7 +540,12 @@ pub fn ensure_favorites(playlists: &mut Vec<Playlist>) {
         let id = next_id(playlists);
         playlists.insert(
             0,
-            Playlist { id, name: FAVORITES_NAME.to_owned(), kind: Kind::Manual { tracks: Vec::new() }, favorite: true },
+            Playlist {
+                id,
+                name: FAVORITES_NAME.to_owned(),
+                kind: Kind::Manual { tracks: Vec::new() },
+                favorite: true,
+            },
         );
     }
 }
@@ -497,11 +554,25 @@ pub fn ensure_favorites(playlists: &mut Vec<Playlist>) {
 mod tests {
     use super::*;
 
-    fn track(path: &str, artist: &str, genres: &[&str], year: Option<u32>, duration: f64) -> TrackEntry {
+    fn track(
+        path: &str,
+        artist: &str,
+        genres: &[&str],
+        year: Option<u32>,
+        duration: f64,
+    ) -> TrackEntry {
         TrackEntry {
             path: path.to_owned(),
-            file_name: Path::new(path).file_name().unwrap().to_string_lossy().into_owned(),
-            title: Path::new(path).file_stem().unwrap().to_string_lossy().into_owned(),
+            file_name: Path::new(path)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            title: Path::new(path)
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
             artist: artist.to_owned(),
             album: "Album".to_owned(),
             album_artist: String::new(),
@@ -522,14 +593,24 @@ mod tests {
 
     fn library() -> Vec<TrackEntry> {
         vec![
-            track("/m/rock/a.flac", "Alpha", &["Rock", "Indie"], Some(1999), 200.0),
+            track(
+                "/m/rock/a.flac",
+                "Alpha",
+                &["Rock", "Indie"],
+                Some(1999),
+                200.0,
+            ),
             track("/m/pop/b.mp3", "Beta", &["Pop"], Some(2015), 185.0),
             track("/m/rock/c.mp3", "Alpha; Gamma", &["Rock"], None, 400.0),
         ]
     }
 
     fn cond(field: Field, op: Op, value: &str) -> Condition {
-        Condition { field, op, value: value.to_owned() }
+        Condition {
+            field,
+            op,
+            value: value.to_owned(),
+        }
     }
 
     fn names(tracks: &[TrackEntry]) -> Vec<&str> {
@@ -539,39 +620,111 @@ mod tests {
     #[test]
     fn text_conditions_ignore_case_and_cover_every_genre() {
         let lib = library();
-        let rule = |c: Condition| Rule { conditions: vec![c], ..Rule::default() };
-        assert_eq!(names(&rule(cond(Field::Artist, Op::Contains, "alpha")).select(&lib, 0)), ["a", "c"]);
-        assert_eq!(names(&rule(cond(Field::Genre, Op::Is, "indie")).select(&lib, 0)), ["a"]);
-        assert_eq!(names(&rule(cond(Field::Genre, Op::IsNot, "rock")).select(&lib, 0)), ["b"]);
-        assert_eq!(names(&rule(cond(Field::Format, Op::Is, "MP3")).select(&lib, 0)), ["b", "c"]);
-        assert_eq!(names(&rule(cond(Field::Folder, Op::EndsWith, "/rock")).select(&lib, 0)), ["a", "c"]);
+        let rule = |c: Condition| Rule {
+            conditions: vec![c],
+            ..Rule::default()
+        };
+        assert_eq!(
+            names(&rule(cond(Field::Artist, Op::Contains, "alpha")).select(&lib, 0)),
+            ["a", "c"]
+        );
+        assert_eq!(
+            names(&rule(cond(Field::Genre, Op::Is, "indie")).select(&lib, 0)),
+            ["a"]
+        );
+        assert_eq!(
+            names(&rule(cond(Field::Genre, Op::IsNot, "rock")).select(&lib, 0)),
+            ["b"]
+        );
+        assert_eq!(
+            names(&rule(cond(Field::Format, Op::Is, "MP3")).select(&lib, 0)),
+            ["b", "c"]
+        );
+        assert_eq!(
+            names(&rule(cond(Field::Folder, Op::EndsWith, "/rock")).select(&lib, 0)),
+            ["a", "c"]
+        );
         // 值为空的条件不参与：匹配整个曲库。
-        assert_eq!(rule(cond(Field::Title, Op::Contains, "  ")).select(&lib, 0).len(), 3);
+        assert_eq!(
+            rule(cond(Field::Title, Op::Contains, "  "))
+                .select(&lib, 0)
+                .len(),
+            3
+        );
     }
 
     #[test]
     fn number_and_date_conditions_use_field_units() {
         let lib = library();
-        let rule = |c: Condition| Rule { conditions: vec![c], ..Rule::default() };
-        assert_eq!(names(&rule(cond(Field::Duration, Op::Greater, "5:00")).select(&lib, 0)), ["c"]);
-        assert_eq!(names(&rule(cond(Field::Duration, Op::Is, "3:05")).select(&lib, 0)), ["b"]);
-        assert_eq!(names(&rule(cond(Field::Year, Op::Less, "2000")).select(&lib, 0)), ["a"], "没有年份的不算");
-        assert_eq!(rule(cond(Field::SampleRate, Op::Is, "44.1")).select(&lib, 0).len(), 3);
-        assert_eq!(rule(cond(Field::Size, Op::Greater, "7.5")).select(&lib, 0).len(), 3);
+        let rule = |c: Condition| Rule {
+            conditions: vec![c],
+            ..Rule::default()
+        };
+        assert_eq!(
+            names(&rule(cond(Field::Duration, Op::Greater, "5:00")).select(&lib, 0)),
+            ["c"]
+        );
+        assert_eq!(
+            names(&rule(cond(Field::Duration, Op::Is, "3:05")).select(&lib, 0)),
+            ["b"]
+        );
+        assert_eq!(
+            names(&rule(cond(Field::Year, Op::Less, "2000")).select(&lib, 0)),
+            ["a"],
+            "没有年份的不算"
+        );
+        assert_eq!(
+            rule(cond(Field::SampleRate, Op::Is, "44.1"))
+                .select(&lib, 0)
+                .len(),
+            3
+        );
+        assert_eq!(
+            rule(cond(Field::Size, Op::Greater, "7.5"))
+                .select(&lib, 0)
+                .len(),
+            3
+        );
         assert!(parse_number(Field::Duration, "1:02:03") == Some(3723.0));
         let now = 1_000_000 + 3 * 86_400;
-        assert_eq!(rule(cond(Field::Modified, Op::InLast, "7")).select(&lib, now).len(), 3);
-        assert_eq!(rule(cond(Field::Modified, Op::InLast, "2")).select(&lib, now).len(), 0);
-        assert_eq!(rule(cond(Field::Modified, Op::NotInLast, "2")).select(&lib, now).len(), 3);
+        assert_eq!(
+            rule(cond(Field::Modified, Op::InLast, "7"))
+                .select(&lib, now)
+                .len(),
+            3
+        );
+        assert_eq!(
+            rule(cond(Field::Modified, Op::InLast, "2"))
+                .select(&lib, now)
+                .len(),
+            0
+        );
+        assert_eq!(
+            rule(cond(Field::Modified, Op::NotInLast, "2"))
+                .select(&lib, now)
+                .len(),
+            3
+        );
     }
 
     #[test]
     fn all_or_any_then_sort_and_limit() {
         let lib = library();
-        let conditions = vec![cond(Field::Genre, Op::Is, "rock"), cond(Field::Format, Op::Is, "mp3")];
-        let all = Rule { conditions: conditions.clone(), ..Rule::default() };
+        let conditions = vec![
+            cond(Field::Genre, Op::Is, "rock"),
+            cond(Field::Format, Op::Is, "mp3"),
+        ];
+        let all = Rule {
+            conditions: conditions.clone(),
+            ..Rule::default()
+        };
         assert_eq!(names(&all.select(&lib, 0)), ["c"]);
-        let any = Rule { match_all: false, conditions, sort: Sort::DurationDesc, limit: Some(2) };
+        let any = Rule {
+            match_all: false,
+            conditions,
+            sort: Sort::DurationDesc,
+            limit: Some(2),
+        };
         assert_eq!(names(&any.select(&lib, 0)), ["c", "a"]);
     }
 
@@ -581,7 +734,13 @@ mod tests {
         let list = Playlist {
             id: 1,
             name: "x".into(),
-            kind: Kind::Manual { tracks: vec!["/m/rock/c.mp3".into(), "/gone.mp3".into(), "/m/rock/a.flac".into()] },
+            kind: Kind::Manual {
+                tracks: vec![
+                    "/m/rock/c.mp3".into(),
+                    "/gone.mp3".into(),
+                    "/m/rock/a.flac".into(),
+                ],
+            },
             favorite: false,
         };
         assert_eq!(names(&list.tracks(&lib)), ["c", "a"]);
@@ -592,7 +751,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("zeo-player-playlists-{}", std::process::id()));
         let path = dir.join("playlists.json");
         let lists = vec![
-            Playlist { id: 1, name: "手动".into(), kind: Kind::Manual { tracks: vec!["/a.mp3".into()] }, favorite: false },
+            Playlist {
+                id: 1,
+                name: "手动".into(),
+                kind: Kind::Manual {
+                    tracks: vec!["/a.mp3".into()],
+                },
+                favorite: false,
+            },
             Playlist {
                 id: 2,
                 name: "智能".into(),
@@ -630,9 +796,13 @@ mod tests {
         // 已有的移到最前；多出来的降为普通歌单。
         let mut lists = vec![manual(1, false), manual(2, true), manual(3, true)];
         ensure_favorites(&mut lists);
-        assert_eq!(lists.iter().map(|p| (p.id, p.favorite)).collect::<Vec<_>>(), [(2, true), (1, false), (3, false)]);
+        assert_eq!(
+            lists.iter().map(|p| (p.id, p.favorite)).collect::<Vec<_>>(),
+            [(2, true), (1, false), (3, false)]
+        );
         // 旧文件里没有 favorite 字段也能读；普通歌单不写这个字段。
-        let old: Playlist = serde_json::from_str(r#"{"id":1,"name":"x","kind":"manual","tracks":[]}"#).unwrap();
+        let old: Playlist =
+            serde_json::from_str(r#"{"id":1,"name":"x","kind":"manual","tracks":[]}"#).unwrap();
         assert!(!old.favorite);
         assert!(!serde_json::to_string(&old).unwrap().contains("favorite"));
     }

@@ -3,13 +3,13 @@
 //! 复用标签缓存，只有变了的文件会重新读取。
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
+use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
-use crate::library::{library_store, AUDIO_EXTENSIONS};
+use crate::library::{AUDIO_EXTENSIONS, library_store};
 
 /// 最后一次变化后等多久再扫描。
 pub const QUIET: Duration = Duration::from_millis(1500);
@@ -35,7 +35,13 @@ struct State {
 
 fn state() -> &'static Mutex<State> {
     static STATE: OnceLock<Mutex<State>> = OnceLock::new();
-    STATE.get_or_init(|| Mutex::new(State { watcher: None, roots: Vec::new(), status: WatchStatus::default() }))
+    STATE.get_or_init(|| {
+        Mutex::new(State {
+            watcher: None,
+            roots: Vec::new(),
+            status: WatchStatus::default(),
+        })
+    })
 }
 
 /// 变化事件送往去抖线程。
@@ -79,11 +85,12 @@ fn events() -> &'static Mutex<Sender<usize>> {
     })
 }
 
-
 /// 这个路径的变化需要重新扫描吗：音频文件，或没有扩展名的路径（文件夹
 /// 的增删改名）；隐藏文件（`.DS_Store`、临时文件）不算。
 pub fn relevant(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return false };
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
     if name.starts_with('.') {
         return false;
     }
@@ -107,7 +114,11 @@ fn on_event(result: notify::Result<notify::Event>) {
 /// 按当前设置开关监视、更新监视的根目录。
 pub fn sync() {
     let lib = library_store();
-    let want: Vec<String> = if lib.watching() { lib.roots() } else { Vec::new() };
+    let want: Vec<String> = if lib.watching() {
+        lib.roots()
+    } else {
+        Vec::new()
+    };
     let mut st = state().lock().unwrap();
     if want.is_empty() {
         st.watcher = None;
@@ -189,7 +200,10 @@ mod tests {
         let wait = |want: usize| {
             let deadline = Instant::now() + Duration::from_secs(10);
             while Instant::now() < deadline {
-                if !lib.is_scanning() && lib.tracks().len() == want && status().last_rescan.is_some() {
+                if !lib.is_scanning()
+                    && lib.tracks().len() == want
+                    && status().last_rescan.is_some()
+                {
                     return true;
                 }
                 std::thread::sleep(Duration::from_millis(100));
@@ -203,13 +217,22 @@ mod tests {
         assert!(wait(2), "新增后自动扫描：{} 首", lib.tracks().len());
         // 内容变化：重写文件，修改时间变 → 重新读取
         // （std::fs::copy 保留源文件的修改时间，正好验证指纹不只看 mtime。）
-        let before = lib.tracks().iter().find(|t| t.path.ends_with("one.flac")).unwrap().stamp;
+        let before = lib
+            .tracks()
+            .iter()
+            .find(|t| t.path.ends_with("one.flac"))
+            .unwrap()
+            .stamp;
         std::fs::copy(&sample, root.join("one.flac")).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut after = before;
         while Instant::now() < deadline && after == before {
             std::thread::sleep(Duration::from_millis(100));
-            after = lib.tracks().iter().find(|t| t.path.ends_with("one.flac")).map_or(before, |t| t.stamp);
+            after = lib
+                .tracks()
+                .iter()
+                .find(|t| t.path.ends_with("one.flac"))
+                .map_or(before, |t| t.stamp);
         }
         assert_ne!(after, before, "内容变化后重新扫描");
         // 删除文件夹

@@ -33,7 +33,12 @@ impl Source {
             hint.with_extension(&ext.to_string_lossy());
         }
         let format = symphonia::default::get_probe()
-            .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
+            .probe(
+                &hint,
+                mss,
+                FormatOptions::default(),
+                MetadataOptions::default(),
+            )
             .map_err(|e| format!("不支持的格式: {e}"))?;
         let track = format
             .default_track(TrackType::Audio)
@@ -49,7 +54,14 @@ impl Source {
             .map_err(|e| format!("解码器创建失败: {e}"))?;
         let sample_rate = params.sample_rate.unwrap_or(44_100).max(1);
         let channels = params.channels.map(|c| c.count()).unwrap_or(2).max(1);
-        Ok(Source { format, decoder, track_id: track.id, sample_rate, channels, scratch: Vec::new() })
+        Ok(Source {
+            format,
+            decoder,
+            track_id: track.id,
+            sample_rate,
+            channels,
+            scratch: Vec::new(),
+        })
     }
 
     /// 解码下一块：返回交错 f32 样本（帧数 = len / channels）。`None` 表示结束。
@@ -104,7 +116,13 @@ impl Source {
             .ok_or_else(|| "seek 时间非法".to_owned())?;
         let seeked = self
             .format
-            .seek(SeekMode::Accurate, SeekTo::Time { time, track_id: Some(self.track_id) })
+            .seek(
+                SeekMode::Accurate,
+                SeekTo::Time {
+                    time,
+                    track_id: Some(self.track_id),
+                },
+            )
             .map_err(|e| format!("seek 失败: {e}"))?;
         self.decoder.reset();
         // actual_ts 是轨道时间基单位；用 fmt 的时间基换回秒。

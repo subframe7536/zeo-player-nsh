@@ -6,7 +6,7 @@ use nsh_base::{ButtonElement, button};
 use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
-use super::icons::{icon_dyn, Icon};
+use super::icons::{Icon, icon_dyn};
 use super::theme::*;
 
 /// shadcn 的 `variant`。
@@ -58,12 +58,19 @@ impl Size {
     }
 
     fn is_icon(self) -> bool {
-        matches!(self, Size::IconXs | Size::IconSm | Size::Icon | Size::IconLg)
+        matches!(
+            self,
+            Size::IconXs | Size::IconSm | Size::Icon | Size::IconLg
+        )
     }
 
     /// 图标边长（shadcn 的 `[&_svg]:size-4`，`xs` 为 `size-3`）。
     pub fn glyph(self) -> f32 {
-        if matches!(self, Size::Xs | Size::IconXs) { 12.0 } else { 16.0 }
+        if matches!(self, Size::Xs | Size::IconXs) {
+            12.0
+        } else {
+            16.0
+        }
     }
 
     fn text_size(self) -> f32 {
@@ -85,7 +92,8 @@ pub fn foreground(variant: Variant) -> AdaptiveColor {
 /// 只有外形的按钮（尺寸、底色、状态样式），内容由调用方给。
 pub fn shell(variant: Variant, size: Size) -> ButtonElement {
     let t = nsh_base::theme();
-    let (ring, primary, secondary, destructive, outline) = (t.ring, t.primary, t.secondary, t.destructive, t.border);
+    let (ring, primary, secondary, destructive, outline) =
+        (t.ring, t.primary, t.secondary, t.destructive, t.border);
     let h = size.height();
     let b = button()
         .flex_row()
@@ -111,7 +119,9 @@ pub fn shell(variant: Variant, size: Size) -> ButtonElement {
     };
     match variant {
         Variant::Default => b.bg(primary).hover(move |st| st.bg(primary.opacity(0.9))),
-        Variant::Secondary => b.bg(secondary).hover(move |st| st.bg(secondary.opacity(0.8))),
+        Variant::Secondary => b
+            .bg(secondary)
+            .hover(move |st| st.bg(secondary.opacity(0.8))),
         Variant::Outline => b
             .border_1()
             .border_color(outline)
@@ -119,7 +129,9 @@ pub fn shell(variant: Variant, size: Size) -> ButtonElement {
             .shadow_xs()
             .hover(|st| st.bg(hover())),
         Variant::Ghost => b.hover(|st| st.bg(hover())),
-        Variant::Destructive => b.bg(destructive).hover(move |st| st.bg(destructive.opacity(0.9))),
+        Variant::Destructive => b
+            .bg(destructive)
+            .hover(move |st| st.bg(destructive.opacity(0.9))),
     }
     .active(|st| st.opacity(0.8))
 }
@@ -138,7 +150,12 @@ pub fn text_button(
         .accessibility_label(label.clone())
         .on_press(move |_: &()| on_press())
         .child(glyph.map(|g| icon_dyn(move || g, size.glyph(), fg)))
-        .child(text(label).text_size(px(size.text_size())).font_weight(FontWeight::MEDIUM).text_color(fg()))
+        .child(
+            text(label)
+                .text_size(px(size.text_size()))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(fg()),
+        )
 }
 
 /// 给按钮加提示（nsh-base `tooltip`，桌面上悬停 500 ms 后出现在上方）。
@@ -160,14 +177,14 @@ pub fn tipped(content: impl IntoElement, tip: impl Into<SharedString>) -> View {
 }
 
 /// 全屏播放页（深色背景上的白色图标）的 ghost 按钮：悬停为白色 8%，
-/// 圆形；`side` 为边长。
+/// 与其它按钮一样是 [`RADIUS_MD`] 圆角的方形；`side` 为边长。
 pub fn on_dark(side: f32) -> ButtonElement {
     button()
         .size(px(side))
         .flex_shrink_0()
         .items_center()
         .justify_center()
-        .rounded_full()
+        .rounded(px(RADIUS_MD))
         .transition_colors()
         .duration(150.0)
         .hover(|st| st.bg(white_a(0.08)))

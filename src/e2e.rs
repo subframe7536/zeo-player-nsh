@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::engine::{Library, Meta, Player};
 use crate::library::library_store;
-use crate::lyrics::{parse_lyric, LyricOptions};
+use crate::lyrics::{LyricOptions, parse_lyric};
 use crate::metadata::MetaCache;
 use crate::waveform::waveform;
 
@@ -41,21 +41,36 @@ fn end_to_end_playback() {
 
     // 1. 曲库：多根目录 + 扫描 + 流派拆分
     let library = Library::new();
-    let roots = library.add_root(root.to_string_lossy().into_owned()).expect("add_root");
+    let roots = library
+        .add_root(root.to_string_lossy().into_owned())
+        .expect("add_root");
     assert_eq!(roots.len(), 1);
     let count = library_store().scan();
     assert_eq!(count, 6, "应扫到 6 个音频文件（mp3/flac/wav 含子目录）");
     let tracks = library.tracks();
-    let flac = tracks.iter().find(|t| t.path.ends_with("sine.flac")).expect("sine.flac");
+    let flac = tracks
+        .iter()
+        .find(|t| t.path.ends_with("sine.flac"))
+        .expect("sine.flac");
     assert_eq!(flac.title, "测试歌曲");
     assert_eq!(flac.artist, "测试歌手 A; 测试歌手 B");
     assert_eq!(flac.album, "测试专辑");
-    assert_eq!(flac.genres, vec!["Rock", "Indie", "Dream Pop"], "genre 按 ; 拆分并 trim");
+    assert_eq!(
+        flac.genres,
+        vec!["Rock", "Indie", "Dream Pop"],
+        "genre 按 ; 拆分并 trim"
+    );
     assert_eq!(flac.track, Some(1));
-    assert!(flac.duration > 1.9 && flac.duration < 2.1, "flac 时长 ≈2s，实际 {}", flac.duration);
+    assert!(
+        flac.duration > 1.9 && flac.duration < 2.1,
+        "flac 时长 ≈2s，实际 {}",
+        flac.duration
+    );
 
     // 2. 元数据缓存
-    let meta = MetaCache::global().get(Path::new(&flac.path)).expect("meta");
+    let meta = MetaCache::global()
+        .get(Path::new(&flac.path))
+        .expect("meta");
     assert!(meta.sample_rate == Some(44_100));
     assert_eq!(meta.codec.as_deref(), Some("FLAC"));
 
@@ -72,7 +87,10 @@ fn end_to_end_playback() {
     assert_eq!(out.lines[1].trans_content.as_deref(), Some("First line"));
     assert_eq!(out.lines[2].raw_content, "");
     assert_eq!(out.lines[3].raw_content, "间奏后的句子");
-    assert_eq!(out.lines[4].raw_content, "最后一句 呀", "卡拉 OK 尖括号碎片被清理");
+    assert_eq!(
+        out.lines[4].raw_content, "最后一句 呀",
+        "卡拉 OK 尖括号碎片被清理"
+    );
 
     // 4. 波形：56 根、归一化
     let bars = waveform(&root.join("sine.wav")).expect("waveform");
@@ -80,9 +98,14 @@ fn end_to_end_playback() {
     // 音量恒定的正弦波：波形平、且偏高。2 秒只有约 2000 块、每块约 44 个
     // 样本，不到 440 Hz 的一个周期，块 RMS 随相位起伏；95 分位取到偏高的块，
     // 每根再平均约 40 块，于是稳定在 0.8 多一点而不是 0.9（参考实现同样如此）。
-    assert!(bars.iter().all(|b| (0.1..=0.9 + 1e-9).contains(b)), "{bars:?}");
+    assert!(
+        bars.iter().all(|b| (0.1..=0.9 + 1e-9).contains(b)),
+        "{bars:?}"
+    );
     let body = &bars[..bars.len() - 1]; // 最后一根可能落在不满的块上
-    let (lo, hi) = body.iter().fold((1.0_f64, 0.0_f64), |(lo, hi), b| (lo.min(*b), hi.max(*b)));
+    let (lo, hi) = body
+        .iter()
+        .fold((1.0_f64, 0.0_f64), |(lo, hi), b| (lo.min(*b), hi.max(*b)));
     assert!(lo > 0.75 && hi - lo < 0.02, "平且高：{lo:.3}..{hi:.3}");
 
     // 5. 播放通路：mp3 打开 → 进度推进 → 暂停 → seek → 队列切曲 → flac seek
@@ -96,7 +119,8 @@ fn end_to_end_playback() {
     let player = Player::new();
     player.open(mp3.to_string_lossy().into_owned(), queue);
     assert!(
-        wait_for(3000, || player.state().is_ready && player.state().is_playing),
+        wait_for(3000, || player.state().is_ready
+            && player.state().is_playing),
         "mp3 装载并开始播放: {:?}",
         player.state().error
     );
@@ -117,7 +141,8 @@ fn end_to_end_playback() {
 
     player.next();
     assert!(
-        wait_for(3000, || player.state().path.as_deref() == Some(wav.to_str().unwrap())),
+        wait_for(3000, || player.state().path.as_deref()
+            == Some(wav.to_str().unwrap())),
         "下一首切到 wav: {:?}",
         player.state().path
     );
@@ -125,7 +150,8 @@ fn end_to_end_playback() {
 
     player.next(); // 到 flac（44.1k → 设备重采样路径）
     assert!(
-        wait_for(3000, || player.state().path.as_deref() == Some(flac.path.as_str())),
+        wait_for(3000, || player.state().path.as_deref()
+            == Some(flac.path.as_str())),
         "下一首切到 flac: {:?}",
         player.state().path
     );
@@ -140,7 +166,8 @@ fn end_to_end_playback() {
     );
     player.previous();
     assert!(
-        wait_for(3000, || player.state().path.as_deref() == Some(wav.to_str().unwrap())),
+        wait_for(3000, || player.state().path.as_deref()
+            == Some(wav.to_str().unwrap())),
         "上一首回到 wav: {:?}",
         player.state().path
     );

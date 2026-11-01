@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::metadata::{CacheEntry, MetaInfo};
@@ -112,14 +112,19 @@ pub fn later(f: impl FnOnce() + Send + 'static) {
     static WRITER: OnceLock<Mutex<std::sync::mpsc::Sender<Job>>> = OnceLock::new();
     let tx = WRITER.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel::<Job>();
-        let _ = std::thread::Builder::new().name("zeo-player-db".into()).spawn(move || {
-            for job in rx {
-                job();
-            }
-        });
+        let _ = std::thread::Builder::new()
+            .name("zeo-player-db".into())
+            .spawn(move || {
+                for job in rx {
+                    job();
+                }
+            });
         Mutex::new(tx)
     });
-    let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(Box::new(f));
+    let _ = tx
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .send(Box::new(f));
 }
 
 fn list(raw: String) -> Vec<String> {
@@ -227,7 +232,10 @@ pub fn retain_meta(keep: &HashSet<String>) {
         let gone: Vec<String> = {
             let mut stmt = tx.prepare("SELECT path FROM tracks")?;
             let paths = stmt.query_map([], |r| r.get::<_, String>(0))?;
-            paths.filter_map(Result::ok).filter(|p| !keep.contains(p)).collect()
+            paths
+                .filter_map(Result::ok)
+                .filter(|p| !keep.contains(p))
+                .collect()
         };
         {
             let mut delete = tx.prepare("DELETE FROM tracks WHERE path = ?1")?;
@@ -241,7 +249,9 @@ pub fn retain_meta(keep: &HashSet<String>) {
 
 /// 删掉全部元数据（重建曲库）。
 pub fn clear_meta() {
-    with("清空元数据", |conn| conn.execute("DELETE FROM tracks", []).map(|_| ()));
+    with("清空元数据", |conn| {
+        conn.execute("DELETE FROM tracks", []).map(|_| ())
+    });
 }
 
 // --- 播放状态 -----------------------------------------------------------------
@@ -259,14 +269,21 @@ const LAST_QUEUE: &str = "last_queue";
 
 fn get_state(key: &str) -> Option<String> {
     with("读取播放状态", |conn| {
-        conn.query_row("SELECT value FROM state WHERE key = ?1", [key], |r| r.get(0)).optional()
+        conn.query_row("SELECT value FROM state WHERE key = ?1", [key], |r| {
+            r.get(0)
+        })
+        .optional()
     })
     .flatten()
 }
 
 fn set_state(key: &str, value: &str) {
     with("写入播放状态", |conn| {
-        conn.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?1, ?2)", params![key, value]).map(|_| ())
+        conn.execute(
+            "INSERT OR REPLACE INTO state (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )
+        .map(|_| ())
     });
 }
 
