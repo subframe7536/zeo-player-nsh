@@ -228,6 +228,17 @@ fn playlists_manual_and_smart() {
         .or_else(|_| app.wait_for("新建智能歌单"))
         .unwrap();
     app.wait_for("text:/^匹配 \\d+ 首$/").unwrap();
+    if corpus {
+        // 字段换「标签」后值变成选择器：列出曲库的标签，选 Indie 命中 1 首。
+        app.press("label:字段").unwrap();
+        app.press("role:menuitem[标签]").unwrap();
+        app.press("label:值").unwrap();
+        app.press("role:menuitem[Indie]").unwrap();
+        app.wait_for("匹配 1 首").unwrap();
+        app.press("label:字段").unwrap();
+        app.press("role:menuitem[歌手]").unwrap();
+        app.clear("label:值").unwrap();
+    }
     app.type_text("label:值", "不存在的歌手-zz").unwrap();
     app.wait_for("匹配 0 首").unwrap();
     app.press("label:创建").unwrap();

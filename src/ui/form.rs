@@ -37,15 +37,16 @@ pub fn input_field(small: bool) -> Input {
 }
 
 /// shadcn SelectTrigger（`size="sm"`）：`h-8 rounded-md border border-input
-/// px-3 text-sm shadow-xs`，右侧 16 pt chevron 半透明。
+/// px-3 text-sm shadow-xs`，右侧 16 pt chevron 半透明。`width` 不大于 0
+/// 时随父容器伸缩（最小 80）；值为空时显示浅色的 `placeholder`。
 pub fn select_trigger(
-    current: impl Fn() -> String + 'static,
+    current: impl Fn() -> String + Copy + 'static,
     label: &'static str,
     width: f32,
+    placeholder: &'static str,
 ) -> View {
     let input_c = nsh_base::theme().input;
-    view()
-        .w(px(width))
+    let trigger = view()
         .h(px(32.0))
         .flex_row()
         .items_center()
@@ -61,17 +62,29 @@ pub fn select_trigger(
         .role(AccessibilityRole::Button)
         .label(label)
         .child(
-            text(current)
-                .flex_1()
-                .number_of_lines(1)
-                .text_size(px(14.0))
-                .text_color(fg()),
+            text(move || {
+                let value = current();
+                if value.is_empty() {
+                    placeholder.to_owned()
+                } else {
+                    value
+                }
+            })
+            .flex_1()
+            .number_of_lines(1)
+            .text_size(px(14.0))
+            .text_color(move || if current().is_empty() { faint() } else { fg() }),
         )
         .child(
             view()
                 .opacity(0.5)
                 .child(icon(Icon::ChevronDown, 16.0, muted_fg)),
-        )
+        );
+    if width > 0.0 {
+        trigger.w(px(width))
+    } else {
+        trigger.flex_1().min_w(px(80.0))
+    }
 }
 
 /// shadcn DialogContent：`rounded-lg border bg-background p-6 gap-4

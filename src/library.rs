@@ -170,15 +170,20 @@ pub struct LibraryStore {
     current: std::sync::Mutex<String>,
 }
 
-/// 应用数据目录（`ZEO_PLAYER_DATA_DIR` 可覆盖）。
+/// 应用数据目录（`ZEO_PLAYER_DATA_DIR` 可覆盖；开发构建写到仓库的
+/// `.nsh/dev-data`，不碰系统目录；正式包才用系统数据目录）。
 pub fn data_dir() -> PathBuf {
-    std::env::var_os("ZEO_PLAYER_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::data_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("ZeoPlayer")
-        })
+    if let Some(dir) = std::env::var_os("ZEO_PLAYER_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
+    if cfg!(debug_assertions) {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".nsh")
+            .join("dev-data");
+    }
+    dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("ZeoPlayer")
 }
 
 pub fn library_store() -> &'static LibraryStore {

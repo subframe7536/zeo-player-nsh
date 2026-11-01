@@ -1,4 +1,4 @@
-//! 歌单：手动歌单（按路径记下曲目与顺序）与智能歌单（按标签、音频参数、
+//! 歌单：手动歌单（按路径记下曲目与顺序）与智能歌单（按元数据、标签、音频参数、
 //! 文件属性的条件从曲库里自动聚合）。持久化到数据目录的 `playlists.json`。
 
 use std::collections::HashMap;
@@ -108,12 +108,14 @@ impl Default for Condition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Field {
-    // 标签
+    // 元数据
     Title,
     Artist,
     Album,
     AlbumArtist,
-    Genre,
+    /// 标签：genre 按设置的分隔符拆开的值。文件里沿用旧名 `genre`。
+    #[serde(rename = "genre")]
+    Tag,
     Year,
     // 音频
     Format,
@@ -138,13 +140,13 @@ pub enum FieldType {
 }
 
 impl Field {
-    /// 选择器里的顺序，按组：标签、音频、文件。
+    /// 选择器里的顺序，按组：元数据、音频、文件。
     pub const ALL: [Field; 15] = [
         Field::Title,
         Field::Artist,
         Field::Album,
         Field::AlbumArtist,
-        Field::Genre,
+        Field::Tag,
         Field::Year,
         Field::Format,
         Field::Duration,
@@ -163,7 +165,7 @@ impl Field {
             Field::Artist => "歌手",
             Field::Album => "专辑",
             Field::AlbumArtist => "专辑歌手",
-            Field::Genre => "流派",
+            Field::Tag => "标签",
             Field::Year => "年份",
             Field::Format => "格式",
             Field::Duration => "时长",
@@ -184,8 +186,8 @@ impl Field {
             | Field::Artist
             | Field::Album
             | Field::AlbumArtist
-            | Field::Genre
-            | Field::Year => "标签",
+            | Field::Tag
+            | Field::Year => "元数据",
             Field::Format
             | Field::Duration
             | Field::SampleRate
@@ -223,7 +225,10 @@ impl Field {
     /// 可用的比较方式（第一个为默认）。
     pub fn ops(self) -> &'static [Op] {
         match self.kind() {
-            FieldType::Text if self == Field::Format => &[Op::Is, Op::IsNot],
+            // 格式与标签的值都从列表里选，只有「是 / 不是」有意义。
+            FieldType::Text if matches!(self, Field::Format | Field::Tag) => {
+                &[Op::Is, Op::IsNot]
+            }
             FieldType::Text => &[
                 Op::Contains,
                 Op::NotContains,
@@ -237,14 +242,14 @@ impl Field {
         }
     }
 
-    /// 文本字段的取值（流派可能有多个）。
+    /// 文本字段的取值（标签可能有多个）。
     fn texts(self, t: &TrackEntry) -> Vec<String> {
         match self {
             Field::Title => vec![t.title.clone()],
             Field::Artist => vec![t.artist.clone()],
             Field::Album => vec![t.album.clone()],
             Field::AlbumArtist => vec![t.album_artist.clone()],
-            Field::Genre => t.genres.clone(),
+            Field::Tag => t.genres.clone(),
             Field::Format => vec![extension(&t.path)],
             Field::Folder => vec![
                 Path::new(&t.path)
@@ -618,7 +623,7 @@ mod tests {
     }
 
     #[test]
-    fn text_conditions_ignore_case_and_cover_every_genre() {
+    fn text_conditions_ignore_case_and_cover_every_tag() {
         let lib = library();
         let rule = |c: Condition| Rule {
             conditions: vec![c],
@@ -629,11 +634,11 @@ mod tests {
             ["a", "c"]
         );
         assert_eq!(
-            names(&rule(cond(Field::Genre, Op::Is, "indie")).select(&lib, 0)),
+            names(&rule(cond(Field::Tag, Op::Is, "indie")).select(&lib, 0)),
             ["a"]
         );
         assert_eq!(
-            names(&rule(cond(Field::Genre, Op::IsNot, "rock")).select(&lib, 0)),
+            names(&rule(cond(Field::Tag, Op::IsNot, "rock")).select(&lib, 0)),
             ["b"]
         );
         assert_eq!(
@@ -711,7 +716,7 @@ mod tests {
     fn all_or_any_then_sort_and_limit() {
         let lib = library();
         let conditions = vec![
-            cond(Field::Genre, Op::Is, "rock"),
+            cond(Field::Tag, Op::Is, "rock"),
             cond(Field::Format, Op::Is, "mp3"),
         ];
         let all = Rule {
@@ -778,6 +783,15 @@ mod tests {
         assert_eq!(next_id(&lists), 3);
         assert!(load_from(&dir.join("missing.json")).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn genre_field_reads_as_tag() {
+        // 旧版文件里字段叫 "genre"，读进来是标签；写回去仍是 "genre"。
+        let c: Condition =
+            serde_json::from_str(r#"{"field":"genre","op":"is","value":"rock"}"#).unwrap();
+        assert_eq!(c.field, Field::Tag);
+        assert!(serde_json::to_string(&c).unwrap().contains(r#""field":"genre""#));
     }
 
     #[test]

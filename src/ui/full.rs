@@ -811,27 +811,7 @@ fn lyrics_scroller() -> View {
     // 过渡不包括滤镜，只能自己推进。
     let clear = signal(0.0_f32);
     let clear_task: Rc<RefCell<Option<Spawned<()>>>> = Rc::default();
-    let fade_blur = Rc::new(move |to: f32| {
-        if let Some(task) = clear_task.borrow_mut().take() {
-            task.cancel();
-        }
-        if untracked(reduce_motion) {
-            clear.set(to);
-            return;
-        }
-        let from = clear.get_untracked();
-        let start = std::time::Instant::now();
-        *clear_task.borrow_mut() = Some(spawn(async move {
-            loop {
-                next_frame().await;
-                let t = (start.elapsed().as_secs_f32() * 1000.0 / BLUR_FADE_MS).min(1.0);
-                clear.set(from + (to - from) * ease_out_cubic(t));
-                if t >= 1.0 {
-                    break;
-                }
-            }
-        }));
-    });
+    let fade_blur = Rc::new(move |to: f32| drive(clear, &clear_task, to, BLUR_FADE_MS));
     let line_ys: Rc<RefCell<Vec<f32>>> = Rc::default();
     // 滚动位置与各行的位置、高度，用来让靠近上下边缘的行淡出（见 `edge_fade`）。
     let scroll_y = signal(0.0_f32);
@@ -1047,9 +1027,14 @@ fn lyrics_scroller() -> View {
                     } else {
                         FontWeight::BOLD
                     })
-                    .text_color(move || original_color(timed, distance() == 0.0))
-                    .transition_colors()
-                    .duration(300.0),
+                    .text_color(white_a(1.0))
+                    // 高亮换行的明暗渐变：文字颜色不在样式过渡里，画成纯白、
+                    // 用不透明度走原生过渡（未高亮 IDLE_ALPHA、高亮
+                    // ACTIVE_ALPHA）；时长与缓动同程序滚动。
+                    .opacity(move || original_opacity(timed, distance() == 0.0))
+                    .transition_opacity()
+                    .ease_out()
+                    .duration(SCROLL_MS),
             )
             .child(line.trans_content.clone().map(|trans| {
                 text(trans)
@@ -1260,9 +1245,12 @@ const IDLE_ALPHA: f32 = 0.3;
 /// 高亮原文的颜色。
 const ACTIVE_ALPHA: f32 = 0.92;
 /// 译文的颜色，任何时候都不变，位于高亮与未高亮原文之间。
-const TRANSLATION_ALPHA: f32 = 0.45;
+const TRANSLATION_ALPHA: f32 = 0.5;
 /// 鼠标移入 / 移出歌词区时，模糊去掉 / 恢复的过渡时长。
 const BLUR_FADE_MS: f32 = 300.0;
+/// 高亮过渡的时长：与程序滚动一致（NSH 0.3.0 滚动动画 `ANIMATION` 为
+/// 300 ms）。
+const SCROLL_MS: f32 = 300.0;
 /// 歌词区上下的留白：滚动的歌词不进入标题栏（窗口按钮、收起按钮那一行），
 /// 也不贴着窗口底边。
 const LYRICS_BOTTOM: f32 = 32.0;
@@ -1271,13 +1259,33 @@ fn ease_out_cubic(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
 }
 
-/// 原文的颜色：高亮行比译文亮，其余行比译文淡。无时间轴的歌词
-/// 没有高亮，按高亮行显示，便于阅读。
-fn original_color(timed: bool, active: bool) -> AdaptiveColor {
-    white_a(original_alpha(timed, active))
+/// 逐帧把 `value` 推到 `to`（`ms` 毫秒，ease-out）：顶替进行中的上一次，
+/// 「减弱动态效果」时直接到位。
+fn drive(value: Signal<f32>, task: &Rc<RefCell<Option<Spawned<()>>>>, to: f32, ms: f32) {
+    if let Some(t) = task.borrow_mut().take() {
+        t.cancel();
+    }
+    let from = value.get_untracked();
+    if untracked(reduce_motion) || (to - from).abs() < 1e-3 {
+        value.set(to);
+        return;
+    }
+    let start = std::time::Instant::now();
+    *task.borrow_mut() = Some(spawn(async move {
+        loop {
+            next_frame().await;
+            let t = (start.elapsed().as_secs_f32() * 1000.0 / ms).min(1.0);
+            value.set(from + (to - from) * ease_out_cubic(t));
+            if t >= 1.0 {
+                break;
+            }
+        }
+    }));
 }
 
-fn original_alpha(timed: bool, active: bool) -> f32 {
+/// 原文的不透明度：画成纯白，高亮行 [`ACTIVE_ALPHA`]、其余
+/// [`IDLE_ALPHA`]。无时间轴的歌词没有高亮，按高亮行显示，便于阅读。
+fn original_opacity(timed: bool, active: bool) -> f32 {
     if active || !timed {
         ACTIVE_ALPHA
     } else {
@@ -1306,11 +1314,11 @@ mod tests {
     #[test]
     fn translation_sits_between_idle_and_active_originals() {
         assert!(
-            original_alpha(true, false) < TRANSLATION_ALPHA,
+            original_opacity(true, false) < TRANSLATION_ALPHA,
             "未高亮：原文比译文淡"
         );
         assert!(
-            original_alpha(true, true) > TRANSLATION_ALPHA,
+            original_opacity(true, true) > TRANSLATION_ALPHA,
             "高亮：原文比译文亮"
         );
     }

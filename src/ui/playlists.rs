@@ -1,6 +1,7 @@
 //! 歌单界面：侧栏的歌单区、歌单页、曲目的右键菜单（添加到歌单 / 从歌单
 //! 移除）、新建与编辑弹窗（智能歌单的条件编辑器）。
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use nsh_base::{context_menu, menu, menu_item, menu_separator, submenu};
@@ -647,7 +648,8 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
             let heading = (i == 0 || Field::ALL[i - 1].group() != f.group()).then(|| f.group());
             let pick = Box::new(move || {
                 change(Box::new(move |c| {
-                    if c.field.kind() != f.kind() {
+                    // 标签只能从列表里选，换过去时把自由文本的值也清掉。
+                    if c.field.kind() != f.kind() || f == Field::Tag {
                         c.value.clear();
                     }
                     c.field = f;
@@ -681,9 +683,16 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
             .collect();
         select(move || get().op.label().to_owned(), "条件", options, 110.0)
     });
-    // 值：换了字段（可能清空了值）时重建输入框，打字时不重建。
+    // 值：标签是从曲库现有标签里选，其余是输入框；换了字段（可能清空了值）
+    // 时重建，打字时不重建。
     let value_input = dynamic(move || {
         let f = field.get();
+        if f == Field::Tag {
+            return tag_select(
+                move || get().value,
+                move |v| change(Box::new(move |c| c.value = v)),
+            );
+        }
         let placeholder = match f.kind() {
             FieldType::Text if f == Field::Format => "mp3 / flac / wav",
             FieldType::Text => "",
@@ -701,6 +710,7 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
                 let t = t.to_owned();
                 change(Box::new(move |c| c.value = t));
             })
+            .into_element()
     });
     let unit = move || {
         let c = get();
@@ -717,6 +727,8 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
         .flex_row()
         .items_center()
         .gap(px(8.0))
+        // 行比输入框高 8 pt：聚焦环（3 pt）才不会被滚动区裁掉。
+        .p(px(4.0))
         .child(field_select)
         .child(op_select)
         .child(view().flex_1().flex_row().items_center().child(value_input))
@@ -763,12 +775,12 @@ const SELECT_POPUP_H: f32 = 300.0;
 /// 下拉选择：按钮显示当前值，菜单列出选项（可带分组小标题）。
 #[allow(clippy::type_complexity)]
 fn select(
-    current: impl Fn() -> String + 'static,
+    current: impl Fn() -> String + Copy + 'static,
     label: &'static str,
     options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)>,
     width: f32,
 ) -> AnyElement {
-    let trigger = select_trigger(current, label, width);
+    let trigger = select_trigger(current, label, width, "");
     let menu = menu().offset(px(4.0)).margin(px(8.0)).trigger(trigger);
     // 选项多（字段有十几个）时在弹层里滚动：弹层的 max_h 只限制它自己，
     // 不限制直接放进去的子项。
@@ -780,6 +792,40 @@ fn select(
         items = items.child(item(option, None, pick));
     }
     popup!(menu, width.max(140.0), SELECT_POPUP_H)
+        // 减去弹层的上下内边距与边框。
+        .child(scroll().max_h(px(SELECT_POPUP_H - 10.0)).child(items))
+        .into_element()
+}
+
+/// 标签条件的值：从曲库现有标签里选（按小写名排序，忽略大小写去重）。
+fn tag_select(
+    current: impl Fn() -> String + Copy + 'static,
+    pick: impl Fn(String) + Copy + 'static,
+) -> AnyElement {
+    let s = store();
+    let trigger = select_trigger(current, "值", 0.0, "选择标签");
+    let menu = menu().offset(px(4.0)).margin(px(8.0)).trigger(trigger);
+    let items = dynamic(move || {
+        let tracks = s.tracks.get();
+        // 键用小写：匹配不分大小写，只差大小写的标签算同一个。
+        let mut tags: BTreeMap<String, String> = BTreeMap::new();
+        for g in tracks.iter().flat_map(|t| &t.genres) {
+            tags.entry(g.to_lowercase()).or_insert_with(|| g.clone());
+        }
+        let options: Vec<AnyElement> = tags
+            .into_values()
+            .map(|tag| {
+                let picked = tag.clone();
+                item(tag, None, move || pick(picked.clone()))
+            })
+            .collect();
+        if options.is_empty() {
+            vec![menu_heading("曲库里还没有标签")]
+        } else {
+            options
+        }
+    });
+    popup!(menu, 200.0, SELECT_POPUP_H)
         // 减去弹层的上下内边距与边框。
         .child(scroll().max_h(px(SELECT_POPUP_H - 10.0)).child(items))
         .into_element()
