@@ -20,6 +20,19 @@ const WORKERS: usize = 3;
 /// 已完成的（曲目路径, 缩略图路径），工作线程写、界面取走。
 type Done = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
+/// 本地同名封面：同目录 `<曲名>.jpg/jpeg/png/webp`（大小写后缀都试）。
+const SIDE_EXTS: [&str; 8] = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"];
+
+/// `path` 的本地同名图片文件（存在与否只按文件名，不解码）。
+pub(crate) fn find_sidecar(path: &Path) -> Option<PathBuf> {
+    let stem = path.file_stem()?.to_string_lossy();
+    let dir = path.parent()?;
+    SIDE_EXTS
+        .iter()
+        .map(|ext| dir.join(format!("{stem}.{ext}")))
+        .find(|candidate| candidate.is_file())
+}
+
 /// 工作任务：`Thumb` 只生成列表缩略图，`Warm` 生成全部尺寸（队尾
 /// 预载——当前曲目的后三首，换歌时大封面 / 背景不再现算）。
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -160,7 +173,8 @@ pub fn art_hue(path: &Path) -> Option<(f32, f32)> {
 
 /// 库里没有色调时解码封面算一次（covers 工作线程；扫描时每个有封面的
 /// 文件都会走到这里，保证 `art_hue` 尽量入库）。优先用已缓存的 `cached`
-/// 缩略图（小 JPEG，省一次 lofty + 原图解码），没有才回源文件读内嵌封面。
+/// 缩略图（小 JPEG，省一次 lofty + 原图解码），没有才回封面来源解码
+/// （与 [`cover_source`] 同一优先序：本地同名图片 ↔ 内嵌封面）。
 fn ensure_hue(path: &Path, cached: &Path) {
     if MetaCache::global().art_hue(path).is_some() {
         return;
@@ -168,10 +182,7 @@ fn ensure_hue(path: &Path, cached: &Path) {
     let hue = image::open(cached)
         .ok()
         .and_then(|img| palette_hue(&img))
-        .or_else(|| {
-            let (bytes, _) = crate::metadata::read_artwork(path)?;
-            palette_hue(&image::load_from_memory(&bytes).ok()?)
-        });
+        .or_else(|| decode_cover(path).and_then(|img| palette_hue(&img)));
     store_hue(path, hue);
 }
 
@@ -280,12 +291,63 @@ pub fn backdrop(path: &Path) -> Option<PathBuf> {
 
 fn cache_key(path: &Path) -> Option<u64> {
     let meta = std::fs::metadata(path).ok()?;
+    // 本地封面参与指纹：同名图片出现 / 改动 / 删除、或「本地优先」开关
+    // 变化，都要让已生成的封面失效重算。
+    let side_stamp = find_sidecar(path)
+        .and_then(|p| std::fs::metadata(&p).ok())
+        .map_or(0, |m| crate::metadata::file_stamp(&m));
+    let prefer = crate::config::library_store().prefer_local_covers() as u64;
     Some(fnv(format!(
-        "{}|{}",
+        "{}|{}|{}|{}",
         path.display(),
-        crate::metadata::file_stamp(&meta)
+        crate::metadata::file_stamp(&meta),
+        side_stamp,
+        prefer
     )
     .as_bytes()))
+}
+
+/// 封面来源：解好的图（本地图片 / 内嵌封面解码成功）或内嵌的原始
+/// 字节（解码失败也要原样写出交给系统解码，同旧行为）。
+enum CoverSrc {
+    Img(image::DynamicImage),
+    Raw(Vec<u8>),
+}
+
+/// `path` 的封面来源，按「本地同名图片优先」开关取序；首选来源失败
+/// 回退另一头，都没有为 `None`。`prefer` 参数化方便测试，运行时用
+/// [`cover_source`]。
+fn cover_source_for(path: &Path, prefer: bool) -> Option<CoverSrc> {
+    let mut local = || {
+        find_sidecar(path)
+            .and_then(|p| image::open(p).ok())
+            .map(CoverSrc::Img)
+    };
+    let mut embedded = || {
+        MetaCache::global().get(path).ok()?.has_art.then_some(())?;
+        let (bytes, _) = crate::metadata::read_artwork(path)?;
+        Some(match image::load_from_memory(&bytes) {
+            Ok(img) => CoverSrc::Img(img),
+            Err(_) => CoverSrc::Raw(bytes),
+        })
+    };
+    if prefer {
+        local().or_else(&mut embedded)
+    } else {
+        embedded().or_else(&mut local)
+    }
+}
+
+fn cover_source(path: &Path) -> Option<CoverSrc> {
+    cover_source_for(path, crate::config::library_store().prefer_local_covers())
+}
+
+/// 解出封面图（取色用；`Raw` 字节再试一次解码）。
+fn decode_cover(path: &Path) -> Option<image::DynamicImage> {
+    match cover_source(path)? {
+        CoverSrc::Img(img) => Some(img),
+        CoverSrc::Raw(bytes) => image::load_from_memory(&bytes).ok(),
+    }
 }
 
 /// `path` 的封面缩到 `side` 像素以内、存为 JPEG（已缓存则直接返回）。
@@ -298,14 +360,11 @@ fn cover_file(path: &Path, side: u32) -> Option<PathBuf> {
         ensure_hue(path, &out);
         return Some(out);
     }
-    if !MetaCache::global().get(path).ok()?.has_art {
-        return None;
-    }
-    let (bytes, _) = crate::metadata::read_artwork(path)?;
+    let src = cover_source(path)?;
     std::fs::create_dir_all(&dir).ok()?;
     let tmp = out.with_extension("tmp");
-    match image::load_from_memory(&bytes) {
-        Ok(img) => {
+    match src {
+        CoverSrc::Img(img) => {
             if MetaCache::global().art_hue(path).is_none() {
                 store_hue(path, palette_hue(&img));
             }
@@ -322,7 +381,7 @@ fn cover_file(path: &Path, side: u32) -> Option<PathBuf> {
                 .ok()?;
         }
         // 解不开的格式：原样写出，交给系统解码。
-        Err(_) => std::fs::write(&tmp, &bytes).ok()?,
+        CoverSrc::Raw(bytes) => std::fs::write(&tmp, &bytes).ok()?,
     }
     std::fs::rename(&tmp, &out).ok()?;
     Some(out)
@@ -384,6 +443,31 @@ mod tests {
         let img = image::load_from_memory(&bytes).expect("decode cover");
         let hue = palette_hue(&img);
         assert!(hue.is_some(), "红色封面应有主色调（mime={mime:?}）");
+    }
+
+    /// 语料 sine.flac 内嵌红色封面、同目录有蓝色 sine.png：本地图片优先
+    /// 取蓝（sidecar），内嵌优先取红（read_artwork）。
+    #[test]
+    fn cover_source_respects_local_first() {
+        let path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/.nsh/tmp/zeo-player-test-music/sine.flac"
+        ));
+        if !path.is_file() || find_sidecar(path).is_none() {
+            eprintln!("跳过：语料不存在（sh scripts/make-test-music.sh）");
+            return;
+        }
+        let hue_of = |src: Option<CoverSrc>| match src? {
+            CoverSrc::Img(img) => palette_hue(&img).map(|(h, _)| h),
+            CoverSrc::Raw(_) => None,
+        };
+        let local = hue_of(cover_source_for(path, true)).expect("sidecar 应有主色调");
+        assert!((0.55..0.75).contains(&local), "本地优先应取蓝 sidecar：{local:.3}");
+        let embedded = hue_of(cover_source_for(path, false)).expect("内嵌封面应有主色调");
+        assert!(
+            !(0.55..0.75).contains(&embedded),
+            "内嵌优先应取红封面而非蓝 sidecar：{embedded:.3}"
+        );
     }
 
     /// 真实曲库里的一首（没有则跳过）：生成缩略图并命中缓存。

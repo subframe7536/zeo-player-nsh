@@ -19,6 +19,8 @@ ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 10 -ac 2 \
 ffmpeg -loglevel error -y -i "$dir/sine.flac" -i "$dir/.cover.png" \
   -map 0:a -map 1:v -c copy -disposition:v:0 attached_pic "$dir/.sine.flac"
 mv "$dir/.sine.flac" "$dir/sine.flac"; rm "$dir/.cover.png"
+# 同名本地封面 sine.png（蓝色，与内嵌红色区分）：「本地图片优先」时应取它。
+ffmpeg -loglevel error -y -f lavfi -i "color=c=0x2c50d0:size=64x64" -frames:v 1 "$dir/sine.png"
 ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 "$dir/sine.wav"
 ffmpeg -loglevel error -y -f lavfi -i "$quiet" -t 3 -ac 2 -b:a 128k "$dir/quiet.mp3"
 ffmpeg -loglevel error -y -f lavfi -i "$quiet" -t 3 -ac 2 "$dir/quiet.wav"

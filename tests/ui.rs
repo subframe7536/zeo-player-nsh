@@ -96,15 +96,16 @@ fn sidebar_navigates_between_library_views() {
     // 设置弹窗：左栏分类 + 右栏选项，默认「外观」。
     app.press("设置").unwrap();
     app.wait_for("id:settings-content >> label:外观").unwrap();
-    for label in ["曲库", "播放", "歌词", "窗口", "流派标签"] {
+    for label in ["曲库", "播放", "歌词", "封面", "窗口", "标签", "通用", "元数据"] {
         assert!(has(&app, label), "{label}: {:?}", texts(&app));
     }
     for (pane, section) in [
         ("曲库", "音乐文件夹"),
-        ("流派标签", "分号"),
+        ("标签", "分号"),
         ("播放", "淡入淡出"),
         ("窗口", "关闭窗口时"),
         ("歌词", "歌词对齐"),
+        ("封面", "本地图片优先"),
     ] {
         app.press(&format!("id:settings-nav >> role:button[{pane}]"))
             .unwrap();

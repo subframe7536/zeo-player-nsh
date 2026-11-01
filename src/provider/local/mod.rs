@@ -58,8 +58,10 @@ pub(crate) fn scan(store: &LibraryStore) -> usize {
             && passes(entry.duration, entry.size_bytes, &config)
         {
             // 封面缩略图交给后台线程池预生成（低优先级，界面可见的请求
-            // 插队）：扫描完浏览列表不用再转圈。
-            if entry.has_art {
+            // 插队）：扫描完浏览列表不用再转圈。本地同名图片也算有封面。
+            if entry.has_art
+                || crate::metadata::covers::find_sidecar(Path::new(&entry.path)).is_some()
+            {
                 crate::metadata::covers::request_low(&entry.path);
             }
             entries.push(entry);

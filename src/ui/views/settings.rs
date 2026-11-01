@@ -415,6 +415,80 @@ fn library_section() -> View {
     .child(watch_row())
 }
 
+/// 封面来源：本地同名图片 / 内嵌封面的优先序。
+fn covers_source_section() -> View {
+    let s = store();
+    setting_section("封面来源", "封面可以来自曲目同目录的同名图片，或音频文件的内嵌封面。", None)
+        .child(pref_row(
+            "本地图片优先",
+            "使用同目录的同名图片（jpg / jpeg / png / webp）作为封面；关闭则优先内嵌封面。",
+            move || s.library.with(|l| l.prefer_local_covers),
+            super::super::store::set_prefer_local_covers,
+        ))
+}
+
+/// 「本地优先」开关行：标题 + 说明 + 右侧开关。
+fn pref_row(
+    title: &'static str,
+    desc: &'static str,
+    checked: impl Fn() -> bool + 'static,
+    set: fn(bool),
+) -> View {
+    let toggle = nsh_base::switch()
+        .checked(checked)
+        .accessibility_label(title)
+        .on_change(move |next: &bool| set(*next))
+        .track_style(|st| {
+            st.w(px(42.0))
+                .h(px(24.0))
+                .p(px(2.0))
+                .rounded_full()
+                .bg(muted())
+                .border_1()
+                .border_color(border())
+                .transition_colors()
+                .duration(150.0)
+                .checked(|st| {
+                    st.bg(move || primary())
+                        .border_color(move || primary())
+                })
+        })
+        .thumb_style(|st| {
+            st.size(px(18.0))
+                .rounded_full()
+                .bg(AdaptiveColor::rgb(0xffffff, 0xffffff))
+                .shadow_sm()
+                .transition_transform()
+                .duration(150.0)
+                .checked(|st| st.translate_x(px(18.0)))
+        });
+    view()
+        .flex_row()
+        .flex_wrap()
+        .items_center()
+        .gap(px(16.0))
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(200.0))
+                .gap(px(2.0))
+                .child(
+                    text(title)
+                        .text_size(px(14.0))
+                        .line_height(px(14.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(fg()),
+                )
+                .child(
+                    text(desc)
+                        .text_size(px(12.0))
+                        .line_height(px(12.0))
+                        .text_color(muted_fg()),
+                ),
+        )
+        .child(toggle)
+}
+
 /// 文件夹监视开关与状态。
 fn watch_row() -> View {
     let s = store();
@@ -757,8 +831,8 @@ fn genres_section() -> View {
     });
 
     setting_section(
-        "流派标签",
-        "一个流派标签里有多个值时，按下面选中的分隔符拆开，并去掉首尾空格。修改后立即生效，不用重新扫描。",
+        "标签",
+        "标签解析自曲目的流派（genre）信息。一个流派里有多个值时，按下面选中的分隔符拆开，并去掉首尾空格。修改后立即生效，不用重新扫描。",
         None,
     )
     .child(view().flex_row().flex_wrap().gap(px(8.0)).child(chips))
@@ -1177,6 +1251,18 @@ fn lyrics_section() -> View {
     )
 }
 
+/// 歌词来源：本地同名 .lrc / 内嵌歌词的优先序。
+fn lyrics_source_section() -> View {
+    let s = store();
+    setting_section("歌词来源", "歌词可以来自曲目同目录的同名 .lrc 文件，或音频文件的内嵌歌词。", None)
+        .child(pref_row(
+            "本地歌词优先",
+            "使用同目录的同名 .lrc 文件作为歌词；关闭则优先内嵌歌词。",
+            move || s.library.with(|l| l.prefer_local_lyrics),
+            super::super::store::set_prefer_local_lyrics,
+        ))
+}
+
 /// 关闭窗口时：每次询问 / 最小化到托盘 / 退出。
 fn window_section() -> View {
     use crate::config::CloseAction;
@@ -1217,19 +1303,33 @@ pub(super) enum Pane {
     Library,
     Playback,
     Lyrics,
+    Covers,
     Window,
     Tags,
 }
 
 impl Pane {
-    const ALL: [Pane; 6] = [
-        Pane::Appearance,
-        Pane::Library,
-        Pane::Playback,
-        Pane::Lyrics,
-        Pane::Window,
-        Pane::Tags,
+    /// 左栏分组（小标题 + 分类，不折叠）：通用是外观 / 曲库 / 播放 /
+    /// 窗口；歌词、封面、标签这些描述曲目信息的归「元数据」。
+    const GROUPS: [(&'static str, &'static [Pane]); 2] = [
+        (
+            "通用",
+            &[
+                Pane::Appearance,
+                Pane::Library,
+                Pane::Playback,
+                Pane::Window,
+            ],
+        ),
+        ("元数据", &[Pane::Lyrics, Pane::Covers, Pane::Tags]),
     ];
+
+    /// 全部分类（显示顺序）。
+    fn all() -> impl Iterator<Item = Pane> {
+        Pane::GROUPS
+            .iter()
+            .flat_map(|(_, panes)| panes.iter().copied())
+    }
 
     fn title(self) -> &'static str {
         match self {
@@ -1237,8 +1337,9 @@ impl Pane {
             Pane::Library => "曲库",
             Pane::Playback => "播放",
             Pane::Lyrics => "歌词",
+            Pane::Covers => "封面",
             Pane::Window => "窗口",
-            Pane::Tags => "流派标签",
+            Pane::Tags => "标签",
         }
     }
 
@@ -1247,6 +1348,7 @@ impl Pane {
             Pane::Library => Icon::Folder,
             Pane::Playback => Icon::Play,
             Pane::Lyrics => Icon::Note,
+            Pane::Covers => Icon::Disc,
             Pane::Window => Icon::Monitor,
             Pane::Tags => Icon::Tag,
             Pane::Appearance => Icon::Sun,
@@ -1283,6 +1385,12 @@ const SECTIONS: &[Section] = &[
         build: filter_section,
     },
     Section {
+        pane: Pane::Covers,
+        title: "封面来源",
+        keys: "封面 图片 本地 同名 内嵌 优先 来源 cover jpg jpeg png webp 专辑",
+        build: covers_source_section,
+    },
+    Section {
         pane: Pane::Playback,
         title: "淡入淡出",
         keys: "播放 音量 渐变 切歌 暂停",
@@ -1295,6 +1403,12 @@ const SECTIONS: &[Section] = &[
         build: lyrics_section,
     },
     Section {
+        pane: Pane::Lyrics,
+        title: "歌词来源",
+        keys: "歌词 本地 lrc 同名 内嵌 优先 来源",
+        build: lyrics_source_section,
+    },
+    Section {
         pane: Pane::Window,
         title: "关闭窗口时",
         keys: "关闭 窗口 最小化 托盘 退出 询问",
@@ -1302,7 +1416,7 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         pane: Pane::Tags,
-        title: "流派标签",
+        title: "标签",
         keys: "流派 标签 分隔符 分号 顿号 斜杠 拆分",
         build: genres_section,
     },
@@ -1447,14 +1561,34 @@ fn result_row(s: &'static Section, pane: Signal<Pane>) -> nsh_base::ButtonElemen
         )
 }
 
+/// 左栏分组的小标题（首个与搜索框之间不留大间隔，其余组间拉开）。
+fn group_heading(name: &'static str, spaced: bool) -> View {
+    view()
+        .px(px(10.0))
+        .pt(if spaced { px(18.0) } else { px(4.0) })
+        .pb(px(4.0))
+        .child(
+            text(name)
+                .text_size(px(11.0))
+                .line_height(px(11.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(faint()),
+        )
+}
+
 /// 左栏：顶部搜索框，下面是分类列表（有搜索词时为命中的节列表）。
 fn nav_column(pane: Signal<Pane>, query: Signal<String>) -> View {
     let rows = dynamic(move || {
         let q = query.get().trim().to_lowercase();
         if q.is_empty() {
-            return Pane::ALL
+            return Pane::GROUPS
                 .iter()
-                .map(|&p| pane_row(p, pane).into_element())
+                .enumerate()
+                .flat_map(|(i, &(name, panes))| {
+                    std::iter::once(group_heading(name, i > 0).into_element()).chain(
+                        panes.iter().map(|&p| pane_row(p, pane).into_element()),
+                    )
+                })
                 .collect::<Vec<_>>();
         }
         SECTIONS
@@ -1484,11 +1618,7 @@ fn content_column(pane: Signal<Pane>, query: Signal<String>) -> View {
     let s = store();
     let shown = move || {
         let q = query.get().trim().to_lowercase();
-        let hits: Vec<Pane> = Pane::ALL
-            .iter()
-            .copied()
-            .filter(|p| pane_hits(&q, *p))
-            .collect();
+        let hits: Vec<Pane> = Pane::all().filter(|p| pane_hits(&q, *p)).collect();
         let cur = pane.get();
         hits.iter()
             .find(|&&p| p == cur)

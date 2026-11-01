@@ -261,12 +261,15 @@ impl Meta {
     pub fn lyrics(path: &str) -> (LyricsOutput, LyricsSource) {
         let path = Path::new(path);
         let lrc = find_external_lrc(path);
+        let prefer = library_store().prefer_local_lyrics();
         let stamp = |p: &Path| {
             std::fs::metadata(p).map_or(0, |m| crate::metadata::file_stamp(&m))
         };
+        // 缓存键含 .lrc 指纹与「本地优先」开关：任一变化自动失效。
         let key = lrc
             .as_deref()
-            .map_or_else(|| stamp(path), |l| stamp(path) ^ stamp(l).wrapping_mul(31));
+            .map_or_else(|| stamp(path), |l| stamp(path) ^ stamp(l).wrapping_mul(31))
+            ^ prefer as u64;
         let name = path.to_string_lossy().into_owned();
         {
             let mut cache = lyrics_cache().lock().unwrap();
@@ -277,7 +280,7 @@ impl Meta {
                 return out;
             }
         }
-        let loaded = load_lyrics(path, lrc.as_deref());
+        let loaded = load_lyrics(path, lrc.as_deref(), prefer);
         let out = loaded.0.clone();
         let out_source = loaded.1;
         {
@@ -307,28 +310,37 @@ fn find_external_lrc(path: &Path) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// 真正读歌词：外置 `.lrc` 文本优先，内嵌按需 lofty 读；解析后由
-/// [`Meta::lyrics`] 放进小缓存。
-fn load_lyrics(path: &Path, lrc: Option<&Path>) -> (LyricsOutput, LyricsSource) {
-    if let Some(lrc) = lrc
-        && let Ok(text) = std::fs::read_to_string(lrc)
-    {
-        return (
+/// 真正读歌词：外置 `.lrc` 与内嵌按「本地优先」开关取序，首选读不到
+/// 回退另一头；解析后由 [`Meta::lyrics`] 放进小缓存。
+fn load_lyrics(
+    path: &Path,
+    lrc: Option<&Path>,
+    prefer_local: bool,
+) -> (LyricsOutput, LyricsSource) {
+    let mut external = || {
+        let text = std::fs::read_to_string(lrc?).ok()?;
+        Some((
             parse_lyric(&text, LyricOptions::default()),
             LyricsSource::External,
-        );
-    }
-    if let Some(text) = crate::metadata::read_lyrics(path) {
-        return (
+        ))
+    };
+    let mut embedded = || {
+        let text = crate::metadata::read_lyrics(path)?;
+        Some((
             parse_lyric(&text, LyricOptions::default()),
             LyricsSource::Embedded,
-        );
-    }
-    (
+        ))
+    };
+    let loaded = if prefer_local {
+        external().or_else(&mut embedded)
+    } else {
+        embedded().or_else(&mut external)
+    };
+    loaded.unwrap_or((
         LyricsOutput {
             lines: Vec::new(),
             timed: false,
         },
         LyricsSource::None,
-    )
+    ))
 }

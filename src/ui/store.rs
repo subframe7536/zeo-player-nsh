@@ -87,6 +87,9 @@ pub struct LibraryState {
     pub min_size_kb: u32,
     /// 主题色（强调色）。
     pub theme_color: crate::config::ThemeColor,
+    /// 本地同名 `.lrc` / 图片是否优先于内嵌歌词 / 封面。
+    pub prefer_local_lyrics: bool,
+    pub prefer_local_covers: bool,
 }
 
 fn library_state() -> LibraryState {
@@ -107,6 +110,8 @@ fn library_state() -> LibraryState {
         min_duration_secs: lib.min_duration_secs(),
         min_size_kb: lib.min_size_kb(),
         theme_color: lib.theme_color(),
+        prefer_local_lyrics: lib.prefer_local_lyrics(),
+        prefer_local_covers: lib.prefer_local_covers(),
     }
 }
 
@@ -570,6 +575,26 @@ pub fn cycle_loop_mode() {
     std::thread::spawn(move || library_store().set_loop_mode(mode));
 }
 
+/// 本地歌词优先（保存）。歌词缓存键带开关位，下次读取自动换来源。
+pub fn set_prefer_local_lyrics(on: bool) {
+    store().library.update(|l| l.prefer_local_lyrics = on);
+    std::thread::spawn(move || library_store().set_prefer_local_lyrics(on));
+}
+
+/// 本地封面优先（保存）：封面缓存键含开关位，重算已显示的封面
+/// （已生成文件保留，翻回来直接命中）。
+pub fn set_prefer_local_covers(on: bool) {
+    store().library.update(|l| l.prefer_local_covers = on);
+    std::thread::spawn(move || {
+        library_store().set_prefer_local_covers(on);
+        // 先写配置再请求：缓存键按新开关算，已显示的信号拿到新来源的图。
+        let known: Vec<String> = COVERS.with(|c| c.borrow().keys().cloned().collect());
+        for path in known {
+            crate::metadata::covers::request(&path);
+        }
+    });
+}
+
 /// 关闭窗口时的行为（保存）。
 pub fn set_close_action(action: crate::config::CloseAction) {
     store().library.update(|l| l.close_action = action);
@@ -971,10 +996,9 @@ pub fn cover_of(path: &str) -> Option<SharedString> {
 
 fn drain_covers() {
     for (track, thumb) in crate::metadata::covers::take_done() {
-        if let Some(thumb) = thumb
-            && let Some(cover) = COVERS.with(|c| c.borrow().get(&track).copied())
-        {
-            cover.set(Some(thumb.into()));
+        if let Some(cover) = COVERS.with(|c| c.borrow().get(&track).copied()) {
+            // None（无封面 / 来源换掉了）也要写：清掉可能已过期的旧图。
+            cover.set(thumb.map(SharedString::from));
         }
     }
 }

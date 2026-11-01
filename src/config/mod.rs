@@ -152,6 +152,12 @@ pub struct LibraryConfig {
     /// 过滤：小于此大小（KB）的音频不进曲库（0 不过滤）。
     #[serde(default = "default_min_size_kb")]
     pub min_size_kb: u32,
+    /// 本地同名 `.lrc` 优先于内嵌歌词。
+    #[serde(default = "default_true")]
+    pub prefer_local_lyrics: bool,
+    /// 本地同名图片（jpg / jpeg / png / webp）优先于内嵌封面。
+    #[serde(default = "default_true")]
+    pub prefer_local_covers: bool,
 }
 
 fn default_fade_ms() -> u32 {
@@ -164,6 +170,10 @@ fn default_min_duration_secs() -> u32 {
 
 fn default_min_size_kb() -> u32 {
     DEFAULT_MIN_SIZE_KB
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for LibraryConfig {
@@ -182,6 +192,8 @@ impl Default for LibraryConfig {
             theme_color: ThemeColor::default(),
             min_duration_secs: default_min_duration_secs(),
             min_size_kb: default_min_size_kb(),
+            prefer_local_lyrics: default_true(),
+            prefer_local_covers: default_true(),
         }
     }
 }
@@ -391,6 +403,28 @@ impl LibraryStore {
     pub fn set_loop_mode(&self, mode: crate::engine::audio::LoopMode) {
         let mut config = self.config.lock().unwrap();
         config.loop_mode = mode;
+        self.save_config(&config);
+    }
+
+    /// 本地同名歌词文件是否优先于内嵌歌词。
+    pub fn prefer_local_lyrics(&self) -> bool {
+        self.config().prefer_local_lyrics
+    }
+
+    pub fn set_prefer_local_lyrics(&self, on: bool) {
+        let mut config = self.config.lock().unwrap();
+        config.prefer_local_lyrics = on;
+        self.save_config(&config);
+    }
+
+    /// 本地同名图片文件是否优先于内嵌封面。
+    pub fn prefer_local_covers(&self) -> bool {
+        self.config().prefer_local_covers
+    }
+
+    pub fn set_prefer_local_covers(&self, on: bool) {
+        let mut config = self.config.lock().unwrap();
+        config.prefer_local_covers = on;
         self.save_config(&config);
     }
 
