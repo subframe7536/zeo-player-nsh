@@ -6,8 +6,8 @@ use nsh_base::{ButtonElement, button};
 use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
-use super::icons::{Icon, icon_dyn};
 use super::super::theme::*;
+use super::icons::{Icon, icon_dyn};
 
 /// shadcn 的 `variant`。
 #[allow(dead_code, reason = "shadcn 的完整变体集，部分暂未用到")]

@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use nsh_core::prelude::*;
 
-use crate::engine::{LyricsSource, Meta, Player};
 use crate::config::{ScanProgress, TrackEntry, library_store};
+use crate::engine::{LyricsSource, Meta, Player};
 use crate::metadata::lyrics::LyricsOutput;
 use crate::metadata::{MetaCache, MetaInfo};
 use crate::playlists::{Kind, Playlist, Rule};
@@ -315,8 +315,10 @@ pub fn install() -> Store {
             return;
         };
         let floor = crate::metadata::waveform::WaveformOptions::default().min;
-        s.waveform
-            .set(Some(Same(Arc::new(vec![floor; crate::metadata::waveform::BARS]))));
+        s.waveform.set(Some(Same(Arc::new(vec![
+            floor;
+            crate::metadata::waveform::BARS
+        ]))));
         let still = move |stamp: &str| untracked(|| path.with(|p| p.as_deref() == Some(stamp)));
         let p = stamp.clone();
         spawn(async move {

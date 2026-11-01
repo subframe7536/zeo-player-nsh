@@ -4,11 +4,11 @@
 
 use nsh_core::prelude::*;
 
+mod config;
 mod db;
 #[cfg(test)]
 mod e2e;
 pub mod engine;
-mod config;
 mod metadata;
 mod playlists;
 mod provider;

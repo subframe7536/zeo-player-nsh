@@ -9,11 +9,11 @@ mod media;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::engine::audio::{EngineCmd, EngineHandle, Snapshot};
-use crate::db::LastPlayed;
 use crate::config::{TrackEntry, library_store};
-use crate::metadata::lyrics::{LyricOptions, LyricsOutput, parse_lyric};
+use crate::db::LastPlayed;
+use crate::engine::audio::{EngineCmd, EngineHandle, Snapshot};
 use crate::metadata::MetaCache;
+use crate::metadata::lyrics::{LyricOptions, LyricsOutput, parse_lyric};
 
 /// 播放器引擎句柄。
 pub struct Player {

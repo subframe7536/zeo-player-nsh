@@ -3,10 +3,10 @@
 use nsh_base::{ButtonElement, button};
 use nsh_core::prelude::*;
 
-use super::cover::cover;
-use super::icons::{Icon, icon_dyn};
 use super::super::store::{cover_of, format_time, store};
 use super::super::theme::*;
+use super::cover::cover;
+use super::icons::{Icon, icon_dyn};
 use crate::config::TrackEntry;
 
 /// 曲目列表显示哪些列。
@@ -214,8 +214,7 @@ pub fn track_row(
                 )
         }))
         .child(cols.cover.then(|| {
-            let src =
-                move || track.with(|t| t.as_ref().and_then(|t| cover_of(&t.path)));
+            let src = move || track.with(|t| t.as_ref().and_then(|t| cover_of(&t.path)));
             cover(src, Some(40.0), 6.0)
         }))
         .child(

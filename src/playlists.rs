@@ -226,9 +226,7 @@ impl Field {
     pub fn ops(self) -> &'static [Op] {
         match self.kind() {
             // 格式与标签的值都从列表里选，只有「是 / 不是」有意义。
-            FieldType::Text if matches!(self, Field::Format | Field::Tag) => {
-                &[Op::Is, Op::IsNot]
-            }
+            FieldType::Text if matches!(self, Field::Format | Field::Tag) => &[Op::Is, Op::IsNot],
             FieldType::Text => &[
                 Op::Contains,
                 Op::NotContains,
@@ -792,7 +790,11 @@ mod tests {
         let c: Condition =
             serde_json::from_str(r#"{"field":"genre","op":"is","value":"rock"}"#).unwrap();
         assert_eq!(c.field, Field::Tag);
-        assert!(serde_json::to_string(&c).unwrap().contains(r#""field":"genre""#));
+        assert!(
+            serde_json::to_string(&c)
+                .unwrap()
+                .contains(r#""field":"genre""#)
+        );
     }
 
     #[test]

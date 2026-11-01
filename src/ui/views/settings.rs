@@ -76,31 +76,28 @@ fn add_as_root(path: &str) -> String {
 /// 设置里的一节：标题、说明、右上角操作，然后是内容（无卡片包装，
 /// 节与节之间靠页面间距分开）。
 fn setting_section(title: &'static str, body: &'static str, action: Option<AnyElement>) -> View {
-    view()
-        .w_full()
-        .gap(px(16.0))
-        .child(
-            view()
-                .flex_row()
-                .flex_wrap()
-                .items_start()
-                .gap(px(16.0))
-                .child(
-                    view()
-                        .flex_1()
-                        .min_w(px(240.0))
-                        .gap(px(4.0))
-                        .child(
-                            text(title)
-                                .text_size(px(15.0))
-                                .line_height(px(15.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(fg()),
-                        )
-                        .child(text(body).text_size(px(13.0)).text_color(muted_fg())),
-                )
-                .child(action.map(|a| view().flex_row().gap(px(8.0)).child(a))),
-        )
+    view().w_full().gap(px(16.0)).child(
+        view()
+            .flex_row()
+            .flex_wrap()
+            .items_start()
+            .gap(px(16.0))
+            .child(
+                view()
+                    .flex_1()
+                    .min_w(px(240.0))
+                    .gap(px(4.0))
+                    .child(
+                        text(title)
+                            .text_size(px(15.0))
+                            .line_height(px(15.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(fg()),
+                    )
+                    .child(text(body).text_size(px(13.0)).text_color(muted_fg())),
+            )
+            .child(action.map(|a| view().flex_row().gap(px(8.0)).child(a))),
+    )
 }
 
 /// 一行说明文字（操作结果）。
@@ -807,11 +804,9 @@ fn appearance_select() -> AnyElement {
         })
         .trigger(trigger);
     for &(mode, glyph, label) in OPTIONS {
-        menu = menu.child(super::playlists::item(
-            label,
-            Some(glyph),
-            move || super::super::store::set_appearance(mode),
-        ));
+        menu = menu.child(super::playlists::item(label, Some(glyph), move || {
+            super::super::store::set_appearance(mode)
+        }));
     }
     menu.into_element()
 }
@@ -946,34 +941,25 @@ fn font_panel(open: Signal<bool>) -> View {
             computed(move || rows.with(|r| r.get(at.index()).cloned().unwrap_or_default()));
         let family = move || family.get();
         let selected = move || current().as_deref() == Some(family().as_str());
-        font_choice(
-            family,
-            family,
-            selected,
-            move || {
-                super::super::store::set_font(Some(family()));
-                open.set(false);
-            },
-        )
+        font_choice(family, family, selected, move || {
+            super::super::store::set_font(Some(family()));
+            open.set(false);
+        })
     })
     .estimated_item_size(px(40.0))
     .empty(
-        view()
-            .h(px(64.0))
-            .items_center()
-            .justify_center()
-            .child(
-                text(move || {
-                    if loading() {
-                        "正在读取字体…"
-                    } else {
-                        "没有匹配的字体"
-                    }
-                })
-                .text_size(px(13.0))
-                .line_height(px(13.0))
-                .text_color(muted_fg()),
-            ),
+        view().h(px(64.0)).items_center().justify_center().child(
+            text(move || {
+                if loading() {
+                    "正在读取字体…"
+                } else {
+                    "没有匹配的字体"
+                }
+            })
+            .text_size(px(13.0))
+            .line_height(px(13.0))
+            .text_color(muted_fg()),
+        ),
     )
     .flex_1();
 
@@ -1030,13 +1016,15 @@ fn lyrics_section() -> View {
         (LyricsAlign::Right, "右对齐"),
     ];
     setting_section("歌词对齐", "全屏播放页里歌词的对齐方式。", None).child(
-        super::super::components::radio::group_row().children(OPTIONS.iter().map(|&(align, label)| {
-            super::super::components::radio::item(
-                move || s.library.with(|l| l.lyrics_align == align),
-                label,
-                move || super::super::store::set_lyrics_align(align),
-            )
-        })),
+        super::super::components::radio::group_row().children(OPTIONS.iter().map(
+            |&(align, label)| {
+                super::super::components::radio::item(
+                    move || s.library.with(|l| l.lyrics_align == align),
+                    label,
+                    move || super::super::store::set_lyrics_align(align),
+                )
+            },
+        )),
     )
 }
 

@@ -7,10 +7,10 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use crate::engine::{Library, Meta, Player};
 use crate::config::library_store;
-use crate::metadata::lyrics::{LyricOptions, parse_lyric};
+use crate::engine::{Library, Meta, Player};
 use crate::metadata::MetaCache;
+use crate::metadata::lyrics::{LyricOptions, parse_lyric};
 use crate::metadata::waveform::waveform;
 
 fn corpus() -> Option<std::path::PathBuf> {

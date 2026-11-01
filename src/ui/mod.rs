@@ -1,9 +1,9 @@
 //! Zeo Player 的界面（纯 Rust）：侧栏导航 + 内容区 + 浮动播放条；全屏播放为
 //! 带淡入的覆盖层。
 
-mod frame;
 mod components;
 mod fonts;
+mod frame;
 mod now_playing;
 pub mod store;
 mod theme;
@@ -11,10 +11,10 @@ mod views;
 
 use std::rc::Rc;
 
+use nsh_core::TouchEvent;
 use nsh_core::desktop::TitleBarStyle;
 use nsh_core::element::desktop::set_title_bar;
 use nsh_core::prelude::*;
-use nsh_core::TouchEvent;
 
 use theme::*;
 

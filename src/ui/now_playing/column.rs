@@ -362,7 +362,8 @@ fn waveform_seek() -> View {
         let mut p = Painter::new();
         s.waveform.with(|bars| {
             // 载入中 / 解不开：全部是归一化的下限。
-            let fallback = [crate::metadata::waveform::WaveformOptions::default().min; crate::metadata::waveform::BARS];
+            let fallback = [crate::metadata::waveform::WaveformOptions::default().min;
+                crate::metadata::waveform::BARS];
             let bars: &[f64] = match bars {
                 Some(b) => b,
                 None => &fallback,

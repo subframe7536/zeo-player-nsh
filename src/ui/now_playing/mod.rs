@@ -13,12 +13,12 @@ use std::rc::Rc;
 
 use nsh_core::prelude::*;
 
+use self::column::left_column;
+use self::lyrics::{LYRICS_BOTTOM, lyrics_column, lyrics_shown};
 use super::components::button::{on_dark, tipped};
 use super::components::icons::{Icon, icon};
 use super::store::{player, set_volume, store};
 use super::theme::*;
-use self::column::left_column;
-use self::lyrics::{LYRICS_BOTTOM, lyrics_column, lyrics_shown};
 
 /// 每次打开全屏播放加一：已有的歌词据此回到高亮行（见 `lyrics` 的滚屏）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

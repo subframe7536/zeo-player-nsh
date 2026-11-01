@@ -4,9 +4,9 @@ use std::rc::Rc;
 
 use nsh_core::prelude::*;
 
+use super::super::theme::*;
 use super::button::{Size, Variant};
 use super::icons::{Icon, icon};
-use super::super::theme::*;
 
 /// 页头：可选返回、大标题、副标题、右侧操作；整条可拖动窗口。
 pub fn page_header(

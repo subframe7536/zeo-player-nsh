@@ -11,8 +11,8 @@ use super::super::components::button::{icon_button, pill_button};
 use super::super::components::icons::{Icon, icon};
 use super::super::components::page::page_header;
 use super::super::components::tracks::{
-    Columns, ROW, W_ALBUM, W_COVER, W_FORMAT, W_NUMBER, W_SIZE, W_TIME, fits_album,
-    fits_number, fits_size, format_bytes, track_columns, track_row, value_cell,
+    Columns, ROW, W_ALBUM, W_COVER, W_FORMAT, W_NUMBER, W_SIZE, W_TIME, fits_album, fits_number,
+    fits_size, format_bytes, track_columns, track_row, value_cell,
 };
 use super::super::store::{Same, play_list, scan, store};
 use super::super::theme::*;
@@ -381,7 +381,10 @@ fn rescan_button() -> nsh_base::ButtonElement {
         .disabled(move || s.library.with(|l| l.scanning))
 }
 
-fn folder_cell(row: Memo<Option<FolderRow>>, cwd: Signal<Option<String>>) -> nsh_base::ButtonElement {
+fn folder_cell(
+    row: Memo<Option<FolderRow>>,
+    cwd: Signal<Option<String>>,
+) -> nsh_base::ButtonElement {
     let pick = move |f: fn(&FolderRow) -> String| {
         move || row.with(|r| r.as_ref().map(f).unwrap_or_default())
     };
@@ -512,7 +515,6 @@ fn format_total_short(seconds: f64) -> String {
         format!("{m}:{s:02}")
     }
 }
-
 
 #[cfg(test)]
 mod tests {

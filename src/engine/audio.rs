@@ -962,7 +962,8 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
     };
     let file = std::path::Path::new(&path);
     let cover = crate::metadata::covers::large(file).map(|p| p.to_string_lossy().into_owned());
-    let backdrop = crate::metadata::covers::backdrop(file).map(|p| p.to_string_lossy().into_owned());
+    let backdrop =
+        crate::metadata::covers::backdrop(file).map(|p| p.to_string_lossy().into_owned());
     {
         let mut t = shared.track.lock().unwrap();
         if t.path.as_deref() != Some(path.as_str()) {

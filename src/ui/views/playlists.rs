@@ -227,7 +227,11 @@ pub fn sidebar_section() -> View {
                 .flex_row()
                 .items_center()
                 .px(px(10.0))
-                .child(super::super::frame::section_label("歌单").px(px(10.0)).flex_1())
+                .child(
+                    super::super::frame::section_label("歌单")
+                        .px(px(10.0))
+                        .flex_1(),
+                )
                 .child(view().pt(px(10.0)).child(add)),
         )
         .child(
@@ -445,9 +449,9 @@ pub fn page(id: u64) -> View {
         }
     });
     let from = untracked(|| list.with(|p| p.as_ref().filter(|p| !p.is_smart()).map(|p| p.id)));
-    view().flex_1().child(
-        super::track_list_in(items, Columns::ALL, header.into_element(), from).empty(empty),
-    )
+    view()
+        .flex_1()
+        .child(super::track_list_in(items, Columns::ALL, header.into_element(), from).empty(empty))
 }
 
 // --- 编辑弹窗 -----------------------------------------------------------------

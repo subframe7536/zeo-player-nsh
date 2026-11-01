@@ -246,7 +246,6 @@ pub fn search_results() -> View {
 
 // --- 路径 ---------------------------------------------------------------------
 
-
 /// 路径分隔符：曲库路径来自文件系统，Windows 上是 `\\`。
 pub(crate) const SEP: char = std::path::MAIN_SEPARATOR;
 
@@ -256,4 +255,3 @@ pub(crate) fn last_segment(path: &str) -> &str {
         .find(|s| !s.is_empty())
         .unwrap_or(path)
 }
-

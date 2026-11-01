@@ -176,9 +176,7 @@ pub fn Artists() -> impl IntoElement {
                         .accessibility_label(move || SharedString::from(name()))
                         .hover(|st| st.bg(hover()))
                         .active(|st| st.opacity(0.7))
-                        .on_press(move |_: &()| {
-                            selected.set(group.get_untracked().map(|g| g.key))
-                        })
+                        .on_press(move |_: &()| selected.set(group.get_untracked().map(|g| g.key)))
                         .child(avatar(cover, name, 44.0))
                         .child(
                             view()
@@ -311,9 +309,7 @@ pub fn Albums() -> impl IntoElement {
                         .accessibility_label(move || SharedString::from(title()))
                         .hover(|st| st.bg(hover()))
                         .active(|st| st.opacity(0.75))
-                        .on_press(move |_: &()| {
-                            selected.set(group.get_untracked().map(|g| g.key))
-                        })
+                        .on_press(move |_: &()| selected.set(group.get_untracked().map(|g| g.key)))
                         .child(
                             cover(move || cover_path().and_then(|p| cover_of(&p)), None, 10.0)
                                 .shadow_md(),
@@ -494,4 +490,3 @@ pub fn Genres() -> impl IntoElement {
         }
     }))
 }
-
