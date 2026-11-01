@@ -8,7 +8,7 @@ use nsh_core::prelude::*;
 
 use super::super::components::button::pill_button;
 use super::super::components::cover::{cover, cover_with};
-use super::super::components::icons::{Icon, icon};
+use super::super::components::icons::Icon;
 use super::super::components::page::{empty_state, page_header};
 use super::super::components::tracks::{Columns, track_columns};
 use super::super::store::{cover_of, format_total, play_list, store};
@@ -79,23 +79,28 @@ fn group_by(
     out
 }
 
-/// 圆形头像：封面或首字。
+/// 圆形头像：封面或首字。`size` 为 `None` 时铺满宽度、正方形。
 fn avatar(
     cover: impl Fn() -> Option<String> + Copy + 'static,
     name: impl Fn() -> String + 'static,
-    size: f32,
+    size: Option<f32>,
 ) -> View {
-    view()
-        .size(px(size))
+    let frame = view()
         .rounded_full()
         .overflow_hidden()
         .bg(muted())
         .items_center()
-        .justify_center()
+        .justify_center();
+    let frame = match size {
+        Some(size) => frame.size(px(size)),
+        None => frame.w_full().aspect_square(),
+    };
+    let glyph = size.map_or(64.0, |s| s * 0.4);
+    frame
         .child(
             text(move || name().chars().next().map(String::from).unwrap_or_default())
-                .text_size(px(size * 0.4))
-                .line_height(px(size * 0.4))
+                .text_size(px(glyph))
+                .line_height(px(glyph))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(muted_fg()),
         )
@@ -139,7 +144,7 @@ pub fn Artists() -> impl IntoElement {
                 let name = group.title.clone();
                 let header = hero(
                     "歌手",
-                    avatar(move || cover_path.get(), move || name.clone(), 168.0),
+                    avatar(move || cover_path.get(), move || name.clone(), Some(168.0)),
                     group.title.clone(),
                     format!("{} 首 · {} 张专辑", group.tracks.len(), group.albums()),
                     format_total(total_duration(&group.tracks)),
@@ -159,36 +164,35 @@ pub fn Artists() -> impl IntoElement {
             }
             None => {
                 let count = computed(move || groups.with(|g| g.len()));
-                let list = virtual_list(count, move |at| {
+                let columns = move || {
+                    let width = window().width.0 - sidebar_width() - 80.0;
+                    ((width + 8.0) / (184.0 + 8.0)).floor().clamp(2.0, 10.0) as u32
+                };
+                let grid = virtual_list(count, move |at| {
                     let group = computed(move || groups.with(|g| g.get(at.index()).cloned()));
                     let cover = move || group.with(|g| g.as_ref().and_then(|g| g.cover.clone()));
                     let name = move || {
                         group.with(|g| g.as_ref().map(|g| g.title.clone()).unwrap_or_default())
                     };
                     nsh_base::button()
-                        .h(px(64.0))
-                        .flex_row()
-                        .items_center()
-                        .gap(px(14.0))
-                        .px(px(12.0))
-                        .mx(px(20.0))
-                        .rounded(px(10.0))
+                        .p(px(8.0))
+                        .gap(px(10.0))
+                        .rounded(px(14.0))
                         .accessibility_label(move || SharedString::from(name()))
                         .hover(|st| st.bg(hover()))
-                        .active(|st| st.opacity(0.7))
+                        .active(|st| st.opacity(0.75))
                         .on_press(move |_: &()| selected.set(group.get_untracked().map(|g| g.key)))
-                        .child(avatar(cover, name, 44.0))
+                        .child(avatar(cover, name, None))
                         .child(
                             view()
-                                .flex_1()
-                                .min_w(px(0.0))
                                 .gap(px(2.0))
+                                .px(px(2.0))
                                 .child(
                                     text(name)
                                         .number_of_lines(1)
-                                        .text_size(px(14.0))
-                                        .line_height(px(14.0))
-                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_size(px(15.0))
+                                        .line_height(px(15.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(fg()),
                                 )
                                 .child(
@@ -205,14 +209,16 @@ pub fn Artists() -> impl IntoElement {
                                                 .unwrap_or_default()
                                         })
                                     })
-                                    .text_size(px(12.0))
-                                    .line_height(px(12.0))
+                                    .number_of_lines(1)
+                                    .text_size(px(13.0))
+                                    .line_height(px(13.0))
                                     .text_color(muted_fg()),
                                 ),
                         )
-                        .child(icon(Icon::ChevronRight, 14.0, faint))
                 })
-                .estimated_item_size(px(64.0))
+                .columns(columns)
+                .estimated_item_size(px(240.0))
+                .content_padding_x(px(40.0))
                 .content_padding_bottom(px(BAR_SPACE))
                 .flex_1();
                 view()
@@ -223,7 +229,7 @@ pub fn Artists() -> impl IntoElement {
                         None,
                         None,
                     ))
-                    .child(list)
+                    .child(grid)
                     .into_element()
             }
         }
@@ -321,16 +327,16 @@ pub fn Albums() -> impl IntoElement {
                                 .child(
                                     text(field(|g| g.title.clone()))
                                         .number_of_lines(1)
-                                        .text_size(px(13.0))
-                                        .line_height(px(13.0))
+                                        .text_size(px(15.0))
+                                        .line_height(px(15.0))
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(fg()),
                                 )
                                 .child(
                                     text(field(|g| g.subtitle.clone()))
                                         .number_of_lines(1)
-                                        .text_size(px(12.0))
-                                        .line_height(px(12.0))
+                                        .text_size(px(13.0))
+                                        .line_height(px(13.0))
                                         .text_color(muted_fg()),
                                 ),
                         )
