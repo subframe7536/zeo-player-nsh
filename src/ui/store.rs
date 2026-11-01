@@ -92,6 +92,8 @@ pub struct LibraryState {
     pub prefer_local_covers: bool,
     /// 「删除文件」是否不经过回收站、直接删除。
     pub delete_permanently: bool,
+    /// 重新打开时恢复上次的窗口大小与位置。
+    pub remember_frame: bool,
 }
 
 fn library_state() -> LibraryState {
@@ -115,6 +117,7 @@ fn library_state() -> LibraryState {
         prefer_local_lyrics: lib.prefer_local_lyrics(),
         prefer_local_covers: lib.prefer_local_covers(),
         delete_permanently: lib.delete_permanently(),
+        remember_frame: lib.remember_frame(),
     }
 }
 
@@ -151,6 +154,8 @@ pub struct Store {
     pub close_prompt: Signal<bool>,
     /// 标题栏搜索框的内容；非空时内容区显示搜索结果。
     pub search: Signal<String>,
+    /// 显示搜索页（没有搜索词时也展示：图标栏点放大镜打开，页顶有输入框）。
+    pub search_open: Signal<bool>,
     /// 全部歌单（侧栏顺序）。
     pub playlists: Signal<Same<Vec<Playlist>>>,
     /// 正在编辑的歌单（弹窗打开时为 `Some`）。
@@ -240,6 +245,7 @@ pub fn install() -> Store {
             lists
         }))),
         editor: signal(None),
+        search_open: signal(false),
         settings: signal(false),
         delete_ask: signal(None),
         accent: signal(None),
@@ -448,6 +454,7 @@ pub fn install() -> Store {
 
     crate::provider::local::watcher::sync();
     crate::window::set_close_action(library_store().close_action());
+    crate::window::set_remember_frame(library_store().remember_frame());
     set_color_scheme(color_scheme(library_store().appearance()));
     player().set_fade_ms(library_store().fade_ms());
     player().set_loop_mode(library_store().loop_mode());
@@ -686,6 +693,12 @@ pub fn set_prefer_local_covers(on: bool) {
 pub fn set_close_action(action: crate::config::CloseAction) {
     store().library.update(|l| l.close_action = action);
     std::thread::spawn(move || library_store().set_close_action(action));
+}
+
+/// 「记住窗口大小和位置」（立即生效并保存；关掉后已存的位置丢弃）。
+pub fn set_remember_frame(on: bool) {
+    store().library.update(|l| l.remember_frame = on);
+    std::thread::spawn(move || library_store().set_remember_frame(on));
 }
 
 /// 回答关闭询问：记住选择，然后照做。

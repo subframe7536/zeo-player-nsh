@@ -1300,6 +1300,12 @@ fn window_section() -> View {
             .child(option(CloseAction::Tray, "最小化到托盘", "继续播放"))
             .child(option(CloseAction::Quit, "退出", "停止播放并退出"))
     }))
+    .child(pref_row(
+        "记住窗口大小和位置",
+        "重新打开时恢复上次的窗口大小与位置；关掉后已存的位置丢弃。",
+        move || s.library.with(|l| l.remember_frame),
+        super::super::store::set_remember_frame,
+    ))
 }
 
 // --- 弹窗 -------------------------------------------------------------------
@@ -1426,7 +1432,7 @@ const SECTIONS: &[Section] = &[
     Section {
         pane: Pane::Window,
         title: "关闭窗口时",
-        keys: "关闭 窗口 最小化 托盘 退出 询问",
+        keys: "关闭 窗口 最小化 托盘 退出 询问 记住 大小 位置 恢复",
         build: window_section,
     },
     Section {
@@ -1516,21 +1522,38 @@ fn search_box(query: Signal<String>) -> View {
 }
 
 /// 左栏分类行（外观同主侧栏的导航行）。
-fn pane_row(p: Pane, pane: Signal<Pane>) -> nsh_base::ButtonElement {
+fn pane_row(p: Pane, pane: Signal<Pane>, rail: bool) -> AnyElement {
     let active = move || pane.get() == p;
-    nsh_base::button()
-        .h(px(32.0))
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .px(px(10.0))
+    let b = nsh_base::button()
         .rounded(px(8.0))
         .accessibility_label(p.title())
         .selected(active)
         .selected_style(|st| st.bg(move || primary().opacity(0.12)))
         .hover(|st| st.bg(move || primary().opacity(0.08)))
         .active(|st| st.opacity(0.7))
-        .on_press(move |_: &()| pane.set(p))
+        .on_press(move |_: &()| pane.set(p));
+    if rail {
+        // tipped 的包装在列里会拉满宽、按钮贴左；再套一层居中让它回到栏中线。
+        return view()
+            .w_full()
+            .items_center()
+            .child(super::super::components::button::tipped(
+                b.size(px(40.0))
+                    .items_center()
+                    .justify_center()
+                    .child(icon(p.glyph(), 17.0, move || {
+                        if active() { primary() } else { sidebar_fg() }
+                    })),
+                p.title(),
+            ))
+            .into_element();
+    }
+    b.h(px(32.0))
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(10.0))
+        .w_full()
         .child(icon(p.glyph(), 15.0, move || {
             if active() { primary() } else { sidebar_fg() }
         }))
@@ -1541,6 +1564,7 @@ fn pane_row(p: Pane, pane: Signal<Pane>) -> nsh_base::ButtonElement {
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(move || if active() { fg() } else { sidebar_fg() }),
         )
+        .into_element()
 }
 
 /// 搜索结果行：节的标题 + 所属分类，按下选中该分类（保留搜索词，右栏
@@ -1595,16 +1619,26 @@ fn group_heading(name: &'static str, spaced: bool) -> View {
 }
 
 /// 左栏：顶部搜索框，下面是分类列表（有搜索词时为命中的节列表）。
+/// 窗口窄时收成图标栏：搜索框与标题隐藏，分类只剩图标（悬停提示里看名字）。
 fn nav_column(pane: Signal<Pane>, query: Signal<String>) -> View {
+    let rail = move || window().width.0 < 760.0;
     let rows = dynamic(move || {
-        let q = query.get().trim().to_lowercase();
+        let rail = rail();
+        let q = if rail {
+            String::new()
+        } else {
+            query.get().trim().to_lowercase()
+        };
         if q.is_empty() {
             return Pane::GROUPS
                 .iter()
                 .enumerate()
                 .flat_map(|(i, &(name, panes))| {
-                    std::iter::once(group_heading(name, i > 0).into_element())
-                        .chain(panes.iter().map(|&p| pane_row(p, pane).into_element()))
+                    let heading = (!rail).then(|| group_heading(name, i > 0).into_element());
+                    heading
+                        .into_iter()
+                        .chain(panes.iter().map(|&p| pane_row(p, pane, rail)))
+                        .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
         }
@@ -1615,17 +1649,26 @@ fn nav_column(pane: Signal<Pane>, query: Signal<String>) -> View {
             .collect()
     });
     view()
-        .w(px(220.0))
+        .w(move || px(if rail() { 64.0 } else { 220.0 }))
         .flex_shrink_0()
         .bg(move || sidebar())
         .transition_colors()
         .duration(300.0)
         .test_id("settings-nav")
-        .child(view().p(px(10.0)).child(search_box(query)))
+        .child(when(move || !rail(), move || {
+            view().p(px(10.0)).child(search_box(query))
+        }))
         .child(
-            scroll()
-                .flex_1()
-                .child(view().px(px(10.0)).pb(px(10.0)).gap(px(2.0)).child(rows)),
+            scroll().flex_1().child(
+                view()
+                    .px(px(10.0))
+                    // 图标栏没有搜索框，顶部留同样的间距。
+                    .pt(move || px(if rail() { 10.0 } else { 0.0 }))
+                    .pb(px(10.0))
+                    .gap(px(2.0))
+                    .style_when(rail, |st| st.items_center())
+                    .child(rows),
+            ),
         )
 }
 

@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use nsh_base::{button, context_menu, menu, menu_item, menu_separator, submenu};
+use nsh_base::{context_menu, menu, menu_item, menu_separator, submenu};
 use nsh_core::prelude::*;
 
 use super::super::Nav;
@@ -207,10 +207,50 @@ pub fn track_menu(
 
 // --- 侧栏 ---------------------------------------------------------------------
 
+/// 「新建歌单」菜单（表头的「+」与图标栏的加号行共用弹层内容）。
+fn add_playlist_menu(trigger: View) -> AnyElement {
+    let add = menu().offset(px(4.0)).trigger(trigger);
+    popup!(add, 200.0)
+        .child(item("新建歌单", Some(Icon::Playlist), || {
+            store::new_playlist(false, Vec::new())
+        }))
+        .child(item("新建智能歌单", Some(Icon::Smart), || {
+            store::new_playlist(true, Vec::new())
+        }))
+        .into_element()
+}
+
 /// 侧栏的歌单区：小标题 + 新建按钮，下面是歌单列表（可滚动）。
-pub fn sidebar_section() -> View {
+/// `rail` 为图标栏模式：标题与歌单名藏起、表头高度收掉，「新建歌单」
+/// 变成列表第一行（只露出加号，与其他行的图标同列）。
+pub fn sidebar_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
     let s = store();
-    let add = menu().offset(px(4.0)).trigger(
+    let fade = super::super::frame::label_fade(rail);
+    // 图标栏时顶替表头「+」的一行：只在 rail 出现（不占高度），
+    // 加号与其他行的图标同列。
+    let add_row = add_playlist_menu(
+        view()
+            .w_full()
+            .h(move || px(if rail() { 34.0 } else { 0.0 }))
+            .opacity(move || if rail() { 1.0_f32 } else { 0.0 })
+            .overflow_hidden()
+            .flex_row()
+            .items_center()
+            .pl(px(10.0))
+            .rounded(px(8.0))
+            .role(AccessibilityRole::Button)
+            .label("新建歌单")
+            .hover(|st| st.bg(move || primary().opacity(0.08)))
+            .active(|st| st.opacity(0.7))
+            .child(
+                view()
+                    .size(px(20.0))
+                    .items_center()
+                    .justify_center()
+                    .child(icon(Icon::Plus, 17.0, sidebar_fg)),
+            ),
+    );
+    let add = add_playlist_menu(
         view()
             .size(px(22.0))
             .rounded(px(6.0))
@@ -223,19 +263,43 @@ pub fn sidebar_section() -> View {
             .active(|st| st.opacity(0.6))
             .child(icon(Icon::Plus, 14.0, faint)),
     );
-    let add = popup!(add, 200.0)
-        .child(item("新建歌单", Some(Icon::Playlist), || {
-            store::new_playlist(false, Vec::new())
-        }))
-        .child(item("新建智能歌单", Some(Icon::Smart), || {
-            store::new_playlist(true, Vec::new())
-        }));
+    let list = scroll().flex_1().child(
+        view()
+            .px(px(10.0))
+            .pb(px(8.0))
+            .gap(px(2.0))
+            .child(add_row)
+            .child(dynamic(move || {
+                let lists = s.playlists.get();
+                // 「我喜欢」固定在最前（`ensure_favorites`），其余按创建顺序。
+                let mut rows: Vec<AnyElement> =
+                    lists.iter().map(|p| sidebar_row(p, rail)).collect();
+                if lists.iter().all(|p| p.favorite) {
+                    rows.push(
+                        view().opacity(fade).child(
+                            text("点 + 新建歌单，或在曲目上点右键添加。")
+                                .text_size(px(12.0))
+                                .line_height(px(18.0))
+                                .text_color(faint())
+                                .px(px(10.0))
+                                .py(px(4.0)),
+                        )
+                        .into_element(),
+                    );
+                }
+                rows
+            })),
+    );
     view()
         .flex_1()
         .min_h(px(0.0))
         .window_drag(true)
+        // 表头藏起并收掉高度，把空间还给歌单列表。
         .child(
             view()
+                .h(move || px(if rail() { 0.0 } else { 33.0 }))
+                .overflow_hidden()
+                .opacity(fade)
                 .flex_row()
                 .items_center()
                 .px(px(10.0))
@@ -246,36 +310,10 @@ pub fn sidebar_section() -> View {
                 )
                 .child(view().pt(px(10.0)).child(add)),
         )
-        .child(
-            scroll()
-                .flex_1()
-                .child(
-                    view()
-                        .px(px(10.0))
-                        .pb(px(8.0))
-                        .gap(px(2.0))
-                        .child(dynamic(move || {
-                            let lists = s.playlists.get();
-                            // 「我喜欢」固定在最前（`ensure_favorites`），其余按创建顺序。
-                            let mut rows: Vec<AnyElement> = lists.iter().map(sidebar_row).collect();
-                            if lists.iter().all(|p| p.favorite) {
-                                rows.push(
-                                    text("点 + 新建歌单，或在曲目上点右键添加。")
-                                        .text_size(px(12.0))
-                                        .line_height(px(18.0))
-                                        .text_color(faint())
-                                        .px(px(10.0))
-                                        .py(px(4.0))
-                                        .into_element(),
-                                );
-                            }
-                            rows
-                        })),
-                ),
-        )
+        .child(list)
 }
 
-fn sidebar_row(p: &Playlist) -> AnyElement {
+fn sidebar_row(p: &Playlist, rail: impl Fn() -> bool + Copy + 'static) -> AnyElement {
     let (id, name, smart, favorite) = (p.id, p.name.clone(), p.is_smart(), p.favorite);
     let nav = global::<Nav>();
     let active = move || nav.get() == Nav::Playlist(id);
@@ -289,34 +327,17 @@ fn sidebar_row(p: &Playlist) -> AnyElement {
     // 按钮不能挂 `window_drag(false)`（`Interactive` 不在组件元素上），
     // 同 `page_header` 的返回键：裸 view 包一层。
     let row = view().window_drag(false).child(
-        button()
-            .h(px(32.0))
-            .w_full()
-            .flex_row()
-            .items_center()
-            .gap(px(10.0))
-            .px(px(10.0))
-            .rounded(px(8.0))
-            .accessibility_label(name.clone())
-            .selected(active)
-            .selected_style(|st| st.bg(move || primary().opacity(0.12)))
-            .hover(|st| st.bg(move || primary().opacity(0.08)))
-            .active(|st| st.opacity(0.7))
-            .on_press(move |_: &()| {
+        super::super::frame::adaptive_row(
+            rail,
+            glyph,
+            name.clone().into(),
+            active,
+            move || {
                 store().search.set(String::new());
+                store().search_open.set(false);
                 nav.set(Nav::Playlist(id));
-            })
-            .child(icon(glyph, 16.0, move || {
-                if active() { primary() } else { sidebar_fg() }
-            }))
-            .child(
-                text(name)
-                    .flex_1()
-                    .number_of_lines(1)
-                    .text_size(px(14.0))
-                    .line_height(px(14.0))
-                    .text_color(move || if active() { fg() } else { sidebar_fg() }),
-            ),
+            },
+        ),
     );
     // 「我喜欢」不能改名或删除：没有右键菜单。
     if favorite {

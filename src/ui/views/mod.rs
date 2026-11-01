@@ -205,27 +205,32 @@ fn hero(
 }
 // --- 搜索 ---------------------------------------------------------------------
 
-/// 标题栏搜索的结果页：标题 / 歌手 / 专辑 / 文件名匹配（不分大小写）。
-/// 点一首播放时，播放队列就是这份结果列表。
+/// 搜索命中：标题 / 歌手 / 专辑 / 文件名包含 `query`（已转小写）的曲目。
+/// 空串返回空。侧栏结果页与搜索弹窗共用。
+pub(crate) fn search_hits(query: &str, tracks: &[TrackEntry]) -> Vec<TrackEntry> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    tracks
+        .iter()
+        .filter(|t| {
+            [&t.title, &t.artist, &t.album, &t.file_name]
+                .iter()
+                .any(|f| f.to_lowercase().contains(query))
+        })
+        .cloned()
+        .collect()
+}
+
+/// 搜索页的结果列表：标题 / 歌手 / 专辑 / 文件名匹配（不分大小写）。
+/// 点一首播放时，播放队列就是这份结果列表。页顶的输入框在 `page()` 里
+/// （放在 `dynamic` 外面，输入时不重建）。
 pub fn search_results() -> View {
     let s = store();
     let items = computed(move || {
         let query = s.search.with(|q| q.trim().to_lowercase());
         let tracks = s.tracks.get();
-        let hits: Vec<TrackEntry> = if query.is_empty() {
-            Vec::new()
-        } else {
-            tracks
-                .iter()
-                .filter(|t| {
-                    [&t.title, &t.artist, &t.album, &t.file_name]
-                        .iter()
-                        .any(|f| f.to_lowercase().contains(&query))
-                })
-                .cloned()
-                .collect()
-        };
-        Rc::new(hits)
+        Rc::new(search_hits(&query, &tracks))
     });
     let count = computed(move || items.with(|v| v.len()));
     let header = view()

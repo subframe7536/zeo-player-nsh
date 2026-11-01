@@ -161,6 +161,25 @@ pub struct LibraryConfig {
     /// 「删除文件」不经过回收站、直接删除（不可恢复）。
     #[serde(default)]
     pub delete_permanently: bool,
+    /// 重新打开时恢复上次的窗口大小与位置。
+    #[serde(default = "default_true")]
+    pub remember_frame: bool,
+    /// 上次窗口的常规位置与大小（Windows 的 `SetWindowPlacement` 用；
+    /// macOS 走系统自己的 frame 自动保存，不写字段）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_frame: Option<SavedFrame>,
+}
+
+/// 持久化的窗口位置（屏幕像素）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedFrame {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    /// 关闭时是最大化的。
+    #[serde(default)]
+    pub maximized: bool,
 }
 
 fn default_fade_ms() -> u32 {
@@ -198,6 +217,8 @@ impl Default for LibraryConfig {
             prefer_local_lyrics: default_true(),
             prefer_local_covers: default_true(),
             delete_permanently: false,
+            remember_frame: true,
+            window_frame: None,
         }
     }
 }
@@ -453,6 +474,39 @@ impl LibraryStore {
         self.save_config(&config);
         drop(config);
         crate::window::set_close_action(action);
+    }
+
+    /// 重新打开时是否恢复上次的窗口大小与位置。
+    pub fn remember_frame(&self) -> bool {
+        self.config().remember_frame
+    }
+
+    pub fn set_remember_frame(&self, on: bool) {
+        let mut config = self.config.lock().unwrap();
+        config.remember_frame = on;
+        if !on {
+            config.window_frame = None;
+        }
+        self.save_config(&config);
+        drop(config);
+        crate::window::set_remember_frame(on);
+    }
+
+    /// 上次的窗口位置（`remember_frame` 开着时才有意义）。
+    #[cfg(target_os = "windows")]
+    pub fn window_frame(&self) -> Option<SavedFrame> {
+        self.config().window_frame
+    }
+
+    /// 记录当前窗口位置（Windows 的 `WM_EXITSIZEMOVE` / 退出时调用）。
+    #[cfg(target_os = "windows")]
+    pub fn set_window_frame(&self, frame: SavedFrame) {
+        let mut config = self.config.lock().unwrap();
+        if !config.remember_frame {
+            return;
+        }
+        config.window_frame = Some(frame);
+        self.save_config(&config);
     }
 
     pub fn watching(&self) -> bool {

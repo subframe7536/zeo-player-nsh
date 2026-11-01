@@ -291,7 +291,7 @@ pub fn Albums() -> impl IntoElement {
             None => {
                 let count = computed(move || groups.with(|g| g.len()));
                 let columns = move || {
-                    let width = window().width.0 - SIDEBAR - 40.0;
+                    let width = window().width.0 - sidebar_width() - 40.0;
                     ((width + 8.0) / (184.0 + 8.0)).floor().clamp(2.0, 10.0) as u32
                 };
                 let grid = virtual_list(count, move |at| {

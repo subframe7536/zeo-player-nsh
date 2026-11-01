@@ -16,8 +16,21 @@ use super::{REVEAL_LABEL, Swap, reveal};
 use crate::engine::audio::LoopMode;
 use crate::metadata::MetaInfo;
 
-/// 左列宽度（= 封面边长）。
+/// 左列宽度（= 封面边长）的上限。
 const COLUMN: f32 = 326.0;
+
+/// 左列宽度跟着窗口走：有歌词时左右分半，窗口矮封面也跟着缩
+///（封面 + 下面的元数据 / 进度 / 控制 / 音量约 340 pt）。
+fn column_size() -> f32 {
+    let share = if super::lyrics::lyrics_shown().get() {
+        window().width.0 / 2.0
+    } else {
+        window().width.0
+    };
+    (share - 72.0)
+        .min(window().height.0 - 380.0)
+        .clamp(140.0, COLUMN)
+}
 
 /// 质量标签：Hi-Res（无损且高于 16-bit / 48 kHz）、Lossless、HQ（有损 ≥ 256 kbps）。
 fn quality_tag(m: &MetaInfo) -> Option<String> {
@@ -64,7 +77,7 @@ pub(super) fn left_column(swap: &Swap) -> View {
     let artwork = move || s.track.with(|t| t.artwork.clone());
 
     let art = view()
-        .size(px(COLUMN))
+        .size(move || px(column_size()))
         .rounded(px(10.0))
         .overflow_hidden()
         .bg(white_a(0.08))
@@ -245,7 +258,7 @@ pub(super) fn left_column(swap: &Swap) -> View {
         ));
 
     view()
-        .w(px(COLUMN))
+        .w(move || px(column_size()))
         .flex_shrink_0()
         // 换曲时封面与曲目信息一起淡入、从切歌方向滑入；进度与控制不动。
         .child(

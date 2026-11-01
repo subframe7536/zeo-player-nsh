@@ -87,12 +87,14 @@ pub fn App() -> impl IntoElement {
 
     let queue_open = signal(false);
     let search = frame::SearchFocus::new();
+    // 搜索页页顶的输入框（与侧栏框共用同一个 query，ElementRef 各一份）。
+    let search_page = frame::SearchFocus::new();
     // 窗口隐藏到托盘时整个界面拆掉（视图、图片、列表都释放），只留播放与
     // 状态轮询；再次显示时重建，导航位置在全局信号里，不丢。
     // 侧栏与内容区一直铺到窗口顶边，标题栏透明地浮在上面；全屏播放盖住
     // 整个窗口（包括标题栏），只有系统的窗口按钮还在它上面。
     let shell = move || {
-        let content = page(nav);
+        let content = page(nav, search_page);
         let (open, close) = (open.clone(), close.clone());
         view()
             .flex_1()
@@ -100,7 +102,7 @@ pub fn App() -> impl IntoElement {
                 view()
                     .flex_1()
                     .flex_row()
-                    .child(frame::sidebar(search))
+                    .child(frame::sidebar(search, search_page))
                     .child(
                         view()
                             .flex_1()
@@ -127,7 +129,10 @@ pub fn App() -> impl IntoElement {
         .font_family(store::font_family)
         // 点在搜索框以外的地方时让它失去焦点（否则焦点一直留在里面，
         // Space 等快捷键也被它吃掉）。
-        .on_touch(move |e: &TouchEvent| search.outside_touch(e))
+        .on_touch(move |e: &TouchEvent| {
+            search.outside_touch(e);
+            search_page.outside_touch(e);
+        })
         .child(when(move || !s.hidden.get(), shell))
         // 弹窗按叠放顺序挂载：设置在最底，「关闭窗口」的询问盖过一切。
         .child(when(
@@ -152,20 +157,34 @@ pub fn App() -> impl IntoElement {
     root
 }
 
-fn page(nav: Signal<Nav>) -> AnyElement {
+fn page(nav: Signal<Nav>, search_page: frame::SearchFocus) -> AnyElement {
     let s = store::store();
-    dynamic(move || {
-        if !s.search.with(|q| q.trim().is_empty()) {
-            return views::search_results().into_element();
-        }
-        match nav.get() {
-            Nav::Folders => views::folders().into_element(),
-            Nav::Artists => views::artists().into_element(),
-            Nav::Albums => views::albums().into_element(),
-            Nav::Genres => views::genres().into_element(),
-            Nav::Playlist(id) => views::playlists::page(id).into_element(),
-        }
-    })
+    let search_mode =
+        move || s.search_open.get() || !s.search.with(|q| q.trim().is_empty());
+    // 输入框挂在 `dynamic` 外面：输入时只重建下面的结果，框本身不重建
+    // （不然每个键击都把焦点弄丢）。
+    view()
+        .flex_1()
+        .child(when(search_mode, move || {
+            view()
+                .px(px(24.0))
+                .pt(px(20.0))
+                .pb(px(4.0))
+                .child(frame::search_box(search_page, false, true))
+        }))
+        .child(dynamic(move || {
+            if search_mode() {
+                return views::search_results().into_element();
+            }
+            match nav.get() {
+                Nav::Folders => views::folders().into_element(),
+                Nav::Artists => views::artists().into_element(),
+                Nav::Albums => views::albums().into_element(),
+                Nav::Genres => views::genres().into_element(),
+                Nav::Playlist(id) => views::playlists::page(id).into_element(),
+            }
+        }))
+        .into_element()
 }
 
 /// 第一次点关闭：最小化到托盘还是退出。应用内的弹窗（nsh-base `dialog`，

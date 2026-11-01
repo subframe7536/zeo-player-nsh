@@ -309,17 +309,11 @@ fn narrow_windows_drop_album_and_size_columns() {
     }
     app.wait_for_within("大小", Duration::from_secs(20))
         .unwrap();
-    app.set_viewport(size(px(700.0), px(800.0))).unwrap(); // 内容区 468 pt
+    // 侧栏收成图标栏（< 900 pt，导航文字被裁掉不绘制），内容区 572 pt：
+    // 大小与专辑列收起——「专辑」文本一条都不剩（侧栏导航也没有）。
+    app.set_viewport(size(px(640.0), px(800.0))).unwrap();
     assert!(!has(&app, "大小"));
-    // 侧栏也有「专辑」：列头那个应已收起。
-    assert_eq!(
-        app.screen()
-            .texts()
-            .iter()
-            .filter(|s| **s == "专辑")
-            .count(),
-        1
-    );
+    assert!(!has(&app, "专辑"));
     assert!(has(&app, "时长"));
 }
 
@@ -357,7 +351,8 @@ fn search_box_blurs_when_pressing_outside() {
     app.type_text("label:搜索", "zz").unwrap();
     app.wait_for("label:清除搜索").unwrap();
     let before = blurs(&app);
-    app.press("label:清除搜索").unwrap();
+    // 有搜索词时搜索页页顶也有一个同样的清除按钮；侧栏的在树里更靠前。
+    app.press("label:清除搜索 >> nth=0").unwrap();
     app.wait(Duration::from_millis(50)).unwrap();
     assert_eq!(blurs(&app), before, "点在搜索框里不失焦");
     app.type_text("label:搜索", "zz").unwrap();

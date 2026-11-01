@@ -15,6 +15,11 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use crate::config::CloseAction;
 
+/// 窗口的最小宽度（点）：播放条还能同时放下进度条两侧时间的最小值
+///（`ui::frame::bar` 的 `fits_times` 阈值）。NSH 没有最小尺寸的接口，
+/// 两个平台都在系统层设（macOS `contentMinSize`，Windows `WM_GETMINMAXINFO`）。
+pub const MIN_WIDTH: f32 = 720.0;
+
 /// 当前关闭行为（界面设置写入）。
 static MODE: AtomicU8 = AtomicU8::new(0);
 /// 窗口里点了关闭、需要问用户。
@@ -23,6 +28,8 @@ static CLOSE_REQUESTED: AtomicBool = AtomicBool::new(false);
 static QUITTING: AtomicBool = AtomicBool::new(false);
 /// 窗口已隐藏到托盘。
 static HIDDEN: AtomicBool = AtomicBool::new(false);
+/// 重新打开时恢复上次的窗口大小与位置（界面设置写入）。
+static REMEMBER: AtomicBool = AtomicBool::new(false);
 /// 窗口事件（关闭请求、托盘操作、显示 / 隐藏）发生时唤醒界面
 /// （[`changed`]），界面不必轮询。
 static CHANGED: tokio::sync::Notify = tokio::sync::Notify::const_new();
@@ -52,6 +59,13 @@ fn mode() -> CloseAction {
         2 => CloseAction::Quit,
         _ => CloseAction::Ask,
     }
+}
+
+/// 设置「记住窗口大小和位置」：立即应用到现有窗口（macOS 自动保存开关，
+/// Windows 只决定退出 / 缩放结束时是否记录；恢复都在下次启动的挂钩里做）。
+pub fn set_remember_frame(on: bool) {
+    REMEMBER.store(on, Ordering::Relaxed);
+    platform::remember(on);
 }
 
 pub fn set_close_action(action: CloseAction) {
@@ -346,8 +360,38 @@ mod platform {
     use objc2::runtime::{AnyObject, Bool, Imp, Sel};
     use objc2::{MainThreadMarker, msg_send, sel};
     use objc2_app_kit::{NSApplication, NSWindow};
+    use objc2_foundation::{NSString, NSSize};
 
     use super::TrayState;
+
+    /// frame 自动保存的名字（`NSWindow Frame <name>` 存进用户默认）。
+    const FRAME_NAME: &str = "ZeoPlayerMain";
+
+    /// 「记住窗口大小和位置」：开时用系统的自动保存（`NSWindow` 的
+    /// `frameAutosaveName` 会在移动 / 缩放与退出时自己写默认，下次启动
+    /// `setFrameUsingName` 恢复）；关时停止保存并清掉已存的记录。
+    fn apply_frame(window: &NSWindow, mtm: MainThreadMarker, on: bool) {
+        let name = NSString::from_str(FRAME_NAME);
+        if on {
+            window.setFrameUsingName(&name);
+            window.setFrameAutosaveName(&name);
+        } else {
+            window.setFrameAutosaveName(&NSString::new());
+            NSWindow::removeFrameUsingName(&name, mtm);
+        }
+    }
+
+    /// 设置改动时应用到现有窗口（启动时窗口还没建好，`hook` 里也会做）。
+    pub fn remember(on: bool) {
+        DispatchQueue::main().exec_async(move || {
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
+            if let Some(window) = main_window(mtm) {
+                apply_frame(&window, mtm, on);
+            }
+        });
+    }
 
     /// NSH 原来的 `windowShouldClose:` 实现。
     static ORIGINAL: OnceLock<usize> = OnceLock::new();
@@ -429,6 +473,15 @@ mod platform {
                 }
                 return;
             };
+            // 最小宽度（见 `MIN_WIDTH`）：保留原来的最小高度。
+            let mut min: NSSize = window.contentMinSize();
+            min.width = super::MIN_WIDTH as f64;
+            window.setContentMinSize(min);
+            apply_frame(
+                &window,
+                mtm,
+                super::REMEMBER.load(std::sync::atomic::Ordering::Relaxed),
+            );
             let Some(delegate) = window.delegate() else {
                 return;
             };
@@ -544,10 +597,12 @@ mod platform {
         BringWindowToTop, CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GW_OWNER,
         GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindow,
         GetWindowLongPtrW, GetWindowThreadProcessId, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsIconic,
-        IsWindowVisible, IsZoomed, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW, PostMessageW,
-        SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME, SW_HIDE, SW_RESTORE,
-        SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, ShowWindowAsync, TranslateMessage,
-        WM_CLOSE, WM_DESTROY, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW,
+        IsWindowVisible, IsZoomed, MINMAXINFO, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW,
+        PostMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME, SW_HIDE,
+        SW_RESTORE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SetForegroundWindow,
+        SetWindowLongPtrW, SetWindowPlacement, ShowWindowAsync, TranslateMessage,
+        GetWindowPlacement, WINDOWPLACEMENT, WM_CLOSE, WM_DESTROY, WM_EXITSIZEMOVE,
+        WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW,
         WM_SYSCOMMAND, WNDPROC, WS_CAPTION, WS_THICKFRAME,
     };
 
@@ -565,8 +620,27 @@ mod platform {
         let mut l = l;
         match msg {
             WM_CLOSE if !super::on_close_clicked() => return 0,
+            // 最小宽度（见 `MIN_WIDTH`）：先让原窗口过程填默认值，再把
+            // ptMinTrackSize 抬到应用的下限（点 → 物理像素）。
+            WM_GETMINMAXINFO => {
+                // SAFETY: 原窗口过程，在子类化时保存。
+                let result = unsafe {
+                    let old: WNDPROC =
+                        std::mem::transmute::<isize, WNDPROC>(OLD_PROC.load(Ordering::Relaxed));
+                    CallWindowProcW(old, hwnd, msg, w, l)
+                };
+                // SAFETY: 本消息的 l 指向 MINMAXINFO。
+                let info = unsafe { &mut *(l as *mut MINMAXINFO) };
+                // SAFETY: 普通查询。
+                let dpi = unsafe { GetDpiForWindow(hwnd) } as f32;
+                let min_x = (super::MIN_WIDTH * dpi / 96.0).ceil() as i32;
+                info.ptMinTrackSize.x = info.ptMinTrackSize.x.max(min_x);
+                return result;
+            }
             // 隐藏后被重新显示（任务栏、Alt+Tab、`show`）。
             WM_SHOWWINDOW if w != 0 => super::shown_by_system(),
+            // 拖动 / 缩放结束：记录窗口位置（「记住窗口大小和位置」）。
+            WM_EXITSIZEMOVE => save_frame(hwnd),
             // 标题栏由应用自己画（NSH 的标题栏样式为 Default，不再处理这些）。
             WM_NCCALCSIZE if w != 0 && has_style(hwnd, WS_CAPTION) => {
                 // SAFETY: w 非 0 时 l 指向本消息的 NCCALCSIZE_PARAMS。
@@ -602,6 +676,64 @@ mod platform {
     fn zoomed(hwnd: HWND) -> bool {
         // SAFETY: 普通查询。
         unsafe { IsZoomed(hwnd) != 0 }
+    }
+
+    /// 「记住窗口大小和位置」：记下常规矩形与是否最大化（最大化时的
+    /// `rcNormalPosition` 是还原后的位置，正好是要存的）。
+    fn save_frame(hwnd: HWND) {
+        if !super::REMEMBER.load(Ordering::Relaxed) {
+            return;
+        }
+        // SAFETY: 输出参数，先填长度。
+        let mut wp = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            ..unsafe { std::mem::zeroed() }
+        };
+        // SAFETY: 本进程窗口。
+        if unsafe { GetWindowPlacement(hwnd, &mut wp) } == 0 {
+            return;
+        }
+        let r = wp.rcNormalPosition;
+        crate::config::library_store().set_window_frame(crate::config::SavedFrame {
+            x: r.left,
+            y: r.top,
+            w: r.right - r.left,
+            h: r.bottom - r.top,
+            maximized: zoomed(hwnd),
+        });
+    }
+
+    /// 启动时恢复上次的窗口位置（`hook` 子类化后调用）。
+    fn restore_frame(hwnd: HWND) {
+        if !super::REMEMBER.load(Ordering::Relaxed) {
+            return;
+        }
+        let Some(saved) = crate::config::library_store().window_frame() else {
+            return;
+        };
+        if saved.w <= 0 || saved.h <= 0 {
+            return;
+        }
+        // SAFETY: 结构由调用方填充，字段都是普通值。
+        let wp = WINDOWPLACEMENT {
+            length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+            flags: 0,
+            showCmd: if saved.maximized {
+                SW_SHOWMAXIMIZED
+            } else {
+                SW_SHOWNOACTIVATE
+            } as u32,
+            ptMinPosition: POINT { x: -1, y: -1 },
+            ptMaxPosition: POINT { x: -1, y: -1 },
+            rcNormalPosition: RECT {
+                left: saved.x,
+                top: saved.y,
+                right: saved.x + saved.w,
+                bottom: saved.y + saved.h,
+            },
+        };
+        // SAFETY: 本进程窗口。
+        unsafe { SetWindowPlacement(hwnd, &wp) };
     }
 
     /// 缩放边框的厚度（像素）；最大化窗口也正好超出显示器这么多。
@@ -723,6 +855,10 @@ mod platform {
         }
     }
 
+    /// 「记住窗口大小和位置」只影响是否记录：标志在保存时读，运行中
+    /// 改动不用对窗口做什么；关掉时已存的位置由 `set_remember_frame` 清掉。
+    pub fn remember(_on: bool) {}
+
     /// 主窗口已销毁：移除托盘图标后直接结束进程。
     ///
     /// NSH 0.3.0 在 UI 线程退出时由线程局部析构释放 D3D / D2D 设备。Windows
@@ -731,6 +867,9 @@ mod platform {
     /// 就停在那里：窗口没了，进程不退。这里不走那条路径。应用数据都在改动时
     /// 写盘，退出时没有要收尾的东西。
     fn exit_now() {
+        if let Some(h) = hwnd() {
+            save_frame(h);
+        }
         if let Some(tx) = TRAY_TX.get() {
             let (done_tx, done_rx) = channel();
             if tx.lock().unwrap().send(TrayMsg::Remove(done_tx)).is_ok() {
@@ -778,6 +917,7 @@ mod platform {
             unsafe { SetWindowLongPtrW(found, GWLP_WNDPROC, proc as *const () as usize as isize) };
         OLD_PROC.store(old, Ordering::Relaxed);
         let _ = HWND_VALUE.set(found as usize as u64);
+        restore_frame(found);
         true
     }
 
@@ -910,6 +1050,7 @@ mod platform {
     pub fn quit() {
         std::process::exit(0);
     }
+    pub fn remember(_on: bool) {}
     pub fn update(_state: TrayState) {}
     pub fn trim_memory() {}
 }

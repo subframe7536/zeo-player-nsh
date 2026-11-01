@@ -51,7 +51,8 @@ pub fn queue_button(open: Signal<bool>) -> AnyElement {
         .offset(px(12.0))
         .margin(px(8.0))
         .popup_style(|st| {
-            st.w(px(340.0))
+            // 宽度跟着窗口走：窄窗口不让弹层超出左右边距。
+            st.w(move || px((window().width.0 - 40.0).clamp(240.0, 340.0)))
                 .rounded(px(RADIUS_MD))
                 .border_1()
                 .border_color(border())

@@ -2,19 +2,42 @@
 
 use std::rc::Rc;
 
-use nsh_base::button;
+use nsh_base::{PopoverEvent, button, popover};
 use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
 use super::super::components::button::{RADIUS_MD, Size, Variant, icon_button, shell, tipped};
 use super::super::components::cover::cover;
-use super::super::components::icons::Icon;
-use super::super::components::slider::slider;
+use super::super::components::icons::{Icon, icon_dyn};
+use super::super::components::slider::{slider, vslider};
 use super::super::store::{
     format_time, player, progress_fraction, seek_to, set_volume, shown_time, store, toggle_mute,
 };
 use super::super::theme::*;
 use crate::engine::audio::LoopMode;
+
+/// 播放条左右两段的宽度：窗口变窄时一起收缩（等宽，播放控制保持居中），
+/// 给中间的进度条留地方。
+fn side_width() -> f32 {
+    let w = window().width.0;
+    if w >= 1080.0 {
+        260.0
+    } else if w >= 900.0 {
+        180.0
+    } else {
+        112.0
+    }
+}
+
+/// 音量滑条只在两边够宽时显示（窄了只剩静音图标）。
+fn fits_volume() -> bool {
+    window().width.0 >= 1080.0
+}
+
+/// 进度条两侧的时间（窄了只留滑条）。
+fn fits_times() -> bool {
+    window().width.0 >= 720.0
+}
 
 pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
     let s = store();
@@ -23,7 +46,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
     let expand = on_expand.clone();
 
     let now = view()
-        .w(px(260.0))
+        .w(move || px(side_width()))
         .flex_row()
         .items_center()
         .gap(px(12.0))
@@ -152,15 +175,15 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .gap(px(10.0))
         .w_full()
         .max_w(px(560.0))
-        .child(
+        .child(when(fits_times, move || {
             text(move || format_time(shown_time()))
                 .w(px(40.0))
                 .text_right()
                 .text_size(px(11.0))
                 .line_height(px(11.0))
                 .tabular_nums()
-                .text_color(muted_fg()),
-        )
+                .text_color(muted_fg())
+        }))
         .child(
             slider(
                 progress_fraction,
@@ -178,14 +201,14 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
             )
             .flex_1(),
         )
-        .child(
+        .child(when(fits_times, move || {
             text(move || format_time(duration()))
                 .w(px(40.0))
                 .text_size(px(11.0))
                 .line_height(px(11.0))
                 .tabular_nums()
-                .text_color(muted_fg()),
-        );
+                .text_color(muted_fg())
+        }));
 
     let center = view()
         .flex_1()
@@ -196,29 +219,39 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .child(progress);
 
     let volume = move || s.playback.with(|p| p.volume);
+    let volume_open = signal(false);
     let right = view()
-        .w(px(260.0))
+        .w(move || px(side_width()))
         .flex_row()
         .items_center()
         .justify_end()
         .gap(px(6.0))
-        .child(tipped(
-            icon_button(
-                move || {
-                    if volume() <= 0.0 {
-                        Icon::Mute
-                    } else {
-                        Icon::Volume
-                    }
-                },
-                16.0,
-                "静音",
-                muted_fg,
-                toggle_mute,
-            ),
-            "静音",
-        ))
-        .child(slider(volume, input(), muted_fg(), fg(), set_volume, set_volume).w(px(96.0)))
+        .child(when(fits_volume, move || {
+            view()
+                .flex_row()
+                .items_center()
+                .gap(px(6.0))
+                .child(tipped(
+                    icon_button(
+                        move || {
+                            if volume() <= 0.0 {
+                                Icon::Mute
+                            } else {
+                                Icon::Volume
+                            }
+                        },
+                        16.0,
+                        "静音",
+                        muted_fg,
+                        toggle_mute,
+                    ),
+                    "静音",
+                ))
+                .child(slider(volume, input(), muted_fg(), fg(), set_volume, set_volume).w(px(96.0)))
+        }))
+        .child(when(move || !fits_volume(), move || {
+            volume_popover(volume_open)
+        }))
         .child(tipped(super::queue::queue_button(queue_open), "播放队列"))
         .child(tipped(
             icon_button(
@@ -255,4 +288,64 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
     #[cfg(not(target_os = "windows"))]
     let bar_view = bar_view.backdrop_blur(px(24.0));
     bar_view.child(now).child(center).child(right)
+}
+
+/// 窄窗口（音量滑条放不下）时的音量：按钮打开与队列一样的 `popover`，
+/// 里面是竖向音量滑条与静音键。触发器用普通 view（同队列按钮：
+/// nsh-base 的 button 会吃掉按压，popover 收不到）。
+fn volume_popover(open: Signal<bool>) -> AnyElement {
+    let s = store();
+    let volume = move || s.playback.with(|p| p.volume);
+    let glyph = move || {
+        if volume() <= 0.0 {
+            Icon::Mute
+        } else {
+            Icon::Volume
+        }
+    };
+    let trigger = view()
+        .size(px(32.0))
+        .items_center()
+        .justify_center()
+        .rounded(px(RADIUS_MD))
+        .role(AccessibilityRole::Button)
+        .label("音量")
+        .style_when(move || open.get(), |st| st.bg(hover()))
+        .hover(|st| st.bg(hover()))
+        .active(|st| st.opacity(0.8))
+        .transition_colors()
+        .duration(150.0)
+        .child(icon_dyn(glyph, 16.0, move || {
+            if open.get() { primary() } else { muted_fg() }
+        }));
+    popover()
+        .open(move || Some(open.get()))
+        .on_open_change(move |e: &PopoverEvent| {
+            if let PopoverEvent::OpenChange(next, _) = e {
+                open.set(*next);
+            }
+        })
+        .placement(Placement::Top)
+        .align(Align::Center)
+        .offset(px(12.0))
+        .margin(px(8.0))
+        .popup_style(|st| {
+            st.rounded(px(RADIUS_MD))
+                .border_1()
+                .border_color(border())
+                .bg(nsh_base::theme().popover)
+                .shadow_md()
+                .overflow_hidden()
+        })
+        .trigger(trigger)
+        .child(
+            view()
+                .items_center()
+                .px(px(8.0))
+                .py(px(10.0))
+                .gap(px(8.0))
+                .child(vslider(volume, input(), muted_fg(), fg(), set_volume, set_volume))
+                .child(icon_button(glyph, 15.0, "静音", muted_fg, toggle_mute)),
+        )
+        .into_element()
 }

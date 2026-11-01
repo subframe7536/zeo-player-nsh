@@ -52,6 +52,8 @@ Workarounds live in the app; don't patch NSH crates locally. When a limitation i
 
 - **解码图片缓存上限不可配置。** `nsh-platform-macos` / `nsh-platform-windows` 0.3.0 的 `src/image.rs` 里 `CACHE_BYTES` 固定为 128 MB，按最近使用淘汰。封面多时它会被填满，macOS 上 Core Animation 还持有同一批图片的副本，所以滚完整个专辑网格后 footprint 约 300 MB（本地实验改成 24 MB 后峰值 91 MB）。希望 NSH 提供缓存上限配置或在内存压力时清理。
 - **没有托盘与关闭拦截的接口。** `AppOptions::keep_alive_on_close` 只在 macOS 有且 runner 不让应用设置；Windows 没有对应项，也没有托盘 API。应用用 `tray-icon` 做托盘，关闭拦截直接改系统层：macOS 替换 `windowShouldClose:`，Windows 子类化 `NshWindow` 拦截 `WM_CLOSE`。希望 NSH 提供「关闭前询问」事件与托盘接口。
+- **没有窗口最小尺寸的接口。** `AppOptions` 只给初始大小，没有 min size；应用在系统层设：macOS `contentMinSize`（`src/window.rs` 的 `MIN_WIDTH`），Windows 子类化里处理 `WM_GETMINMAXINFO`。
+- **没有读写窗口 frame 的接口。** `WindowFrame` / `setFrame` 只在 `runtime::desktop`（`pub(crate)`，走 JS）里，Rust 组件拿不到，也没有读当前 frame 的 API。「记住窗口大小和位置」自己实现：macOS `setFrameUsingName` / `setFrameAutosaveName`，Windows `GetWindowPlacement` / `SetWindowPlacement`（`WM_EXITSIZEMOVE` 与退出时记录）。
 - **Windows 关窗后进程可能不退。** `nsh-platform-windows` 在 `nsh-ui` 线程退出时由线程局部析构释放 `Gfx`（D3D11 / D2D），而 Windows 在持有加载器锁时运行析构；Intel 驱动释放设备时等自己的工作线程退出，那个线程又要加载器锁——死锁，进程留在后台。应用在 `WM_DESTROY` 后移除托盘图标并 `TerminateProcess` 绕过。
 - **Windows 标题栏按钮画得发虚。** 隐藏标题栏时 NSH 用 Direct2D 画 1 设备像素宽的线（发虚）且总叠在应用之上。应用自己画（`src/ui/frame/caption.rs`）：子类化后把标题栏样式切到 Default，NSH 就不再画。代价是没有 Snap 布局（Win + Z 仍可用），失焦时按钮不变淡。
 - **`maskImage` 不绘制。** nsh-core 能解析 `maskImage` 渐变，但两个原生后端都不画。歌词边缘淡出改用每行按视口位置算透明度（`src/ui/now_playing/lyrics.rs` 的 `edge_fade`），只能整行淡，做不到行内渐隐。
