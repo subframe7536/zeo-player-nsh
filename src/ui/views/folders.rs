@@ -381,7 +381,7 @@ fn rescan_button() -> nsh_base::ButtonElement {
         .disabled(move || s.library.with(|l| l.scanning))
 }
 
-fn folder_cell(row: Memo<Option<FolderRow>>, cwd: Signal<Option<String>>) -> View {
+fn folder_cell(row: Memo<Option<FolderRow>>, cwd: Signal<Option<String>>) -> nsh_base::ButtonElement {
     let pick = move |f: fn(&FolderRow) -> String| {
         move || row.with(|r| r.as_ref().map(f).unwrap_or_default())
     };
@@ -401,21 +401,21 @@ fn folder_cell(row: Memo<Option<FolderRow>>, cwd: Signal<Option<String>>) -> Vie
         .child(icon(Icon::Folder, 20.0, move || {
             if is_root() { primary() } else { muted_fg() }
         }));
-    view()
+    let label = pick(|r| match r {
+        FolderRow::Folder { name, .. } => name.clone(),
+        FolderRow::Track { .. } => String::new(),
+    });
+    nsh_base::button()
         .h(px(ROW))
         .flex_row()
         .items_center()
         .gap(px(12.0))
         .px(px(12.0))
         .rounded(px(10.0))
-        .role(AccessibilityRole::Button)
-        .label(pick(|r| match r {
-            FolderRow::Folder { name, .. } => name.clone(),
-            FolderRow::Track { .. } => String::new(),
-        }))
+        .accessibility_label(move || SharedString::from(label()))
         .hover(|st| st.bg(hover()))
         .active(|st| st.opacity(0.7))
-        .on_press(move || {
+        .on_press(move |_: &()| {
             if let Some(FolderRow::Folder { path, .. }) = row.get_untracked() {
                 cwd.set(Some(path));
             }
@@ -439,6 +439,7 @@ fn folder_cell(row: Memo<Option<FolderRow>>, cwd: Signal<Option<String>>) -> Vie
                     }))
                     .number_of_lines(1)
                     .text_size(px(14.0))
+                    .line_height(px(14.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(fg()),
                 )
@@ -455,6 +456,7 @@ fn folder_cell(row: Memo<Option<FolderRow>>, cwd: Signal<Option<String>>) -> Vie
                     }))
                     .number_of_lines(1)
                     .text_size(px(12.0))
+                    .line_height(px(12.0))
                     .text_color(muted_fg()),
                 ),
         )
@@ -476,6 +478,7 @@ fn folder_cell(row: Memo<Option<FolderRow>>, cwd: Signal<Option<String>>) -> Vie
                 }))
                 .number_of_lines(1)
                 .text_size(px(13.0))
+                .line_height(px(13.0))
                 .text_color(muted_fg()),
             )
         }))

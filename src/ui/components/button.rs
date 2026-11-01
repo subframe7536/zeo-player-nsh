@@ -153,6 +153,7 @@ pub fn text_button(
         .child(
             text(label)
                 .text_size(px(size.text_size()))
+                .line_height(px(size.text_size()))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(fg()),
         )
@@ -172,7 +173,12 @@ pub fn tipped(content: impl IntoElement, tip: impl Into<SharedString>) -> View {
             .py(px(6.0))
             .rounded(px(RADIUS_MD))
             .bg(back)
-            .child(text(tip.into()).text_size(px(12.0)).text_color(front)),
+            .child(
+                text(tip.into())
+                    .text_size(px(12.0))
+                    .line_height(px(12.0))
+                    .text_color(front),
+            ),
     )
 }
 

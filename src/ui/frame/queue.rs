@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use nsh_base::{PopoverEvent, popover};
+use nsh_base::{PopoverEvent, button, popover};
 use nsh_core::prelude::*;
 
 use super::super::components::button::{RADIUS_MD, icon_button};
@@ -101,19 +101,19 @@ fn queue_panel(open: Signal<bool>) -> View {
             })
         };
         let src = move || path.with(|p| p.as_deref().and_then(cover_of));
-        view()
+        button()
             .h(px(ROW))
             .flex_row()
             .items_center()
             .gap(px(10.0))
             .px(px(10.0))
             .rounded(px(RADIUS_MD))
-            .role(AccessibilityRole::Button)
-            .label(title)
-            .style_when(is_current, |st| st.bg(hover()))
+            .accessibility_label(move || SharedString::from(title()))
+            .selected(is_current)
+            .selected_style(|st| st.bg(hover()))
             .hover(|st| st.bg(hover()))
             .active(|st| st.opacity(0.7))
-            .on_press(move || player().jump(untracked(|| at.index())))
+            .on_press(move |_: &()| player().jump(untracked(|| at.index())))
             .child(
                 view().w(px(24.0)).items_center().child(
                     when(is_current, move || {
@@ -126,6 +126,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                     .otherwise(move || {
                         text(move || (at.index() + 1).to_string())
                             .text_size(px(12.0))
+                            .line_height(px(12.0))
                             .tabular_nums()
                             .text_color(faint())
                     }),
@@ -141,6 +142,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                         text(title)
                             .number_of_lines(1)
                             .text_size(px(13.0))
+                            .line_height(px(13.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(move || if is_current() { primary() } else { fg() }),
                     )
@@ -150,6 +152,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                         })
                         .number_of_lines(1)
                         .text_size(px(12.0))
+                        .line_height(px(12.0))
                         .text_color(muted_fg()),
                     ),
             )
@@ -162,6 +165,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                     })
                 })
                 .text_size(px(12.0))
+                .line_height(px(12.0))
                 .tabular_nums()
                 .text_color(muted_fg()),
             )
@@ -180,11 +184,13 @@ fn queue_panel(open: Signal<bool>) -> View {
             .child(
                 text("队列是空的")
                     .text_size(px(13.0))
+                    .line_height(px(13.0))
                     .text_color(muted_fg()),
             )
             .child(
                 text("从曲库播放一首，它所在的列表就成为队列")
                     .text_size(px(12.0))
+                    .line_height(px(12.0))
                     .text_color(faint()),
             ),
     )
@@ -209,6 +215,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                         .child(
                             text("播放队列")
                                 .text_size(px(14.0))
+                                .line_height(px(14.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(fg()),
                         )
@@ -223,6 +230,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                                 }
                             })
                             .text_size(px(12.0))
+                            .line_height(px(12.0))
                             .tabular_nums()
                             .text_color(muted_fg()),
                         ),

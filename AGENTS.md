@@ -19,6 +19,7 @@ Zeo Player is a local-first desktop music player written as a pure-Rust NSH (Nat
 - Inside `src/ui/`: `frame/` is the persistent app frame (sidebar, title bar, player bar, queue, Windows caption), `components/` is the reusable widget kit, `views/` holds the route pages, `now_playing/` is the fullscreen player. Keep module-private visibility (`pub(super)` between siblings) rather than widening to `pub`.
 - Large lists are virtualized; keep them that way. Watch memory: no data URIs, no full-size artwork in caches — the tag cache stores `has_art` only and artwork is re-read on demand (`metadata::read_artwork`); thumbnails are files at 400 px (lists), 720 px (fullscreen), 64 px pre-blurred (background).
 - Persisted files (`library.json`, `playlists.json`, settings) live in the data directory from `dirs`. Keep their formats backward compatible or migrate them.
+- 单行 `text()` 一律配 `.line_height(px(字号))`（leading-none）：默认行高约 1.2× 字号，中文/拉丁字形墨水在行盒里偏下约 0.75 pt，居中行里能看出来。会折行的正文/提示保持默认行高。
 
 ## Commands
 

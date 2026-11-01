@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use nsh_base::{context_menu, menu, menu_item, menu_separator, submenu};
+use nsh_base::{button, context_menu, menu, menu_item, menu_separator, submenu};
 use nsh_core::prelude::*;
 
 use super::super::Nav;
@@ -62,6 +62,7 @@ fn row_content(glyph: Option<Icon>, label: impl Fn() -> String + 'static) -> Vie
                 .flex_1()
                 .number_of_lines(1)
                 .text_size(px(13.0))
+                .line_height(px(13.0))
                 .text_color(fg()),
         )
 }
@@ -93,6 +94,7 @@ fn separator() -> AnyElement {
 fn menu_heading(label: &'static str) -> AnyElement {
     text(label)
         .text_size(px(11.0))
+        .line_height(px(11.0))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(faint())
         .px(px(10.0))
@@ -122,6 +124,7 @@ pub fn add_to_submenu(paths: impl Fn() -> Vec<String> + Clone + 'static) -> AnyE
                     text("添加到歌单")
                         .flex_1()
                         .text_size(px(13.0))
+                        .line_height(px(13.0))
                         .text_color(fg()),
                 )
                 .child(icon(Icon::ChevronRight, 12.0, faint)),
@@ -157,7 +160,7 @@ pub fn add_to_submenu(paths: impl Fn() -> Vec<String> + Clone + 'static) -> AnyE
 /// 曲目的右键菜单（包着 `row`）：播放、添加到歌单、从歌单移除（`from`：
 /// 当前所在的手动歌单）、在访达中显示。
 pub fn track_menu(
-    row: View,
+    row: impl IntoElement,
     track: Memo<Option<TrackEntry>>,
     from: Option<u64>,
     play: impl Fn() + 'static,
@@ -267,37 +270,38 @@ fn sidebar_row(p: &Playlist) -> AnyElement {
     } else {
         Icon::Playlist
     };
-    let row = view()
-        .h(px(32.0))
-        .flex_row()
-        .items_center()
-        .gap(px(10.0))
-        .px(px(10.0))
-        .rounded(px(8.0))
-        .window_drag(false)
-        .role(AccessibilityRole::Button)
-        .label(name.clone())
-        .accessibility_state(move || AccessibilityState {
-            selected: active(),
-            ..AccessibilityState::default()
-        })
-        .style_when(active, |st| st.bg(sidebar_accent()))
-        .hover(|st| st.bg(sidebar_accent()))
-        .active(|st| st.opacity(0.7))
-        .on_press(move || {
-            store().search.set(String::new());
-            nav.set(Nav::Playlist(id));
-        })
-        .child(icon(glyph, 16.0, move || {
-            if active() { primary() } else { sidebar_fg() }
-        }))
-        .child(
-            text(name)
-                .flex_1()
-                .number_of_lines(1)
-                .text_size(px(14.0))
-                .text_color(move || if active() { fg() } else { sidebar_fg() }),
-        );
+    // 按钮不能挂 `window_drag(false)`（`Interactive` 不在组件元素上），
+    // 同 `page_header` 的返回键：裸 view 包一层。
+    let row = view().window_drag(false).child(
+        button()
+            .h(px(32.0))
+            .w_full()
+            .flex_row()
+            .items_center()
+            .gap(px(10.0))
+            .px(px(10.0))
+            .rounded(px(8.0))
+            .accessibility_label(name.clone())
+            .selected(active)
+            .selected_style(|st| st.bg(sidebar_accent()))
+            .hover(|st| st.bg(sidebar_accent()))
+            .active(|st| st.opacity(0.7))
+            .on_press(move |_: &()| {
+                store().search.set(String::new());
+                nav.set(Nav::Playlist(id));
+            })
+            .child(icon(glyph, 16.0, move || {
+                if active() { primary() } else { sidebar_fg() }
+            }))
+            .child(
+                text(name)
+                    .flex_1()
+                    .number_of_lines(1)
+                    .text_size(px(14.0))
+                    .line_height(px(14.0))
+                    .text_color(move || if active() { fg() } else { sidebar_fg() }),
+            ),
+    );
     // 「我喜欢」不能改名或删除：没有右键菜单。
     if favorite {
         return row.into_element();
@@ -546,17 +550,28 @@ fn rule_editor(draft: Signal<Draft>) -> View {
         .flex_row()
         .items_center()
         .gap(px(8.0))
-        .child(text("符合以下").text_size(px(14.0)).text_color(muted_fg()))
+        .child(
+            text("符合以下")
+                .text_size(px(14.0))
+                .line_height(px(14.0))
+                .text_color(muted_fg()),
+        )
         .child(
             tab_list()
                 .child(chip("全部", true))
                 .child(chip("任一", false)),
         )
-        .child(text("条件").text_size(px(14.0)).text_color(muted_fg()))
+        .child(
+            text("条件")
+                .text_size(px(14.0))
+                .line_height(px(14.0))
+                .text_color(muted_fg()),
+        )
         .child(view().flex_1())
         .child(
             text(move || format!("匹配 {} 首", matched.get()))
                 .text_size(px(14.0))
+                .line_height(px(14.0))
                 .font_weight(FontWeight::MEDIUM)
                 .tabular_nums()
                 .text_color(primary()),
@@ -605,12 +620,27 @@ fn rule_editor(draft: Signal<Draft>) -> View {
         .flex_row()
         .items_center()
         .gap(px(8.0))
-        .child(text("排序").text_size(px(14.0)).text_color(muted_fg()))
+        .child(
+            text("排序")
+                .text_size(px(14.0))
+                .line_height(px(14.0))
+                .text_color(muted_fg()),
+        )
         .child(sort)
         .child(view().w(px(12.0)))
-        .child(text("最多").text_size(px(14.0)).text_color(muted_fg()))
+        .child(
+            text("最多")
+                .text_size(px(14.0))
+                .line_height(px(14.0))
+                .text_color(muted_fg()),
+        )
         .child(limit)
-        .child(text("首").text_size(px(14.0)).text_color(muted_fg()));
+        .child(
+            text("首")
+                .text_size(px(14.0))
+                .line_height(px(14.0))
+                .text_color(muted_fg()),
+        );
     view()
         .gap(px(12.0))
         .flex_shrink(1.0)
@@ -747,6 +777,7 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
             .w(px(70.0))
             .number_of_lines(1)
             .text_size(px(12.0))
+            .line_height(px(12.0))
             .text_color(move || {
                 if invalid() {
                     nsh_base::theme().destructive

@@ -100,6 +100,7 @@ pub(super) fn left_column(swap: &Swap) -> View {
             .flex_1()
             .number_of_lines(1)
             .text_size(px(20.0))
+            .line_height(px(20.0))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(white_a(0.95)),
         )
@@ -117,6 +118,7 @@ pub(super) fn left_column(swap: &Swap) -> View {
                     .flex_1()
                     .number_of_lines(1)
                     .text_size(px(13.0))
+                    .line_height(px(13.0))
                     .text_color(white_a(0.7)),
             )
     };
@@ -159,6 +161,7 @@ pub(super) fn left_column(swap: &Swap) -> View {
                             text(label)
                                 .number_of_lines(1)
                                 .text_size(px(11.0))
+                                .line_height(px(11.0))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(white_a(0.85)),
                         )
@@ -290,7 +293,12 @@ fn more_menu() -> AnyElement {
             .hover(|st| st.bg(hover()))
             .active(|st| st.bg(hover()))
             .child(icon(glyph, 15.0, muted_fg))
-            .child(text(label).text_size(px(13.0)).text_color(fg()))
+            .child(
+                text(label)
+                    .text_size(px(13.0))
+                    .line_height(px(13.0))
+                    .text_color(fg()),
+            )
     };
     menu()
         .offset(px(4.0))
@@ -404,6 +412,7 @@ fn waveform_seek() -> View {
     };
     let small = |t: Text| {
         t.text_size(px(12.0))
+            .line_height(px(12.0))
             .tabular_nums()
             .text_color(white_a(0.75))
     };
@@ -436,6 +445,7 @@ fn waveform_seek() -> View {
                     .text_center()
                     .number_of_lines(1)
                     .text_size(px(10.5))
+                    .line_height(px(10.5))
                     .text_color(white_a(0.45)),
                 )
                 .child(
@@ -486,6 +496,7 @@ fn volume_row() -> View {
                 .w(px(26.0))
                 .text_right()
                 .text_size(px(11.0))
+                .line_height(px(11.0))
                 .tabular_nums()
                 .text_color(white_a(0.55)),
         )

@@ -128,24 +128,27 @@ fn hero(
         .gap(px(16.0))
         .window_drag(true)
         .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap(px(2.0))
-                .self_start()
-                .h(px(28.0))
-                .pl(px(4.0))
-                .pr(px(10.0))
-                .ml(px(-8.0))
-                .rounded(px(8.0))
-                .role(AccessibilityRole::Button)
-                .label("返回")
-                .window_drag(false)
-                .hover(|s| s.bg(hover()))
-                .active(|s| s.opacity(0.6))
-                .on_press(move || back())
-                .child(icon(Icon::ChevronLeft, 16.0, muted_fg))
-                .child(text("返回").text_size(px(13.0)).text_color(muted_fg())),
+            view().self_start().ml(px(-8.0)).window_drag(false).child(
+                nsh_base::button()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(2.0))
+                    .h(px(28.0))
+                    .pl(px(4.0))
+                    .pr(px(10.0))
+                    .rounded(px(8.0))
+                    .accessibility_label("返回")
+                    .hover(|s| s.bg(hover()))
+                    .active(|s| s.opacity(0.6))
+                    .on_press(move |_: &()| back())
+                    .child(icon(Icon::ChevronLeft, 16.0, muted_fg))
+                    .child(
+                        text("返回")
+                            .text_size(px(13.0))
+                            .line_height(px(13.0))
+                            .text_color(muted_fg()),
+                    ),
+            ),
         )
         .child(
             view()
@@ -161,6 +164,7 @@ fn hero(
                         .child(
                             text(eyebrow)
                                 .text_size(px(11.0))
+                                .line_height(px(11.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .letter_spacing(px(0.8))
                                 .text_color(primary()),
@@ -176,6 +180,7 @@ fn hero(
                             text(subtitle)
                                 .number_of_lines(1)
                                 .text_size(px(15.0))
+                                .line_height(px(15.0))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(fg()),
                         )
@@ -183,6 +188,7 @@ fn hero(
                             text(meta)
                                 .number_of_lines(1)
                                 .text_size(px(13.0))
+                                .line_height(px(13.0))
                                 .text_color(muted_fg()),
                         )
                         .child(

@@ -27,6 +27,7 @@ pub fn page_header(
                 .child(
                     text("返回")
                         .text_size(px(13.0))
+                        .line_height(px(13.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(muted_fg()),
                 ),
@@ -50,6 +51,7 @@ pub fn page_header(
                     text(title)
                         .number_of_lines(1)
                         .text_size(px(28.0))
+                        .line_height(px(32.0))
                         .font_weight(FontWeight::BOLD)
                         .text_color(fg()),
                 )
@@ -57,6 +59,7 @@ pub fn page_header(
                     text(subtitle)
                         .number_of_lines(1)
                         .text_size(px(13.0))
+                        .line_height(px(13.0))
                         .text_color(muted_fg()),
                 ),
         )
@@ -85,6 +88,7 @@ pub fn empty_state(name: Icon, title: &'static str, body: &'static str) -> View 
         .child(
             text(title)
                 .text_size(px(16.0))
+                .line_height(px(16.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(fg()),
         )

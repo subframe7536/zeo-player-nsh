@@ -95,6 +95,7 @@ fn avatar(
         .child(
             text(move || name().chars().next().map(String::from).unwrap_or_default())
                 .text_size(px(size * 0.4))
+                .line_height(px(size * 0.4))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(muted_fg()),
         )
@@ -164,7 +165,7 @@ pub fn Artists() -> impl IntoElement {
                     let name = move || {
                         group.with(|g| g.as_ref().map(|g| g.title.clone()).unwrap_or_default())
                     };
-                    view()
+                    nsh_base::button()
                         .h(px(64.0))
                         .flex_row()
                         .items_center()
@@ -172,11 +173,12 @@ pub fn Artists() -> impl IntoElement {
                         .px(px(12.0))
                         .mx(px(20.0))
                         .rounded(px(10.0))
-                        .role(AccessibilityRole::Button)
-                        .label(name)
+                        .accessibility_label(move || SharedString::from(name()))
                         .hover(|st| st.bg(hover()))
                         .active(|st| st.opacity(0.7))
-                        .on_press(move || selected.set(group.get_untracked().map(|g| g.key)))
+                        .on_press(move |_: &()| {
+                            selected.set(group.get_untracked().map(|g| g.key))
+                        })
                         .child(avatar(cover, name, 44.0))
                         .child(
                             view()
@@ -187,6 +189,7 @@ pub fn Artists() -> impl IntoElement {
                                     text(name)
                                         .number_of_lines(1)
                                         .text_size(px(14.0))
+                                        .line_height(px(14.0))
                                         .font_weight(FontWeight::MEDIUM)
                                         .text_color(fg()),
                                 )
@@ -205,6 +208,7 @@ pub fn Artists() -> impl IntoElement {
                                         })
                                     })
                                     .text_size(px(12.0))
+                                    .line_height(px(12.0))
                                     .text_color(muted_fg()),
                                 ),
                         )
@@ -299,15 +303,17 @@ pub fn Albums() -> impl IntoElement {
                     };
                     let cover_path =
                         move || group.with(|g| g.as_ref().and_then(|g| g.cover.clone()));
-                    view()
+                    let title = field(|g| g.title.clone());
+                    nsh_base::button()
                         .p(px(8.0))
                         .gap(px(10.0))
                         .rounded(px(14.0))
-                        .role(AccessibilityRole::Button)
-                        .label(field(|g| g.title.clone()))
+                        .accessibility_label(move || SharedString::from(title()))
                         .hover(|st| st.bg(hover()))
                         .active(|st| st.opacity(0.75))
-                        .on_press(move || selected.set(group.get_untracked().map(|g| g.key)))
+                        .on_press(move |_: &()| {
+                            selected.set(group.get_untracked().map(|g| g.key))
+                        })
                         .child(
                             cover(move || cover_path().and_then(|p| cover_of(&p)), None, 10.0)
                                 .shadow_md(),
@@ -320,6 +326,7 @@ pub fn Albums() -> impl IntoElement {
                                     text(field(|g| g.title.clone()))
                                         .number_of_lines(1)
                                         .text_size(px(13.0))
+                                        .line_height(px(13.0))
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(fg()),
                                 )
@@ -327,6 +334,7 @@ pub fn Albums() -> impl IntoElement {
                                     text(field(|g| g.subtitle.clone()))
                                         .number_of_lines(1)
                                         .text_size(px(12.0))
+                                        .line_height(px(12.0))
                                         .text_color(muted_fg()),
                                 ),
                         )
@@ -427,7 +435,7 @@ pub fn Genres() -> impl IntoElement {
                 let chips = list.iter().map(|g| {
                     let key = g.key.clone();
                     let art = stored(g.cover.clone());
-                    view()
+                    nsh_base::button()
                         .flex_row()
                         .items_center()
                         .gap(px(10.0))
@@ -436,11 +444,10 @@ pub fn Genres() -> impl IntoElement {
                         .pr(px(16.0))
                         .rounded_full()
                         .bg(muted())
-                        .role(AccessibilityRole::Button)
-                        .label(g.title.clone())
+                        .accessibility_label(g.title.clone())
                         .hover(|st| st.bg(hover()))
                         .active(|st| st.opacity(0.7))
-                        .on_press(move || selected.set(Some(key.clone())))
+                        .on_press(move |_: &()| selected.set(Some(key.clone())))
                         .child(cover_with(
                             move || art.get().and_then(|p| cover_of(&p)),
                             32.0,
@@ -450,12 +457,14 @@ pub fn Genres() -> impl IntoElement {
                         .child(
                             text(g.title.clone())
                                 .text_size(px(14.0))
+                                .line_height(px(14.0))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(fg()),
                         )
                         .child(
                             text(g.tracks.len().to_string())
                                 .text_size(px(12.0))
+                                .line_height(px(12.0))
                                 .tabular_nums()
                                 .text_color(faint()),
                         )

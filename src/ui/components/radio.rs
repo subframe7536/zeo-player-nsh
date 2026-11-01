@@ -77,6 +77,7 @@ pub fn item(
         .child(
             text(label)
                 .text_size(px(14.0))
+                .line_height(px(14.0))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(fg()),
         )

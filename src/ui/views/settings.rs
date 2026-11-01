@@ -93,6 +93,7 @@ fn setting_section(title: &'static str, body: &'static str, action: Option<AnyEl
                         .child(
                             text(title)
                                 .text_size(px(15.0))
+                                .line_height(px(15.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(fg()),
                         )
@@ -106,7 +107,12 @@ fn setting_section(title: &'static str, body: &'static str, action: Option<AnyEl
 fn note(message: Signal<String>) -> AnyElement {
     dynamic(move || {
         let now = message.get();
-        (!now.is_empty()).then(|| text(now).text_size(px(12.0)).text_color(muted_fg()))
+        (!now.is_empty()).then(|| {
+            text(now)
+                .text_size(px(12.0))
+                .line_height(px(12.0))
+                .text_color(muted_fg())
+        })
     })
 }
 
@@ -211,6 +217,7 @@ fn folders_section() -> View {
                                 text(name)
                                     .number_of_lines(1)
                                     .text_size(px(14.0))
+                                    .line_height(px(14.0))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(fg()),
                             )
@@ -218,6 +225,7 @@ fn folders_section() -> View {
                                 text(root.clone())
                                     .number_of_lines(1)
                                     .text_size(px(12.0))
+                                    .line_height(px(12.0))
                                     .text_color(muted_fg()),
                             ),
                     )
@@ -226,6 +234,7 @@ fn folders_section() -> View {
                             counts.with(|c| c.get(i).map(|n| format!("{n} 首")).unwrap_or_default())
                         })
                         .text_size(px(12.0))
+                        .line_height(px(12.0))
                         .tabular_nums()
                         .text_color(faint()),
                     )
@@ -355,6 +364,7 @@ fn library_section() -> View {
                             }
                         })
                         .text_size(px(13.0))
+                        .line_height(px(13.0))
                         .font_weight(FontWeight::MEDIUM)
                         .tabular_nums()
                         .text_color(fg()),
@@ -363,31 +373,35 @@ fn library_section() -> View {
                     .child(
                         text(move || format!("{:.0}%", fraction() * 100.0))
                             .text_size(px(12.0))
+                            .line_height(px(12.0))
                             .tabular_nums()
                             .text_color(muted_fg()),
                     ),
             )
             .child(
-                view()
-                    .h(px(6.0))
-                    .w_full()
-                    .rounded_full()
-                    .bg(muted())
-                    .overflow_hidden()
-                    .child(
-                        view()
-                            .h_full()
+                nsh_base::progress()
+                    .accessibility_label("扫描进度")
+                    .value(move || (fraction() * 100.0) as f32)
+                    .track_style(|st| {
+                        st.h(px(6.0))
+                            .w_full()
+                            .rounded_full()
+                            .bg(muted())
+                            .overflow_hidden()
+                    })
+                    .indicator_style(|st| {
+                        st.h_full()
                             .rounded_full()
                             .bg(primary())
-                            .w(move || relative(fraction() as f32))
                             .transition_all()
-                            .duration(150.0),
-                    ),
+                            .duration(150.0)
+                    }),
             )
             .child(
                 text(move || progress().current)
                     .number_of_lines(1)
                     .text_size(px(12.0))
+                    .line_height(px(12.0))
                     .text_color(faint()),
             )
     };
@@ -469,16 +483,22 @@ fn watch_row() -> View {
                 .child(
                     text("监视文件夹变化")
                         .text_size(px(14.0))
+                        .line_height(px(14.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(fg()),
                 )
-                .child(text(status).text_size(px(12.0)).text_color(move || {
-                    if s.library.with(|l| l.watching && l.watch.error.is_some()) {
-                        nsh_base::theme().destructive
-                    } else {
-                        muted_fg()
-                    }
-                })),
+                .child(
+                    text(status)
+                        .text_size(px(12.0))
+                        .line_height(px(12.0))
+                        .text_color(move || {
+                            if s.library.with(|l| l.watching && l.watch.error.is_some()) {
+                                nsh_base::theme().destructive
+                            } else {
+                                muted_fg()
+                            }
+                        }),
+                ),
         )
         .child(toggle)
 }
@@ -489,11 +509,17 @@ fn stat(value: impl Fn() -> String + 'static, label: &'static str) -> View {
         .child(
             text(value)
                 .text_size(px(22.0))
+                .line_height(px(22.0))
                 .font_weight(FontWeight::BOLD)
                 .tabular_nums()
                 .text_color(fg()),
         )
-        .child(text(label).text_size(px(12.0)).text_color(muted_fg()))
+        .child(
+            text(label)
+                .text_size(px(12.0))
+                .line_height(px(12.0))
+                .text_color(muted_fg()),
+        )
 }
 
 /// 常用分隔符（可直接点选）。
@@ -545,9 +571,8 @@ fn genres_section() -> View {
             let sep = sep.clone();
             move || separators().contains(&sep)
         };
-        let on2 = on.clone();
         let press = sep.clone();
-        view()
+        nsh_base::button()
             .flex_row()
             .items_center()
             .gap(px(6.0))
@@ -555,26 +580,26 @@ fn genres_section() -> View {
             .px(px(12.0))
             .rounded_full()
             .border_1()
-            .border_color(move || if on() { primary() } else { border() })
-            .bg(move || {
-                if on2() {
-                    primary().opacity(0.12)
-                } else {
-                    AdaptiveColor::TRANSPARENT
-                }
-            })
-            .role(AccessibilityRole::Button)
-            .label(caption.unwrap_or("自定义分隔符"))
+            .border_color(border())
+            .selected(on)
+            .selected_style(|st| st.border_color(primary()).bg(primary().opacity(0.12)))
+            .accessibility_label(caption.unwrap_or("自定义分隔符"))
             .hover(|st| st.bg(hover()))
             .active(|st| st.opacity(0.7))
-            .on_press(move || toggle(press.clone()))
+            .on_press(move |_: &()| toggle(press.clone()))
             .child(
                 text(separator_label(&sep))
                     .text_size(px(14.0))
+                    .line_height(px(14.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(fg()),
             )
-            .child(caption.map(|c| text(c).text_size(px(12.0)).text_color(muted_fg())))
+            .child(caption.map(|c| {
+                text(c)
+                    .text_size(px(12.0))
+                    .line_height(px(12.0))
+                    .text_color(muted_fg())
+            }))
     };
 
     let chips = dynamic(move || {
@@ -672,6 +697,7 @@ fn genres_section() -> View {
                             .number_of_lines(1)
                             .w(px(220.0))
                             .text_size(px(13.0))
+                            .line_height(px(13.0))
                             .text_color(muted_fg()),
                     )
                     .child(icon(Icon::ChevronRight, 12.0, faint))
@@ -690,6 +716,7 @@ fn genres_section() -> View {
                                     .child(
                                         text(g)
                                             .text_size(px(12.0))
+                                            .line_height(px(12.0))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(fg()),
                                     )
@@ -712,6 +739,7 @@ fn genres_section() -> View {
                         format!("预览 · 当前共 {} 个标签", total.len())
                     })
                     .text_size(px(11.0))
+                    .line_height(px(11.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .letter_spacing(px(0.6))
                     .text_color(faint())
@@ -815,6 +843,7 @@ fn font_select() -> AnyElement {
                 .min_w(px(0.0))
                 .number_of_lines(1)
                 .text_size(px(14.0))
+                .line_height(px(14.0))
                 .font_family(move || {
                     SharedString::from(current().unwrap_or_else(|| "system-ui".to_owned()))
                 })
@@ -856,20 +885,20 @@ fn font_choice(
     family: impl Fn() -> String + Copy + 'static,
     selected: impl Fn() -> bool + Copy + 'static,
     press: impl Fn() + 'static,
-) -> View {
-    view()
+) -> nsh_base::ButtonElement {
+    nsh_base::button()
         .h(px(40.0))
         .flex_row()
         .items_center()
         .gap(px(8.0))
         .px(px(8.0))
         .rounded(px(6.0))
-        .role(AccessibilityRole::Button)
-        .label(move || label())
-        .style_when(selected, |st| st.bg(primary().opacity(0.12)))
+        .accessibility_label(move || SharedString::from(label()))
+        .selected(selected)
+        .selected_style(|st| st.bg(primary().opacity(0.12)))
         .hover(|st| st.bg(hover()))
         .active(|st| st.opacity(0.7))
-        .on_press(move || press())
+        .on_press(move |_: &()| press())
         .child(
             text(move || format!("{} · 歌词 Aa あ", label()))
                 .flex_1()
@@ -877,6 +906,7 @@ fn font_choice(
                 .number_of_lines(1)
                 .font_family(move || SharedString::from(family()))
                 .text_size(px(14.0))
+                .line_height(px(14.0))
                 .text_color(fg()),
         )
         .child(when(selected, || icon(Icon::Check, 14.0, primary)))
@@ -941,6 +971,7 @@ fn font_panel(open: Signal<bool>) -> View {
                     }
                 })
                 .text_size(px(13.0))
+                .line_height(px(13.0))
                 .text_color(muted_fg()),
             ),
     )

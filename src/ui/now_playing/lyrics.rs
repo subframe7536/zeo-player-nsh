@@ -63,6 +63,7 @@ pub(super) fn lyrics_column(swap: &Swap) -> View {
                     }
                 })
                 .text_size(px(15.0))
+                .line_height(px(15.0))
                 .text_color(white_a(0.4)),
             )
         }))
@@ -344,6 +345,7 @@ fn lyrics_scroller() -> View {
                         .child(
                             text(format_time(time))
                                 .text_size(px(12.0))
+                                .line_height(px(12.0))
                                 .font_weight(FontWeight::MEDIUM)
                                 .tabular_nums()
                                 .text_color(white_a(0.8)),
@@ -359,31 +361,49 @@ fn lyrics_scroller() -> View {
                 })
             })
         };
+        // `on_layout` 只能挂在裸 view 上（`Interactive` 不在组件元素上）：
+        // 外层量位置、包按钮。按钮管按压与无障碍，时间戳仍在最外层的绝对定位。
         view()
             .w_full()
             .group()
             .opacity(fade)
-            .role(AccessibilityRole::Button)
-            .label(if seekable {
-                format!("跳到 {}", format_time(time))
-            } else {
-                String::new()
-            })
-            // 当前行与前后一句清晰，再远越模糊（见 `lyric_blur`）。颜色
-            // 在文字上：原文随高亮变化，译文始终不变。时间戳在这层之外，
-            // 不跟着模糊。
             .child(
-                view()
+                nsh_base::button()
                     .w_full()
-                    .style_with(move |st| {
-                        // 鼠标在歌词区时不模糊（移入移出有过渡）；否则按与
-                        // 高亮行的距离模糊。
-                        let blur = lyric_blur(timed, distance()) * (1.0 - clear.get());
-                        st.blur(px(blur))
+                    .accessibility_label(if seekable {
+                        format!("跳到 {}", format_time(time))
+                    } else {
+                        String::new()
                     })
-                    .transition_all()
-                    .duration(300.0)
-                    .child(content_view),
+                    // 当前行与前后一句清晰，再远越模糊（见 `lyric_blur`）。颜色
+                    // 在文字上：原文随高亮变化，译文始终不变。时间戳在这层之外，
+                    // 不跟着模糊。
+                    .child(
+                        view()
+                            .w_full()
+                            .style_with(move |st| {
+                                // 鼠标在歌词区时不模糊（移入移出有过渡）；否则按与
+                                // 高亮行的距离模糊。
+                                let blur = lyric_blur(timed, distance()) * (1.0 - clear.get());
+                                st.blur(px(blur))
+                            })
+                            .transition_all()
+                            .duration(300.0)
+                            .child(content_view),
+                    )
+                    .on_press(move |_: &()| {
+                        if seekable {
+                            if let Some(task) = resume.borrow_mut().take() {
+                                task.cancel();
+                            }
+                            // 直接滚到点的这一行；跟随在高亮换过来之前不动。
+                            *pending.borrow_mut() = Some((i, std::time::Instant::now()));
+                            *last_followed.borrow_mut() = i;
+                            seek_to(time);
+                            scroll_to_line(i);
+                            follow.set(true);
+                        }
+                    }),
             )
             .child(stamp)
             .on_layout(move |frame: &Bounds<Points>| {
@@ -406,19 +426,6 @@ fn lyrics_scroller() -> View {
                     laid.set(index + 1);
                 }
             })
-            .on_press(move || {
-                if seekable {
-                    if let Some(task) = resume.borrow_mut().take() {
-                        task.cancel();
-                    }
-                    // 直接滚到点的这一行；跟随在高亮换过来之前不动。
-                    *pending.borrow_mut() = Some((i, std::time::Instant::now()));
-                    *last_followed.borrow_mut() = i;
-                    seek_to(time);
-                    scroll_to_line(i);
-                    follow.set(true);
-                }
-            })
     });
 
     let user_scroll = interrupt.clone();
@@ -433,6 +440,7 @@ fn lyrics_scroller() -> View {
             text("歌词无时间信息")
                 .text_center()
                 .text_size(px(11.0))
+                .line_height(px(11.0))
                 .letter_spacing(px(0.6))
                 .text_color(white_a(0.4))
                 .pb(px(8.0))

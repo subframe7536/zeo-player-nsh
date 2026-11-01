@@ -53,6 +53,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                     })
                     .number_of_lines(1)
                     .text_size(px(14.0))
+                    .line_height(px(14.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(fg()),
                 )
@@ -66,6 +67,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                     })
                     .number_of_lines(1)
                     .text_size(px(12.0))
+                    .line_height(px(12.0))
                     .text_color(muted_fg()),
                 ),
         );
@@ -155,6 +157,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 .w(px(40.0))
                 .text_right()
                 .text_size(px(11.0))
+                .line_height(px(11.0))
                 .tabular_nums()
                 .text_color(muted_fg()),
         )
@@ -179,6 +182,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
             text(move || format_time(duration()))
                 .w(px(40.0))
                 .text_size(px(11.0))
+                .line_height(px(11.0))
                 .tabular_nums()
                 .text_color(muted_fg()),
         );

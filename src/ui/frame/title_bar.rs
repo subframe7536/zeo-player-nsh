@@ -34,6 +34,7 @@ pub(crate) fn title_bar() -> View {
                     text("Zeo Player")
                         .flex_shrink_0()
                         .text_size(px(14.0))
+                        .line_height(px(14.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(fg()),
                 ),

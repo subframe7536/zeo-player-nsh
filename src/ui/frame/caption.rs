@@ -66,14 +66,14 @@ pub fn buttons(on_dark: impl Fn() -> bool + Copy + 'static) -> impl IntoElement 
             .flex_row()
             .z_index(200)
             .window_drag(false)
-            .child(button(
+            .child(caption_button(
                 move || Icon::WinMinimize,
                 || "最小化",
                 false,
                 on_dark,
                 crate::window::minimize,
             ))
-            .child(button(
+            .child(caption_button(
                 move || {
                     if maximized() {
                         Icon::WinRestore
@@ -86,7 +86,7 @@ pub fn buttons(on_dark: impl Fn() -> bool + Copy + 'static) -> impl IntoElement 
                 on_dark,
                 crate::window::toggle_maximize,
             ))
-            .child(button(
+            .child(caption_button(
                 move || Icon::WinClose,
                 || "关闭",
                 true,
@@ -96,7 +96,7 @@ pub fn buttons(on_dark: impl Fn() -> bool + Copy + 'static) -> impl IntoElement 
     })
 }
 
-fn button(
+fn caption_button(
     glyph: impl Fn() -> Icon + 'static,
     label: impl Fn() -> &'static str + 'static,
     close: bool,
@@ -122,20 +122,26 @@ fn button(
             fg()
         }
     };
+    // 悬停进出只能挂在裸 view 上（`Interactive` 不在组件元素上）：
+    // 外层记悬停，内层 nsh-base `button` 管按压与无障碍。
     view()
         .w(px(BUTTON_W))
         .h_full()
-        .items_center()
-        .justify_center()
-        .role(AccessibilityRole::Button)
-        .label(label)
-        .bg(background)
-        .active(|st| st.opacity(0.8))
         .on_hover_in(move || hovered.set(true))
         .on_hover_out(move || hovered.set(false))
-        .on_press(move || {
-            hovered.set(false);
-            press();
-        })
-        .child(icon_dyn(glyph, GLYPH, tint))
+        .child(
+            nsh_base::button()
+                .w_full()
+                .h_full()
+                .items_center()
+                .justify_center()
+                .accessibility_label(move || SharedString::from(label()))
+                .bg(background)
+                .active(|st| st.opacity(0.8))
+                .on_press(move |_: &()| {
+                    hovered.set(false);
+                    press();
+                })
+                .child(icon_dyn(glyph, GLYPH, tint)),
+        )
 }

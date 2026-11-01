@@ -71,6 +71,7 @@ pub fn select_trigger(
                     .min_w(px(0.0))
                     .number_of_lines(1)
                     .text_size(px(14.0))
+                    .line_height(px(14.0))
                     .text_color(move || if current().is_empty() { faint() } else { fg() }),
                 ),
         )
@@ -208,6 +209,7 @@ pub fn tab_trigger(
         .child(
             text(label)
                 .text_size(px(14.0))
+                .line_height(px(14.0))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(move || if on() { fg() } else { muted_fg() }),
         )

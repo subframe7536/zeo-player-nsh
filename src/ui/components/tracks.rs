@@ -1,5 +1,6 @@
 //! 曲目表套件：列定义、定宽单元格、列头与曲目行；文件夹 / 浏览 / 歌单页共用。
 
+use nsh_base::{ButtonElement, button};
 use nsh_core::prelude::*;
 
 use super::cover::cover;
@@ -75,6 +76,7 @@ pub fn format_cell(value: impl Fn() -> String + Copy + 'static) -> View {
                 .child(
                     text(value)
                         .text_size(px(10.0))
+                        .line_height(px(10.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .letter_spacing(px(0.4))
                         .text_color(muted_fg()),
@@ -101,6 +103,7 @@ pub fn value_cell(width: f32, value: impl Fn() -> String + 'static) -> View {
         text(value)
             .number_of_lines(1)
             .text_size(px(13.0))
+            .line_height(px(13.0))
             .tabular_nums()
             .text_color(muted_fg()),
     )
@@ -111,6 +114,7 @@ pub fn track_columns(cols: Columns) -> View {
     let label = |s: &'static str| {
         text(s)
             .text_size(px(11.0))
+            .line_height(px(11.0))
             .font_weight(FontWeight::SEMIBOLD)
             .letter_spacing(px(0.6))
             .text_color(faint())
@@ -157,7 +161,7 @@ pub fn track_row(
     number: Memo<String>,
     cols: Columns,
     on_play: impl Fn() + 'static,
-) -> View {
+) -> ButtonElement {
     let s = store();
     let current = computed(move || {
         track.with(|t| {
@@ -170,19 +174,20 @@ pub fn track_row(
     let field = move |f: fn(&TrackEntry) -> String| {
         move || track.with(|t| t.as_ref().map(f).unwrap_or_default())
     };
-    view()
+    let title = field(|t| t.title.clone());
+    button()
         .h(px(ROW))
         .flex_row()
         .items_center()
         .gap(px(12.0))
         .px(px(12.0))
         .rounded(px(10.0))
-        .role(AccessibilityRole::Button)
-        .label(field(|t| t.title.clone()))
-        .style_when(move || current.get(), |st| st.bg(hover()))
+        .accessibility_label(move || SharedString::from(title()))
+        .selected(current)
+        .selected_style(|st| st.bg(hover()))
         .hover(|st| st.bg(hover()))
         .active(|st| st.opacity(0.7))
-        .on_press(on_play)
+        .on_press(move |_: &()| on_play())
         .child(when(fits_number, move || {
             view()
                 .w(px(W_NUMBER))
@@ -202,6 +207,7 @@ pub fn track_row(
                     .otherwise(move || {
                         text(move || number.get())
                             .text_size(px(13.0))
+                            .line_height(px(13.0))
                             .tabular_nums()
                             .text_color(faint())
                     }),
@@ -221,6 +227,7 @@ pub fn track_row(
                     text(field(|t| t.title.clone()))
                         .number_of_lines(1)
                         .text_size(px(14.0))
+                        .line_height(px(14.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(move || if current.get() { primary() } else { fg() }),
                 )
@@ -228,6 +235,7 @@ pub fn track_row(
                     text(field(|t| t.artist.clone()))
                         .number_of_lines(1)
                         .text_size(px(12.0))
+                        .line_height(px(12.0))
                         .text_color(muted_fg()),
                 ),
         )
@@ -237,6 +245,7 @@ pub fn track_row(
                     text(field(|t| t.album.clone()))
                         .number_of_lines(1)
                         .text_size(px(13.0))
+                        .line_height(px(13.0))
                         .text_color(muted_fg()),
                 )
             })

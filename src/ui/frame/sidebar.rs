@@ -109,26 +109,22 @@ fn search_box(focus: SearchFocus) -> View {
         ))
 }
 
-fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> View {
+fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> nsh_base::ButtonElement {
     let nav = global::<Nav>();
     let active = move || nav.get() == target;
-    view()
+    nsh_base::button()
         .h(px(34.0))
         .flex_row()
         .items_center()
         .gap(px(10.0))
         .px(px(10.0))
         .rounded(px(8.0))
-        .role(AccessibilityRole::Button)
-        .label(label)
-        .accessibility_state(move || AccessibilityState {
-            selected: active(),
-            ..AccessibilityState::default()
-        })
-        .style_when(active, |s| s.bg(sidebar_accent()))
+        .accessibility_label(label)
+        .selected(active)
+        .selected_style(|s| s.bg(sidebar_accent()))
         .hover(|s| s.bg(sidebar_accent()))
         .active(|s| s.opacity(0.7))
-        .on_press(move || nav.set(target))
+        .on_press(move |_: &()| nav.set(target))
         .child(icon(glyph, 17.0, move || {
             if active() { primary() } else { sidebar_fg() }
         }))
@@ -136,6 +132,7 @@ fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> View {
             text(label)
                 .flex_1()
                 .text_size(px(14.0))
+                .line_height(px(14.0))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(move || if active() { theme::fg() } else { sidebar_fg() }),
         )
@@ -144,6 +141,7 @@ fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> View {
 pub(crate) fn section_label(label: &'static str) -> Text {
     text(label)
         .text_size(px(11.0))
+        .line_height(px(11.0))
         .font_weight(FontWeight::SEMIBOLD)
         .letter_spacing(px(0.6))
         .text_color(faint())
@@ -192,6 +190,7 @@ pub(crate) fn sidebar(search: SearchFocus) -> View {
                         })
                     })
                     .text_size(px(12.0))
+                    .line_height(px(12.0))
                     .tabular_nums()
                     .text_color(faint())
                     .px(px(10.0))
