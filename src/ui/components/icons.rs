@@ -289,24 +289,14 @@ pub fn icon_dyn(
         .pointer_events(PointerEvents::None)
 }
 
-/// 应用图标的 SVG 版（icon.png 的矢量重画）：深色圆角底、绿色均衡条、
-/// 奶油色音符。填充图形没有描边，任何缩放级别下边缘都干净。
+/// 应用图标的 SVG 版：直接用 resources/icon.svg，与应用图标同一份图形。
+/// 源文件根元素声明 1024 见方；把根标签换成带 viewBox 的显示尺寸
+/// （文件头注释：声明尺寸即光栅化尺寸，按 1024 出图再缩到十几点会糊）。
 fn logo_svg(size: f32) -> SharedString {
-    const BODY: &str = concat!(
-        r##"<rect x="1" y="1" width="22" height="22" rx="6" fill="#2f3341"/>"##,
-        r##"<g fill="#b3c07d">"##,
-        r#"<rect x="4.2" y="9.6" width="1.7" height="4.8" rx="0.85"/>"#,
-        r#"<rect x="6.8" y="7.8" width="1.7" height="8.4" rx="0.85"/>"#,
-        r#"<rect x="9.4" y="5.8" width="1.7" height="12.4" rx="0.85"/>"#,
-        r#"</g>"#,
-        r##"<g fill="#f1f0e2">"##,
-        r#"<ellipse cx="16.1" cy="16.8" rx="2.5" ry="1.9" transform="rotate(-14 16.1 16.8)"/>"#,
-        r#"<rect x="17.9" y="7.4" width="1.5" height="9.6"/>"#,
-        r#"<path d="M17.9 7.4c2.4 0 3.5 1.3 3.5 3.2-1-1.1-2.1-1.6-3.5-1.6z"/>"#,
-        r#"</g>"#,
-    );
-    let svg = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="{size}" height="{size}">{BODY}</svg>"#
+    let svg = include_str!("../../../resources/icon.svg").replacen(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1024\" height=\"1024\" fill=\"none\">",
+        &format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1024 1024\" width=\"{size}\" height=\"{size}\" fill=\"none\">"),
+        1,
     );
     format!("data:image/svg+xml,{}", percent_encode(&svg)).into()
 }

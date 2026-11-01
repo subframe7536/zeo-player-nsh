@@ -265,7 +265,7 @@ mod tray {
 
     /// 应用图标缩到托盘尺寸（RGBA）。
     fn icon() -> Option<Icon> {
-        let img = image::load_from_memory(include_bytes!("../icon.png")).ok()?;
+        let img = image::load_from_memory(include_bytes!("../resources/icon.png")).ok()?;
         let img = img
             .resize(64, 64, image::imageops::FilterType::Triangle)
             .to_rgba8();

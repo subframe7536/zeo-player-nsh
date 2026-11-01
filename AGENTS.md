@@ -22,6 +22,7 @@ Zeo Player is a local-first desktop music player written as a pure-Rust NSH (Nat
 - 单行 `text()` 一律配 `.line_height(px(字号))`（leading-none）：默认行高约 1.2× 字号，中文/拉丁字形墨水在行盒里偏下约 0.75 pt，居中行里能看出来。会折行的正文/提示保持默认行高。
 - `store()`（含 `store::later`、`Owner`、环境）是线程局部的，只能在根组件所在线程调；后台线程收尾要回界面侧时，在界面侧先拿 `store::poster()` 的 `Post` 把手带进线程，`post(f)` 由 `install` 的轮询循环执行（每实例一条通道，并行 UI 测试不互串）。看当前曲用 `player().state()`，不用 `store().track`。
 - 文件 / 文件夹移动或改名用 `LibraryStore::move_path`，删除 / 摘除用 `remove_under`：索引、`MetaCache`、SQLite 直接换 / 清路径（不重读标签、不整库重扫）；歌单路径用 `store::move_playlist_paths` / `remove_playlist_paths_under` 同步。watcher 的单路径改名事件按（大小, mtime）指纹配对后同样走 `move_path`，配不上的才重扫。macOS 回收站走 `trash` 的 `DeleteMethod::NsFileManager`（默认的 Finder/osascript 要辅助功能权限）。
+- 应用图标：`resources/icon.svg` 是源文件；`resources/icon.png` 是它的 1024px 渲染（`sips -s format png -z 1024 1024 resources/icon.svg --out resources/icon.png`），`nsh.json` 的 `icon` 与托盘（`window.rs`）都指向 PNG——NSH 打包在 Windows 上用 image crate 解码、不认 SVG（macOS 收 SVG，但为了两端一致都用 PNG）。标题栏 logo 直接嵌 `icon.svg`（`ui::components::icons::logo_svg`）。换图标改 `icon.svg` 并重渲染 PNG。
 
 ## Commands
 
