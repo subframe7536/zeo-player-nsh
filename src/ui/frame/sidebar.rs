@@ -138,6 +138,37 @@ fn nav_row(target: Nav, label: &'static str, glyph: Icon) -> nsh_base::ButtonEle
         )
 }
 
+/// 「设置」：不是页面，按下打开设置弹窗（外观与导航行一致）。
+fn settings_row() -> nsh_base::ButtonElement {
+    let s = store::store();
+    nsh_base::button()
+        .h(px(34.0))
+        .flex_row()
+        .items_center()
+        .gap(px(10.0))
+        .px(px(10.0))
+        .rounded(px(8.0))
+        .accessibility_label("设置")
+        .selected(move || s.settings.get())
+        .selected_style(|st| st.bg(sidebar_accent()))
+        .hover(|st| st.bg(sidebar_accent()))
+        .active(|st| st.opacity(0.7))
+        .on_press(move |_: &()| s.settings.set(true))
+        .child(icon(Icon::Settings, 17.0, move || {
+            if s.settings.get() { theme::primary() } else { sidebar_fg() }
+        }))
+        .child(
+            text("设置")
+                .flex_1()
+                .text_size(px(14.0))
+                .line_height(px(14.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(move || {
+                    if s.settings.get() { theme::fg() } else { sidebar_fg() }
+                }),
+        )
+}
+
 pub(crate) fn section_label(label: &'static str) -> Text {
     text(label)
         .text_size(px(11.0))
@@ -178,7 +209,7 @@ pub(crate) fn sidebar(search: SearchFocus) -> View {
                 .px(px(10.0))
                 .pb(px(12.0))
                 .gap(px(2.0))
-                .child(nav_row(Nav::Settings, "设置", Icon::Settings))
+                .child(settings_row())
                 .child(
                     text(move || {
                         s.library.with(|l| {

@@ -82,6 +82,9 @@ pub struct LibraryState {
     pub lyrics_align: crate::config::LyricsAlign,
     /// 界面外观（跟随系统 / 浅色 / 深色）。
     pub appearance: crate::config::Appearance,
+    /// 过滤：短于此时长（秒）/ 小于此大小（KB）的音频不进曲库。
+    pub min_duration_secs: u32,
+    pub min_size_kb: u32,
 }
 
 fn library_state() -> LibraryState {
@@ -99,6 +102,8 @@ fn library_state() -> LibraryState {
         fade_ms: lib.fade_ms(),
         lyrics_align: lib.lyrics_align(),
         appearance: lib.appearance(),
+        min_duration_secs: lib.min_duration_secs(),
+        min_size_kb: lib.min_size_kb(),
     }
 }
 
@@ -139,6 +144,8 @@ pub struct Store {
     pub playlists: Signal<Same<Vec<Playlist>>>,
     /// 正在编辑的歌单（弹窗打开时为 `Some`）。
     pub editor: Signal<Option<Draft>>,
+    /// 设置弹窗打开中。
+    pub settings: Signal<bool>,
 }
 
 /// 歌单编辑弹窗的草稿：`id` 为 `None` 时是新建。
@@ -215,6 +222,7 @@ pub fn install() -> Store {
             lists
         }))),
         editor: signal(None),
+        settings: signal(false),
     };
     STORE.with(|cell| cell.set(Some(s)));
 
@@ -750,6 +758,30 @@ pub fn rebuild() {
 /// 改流派分隔符（立即重新拆分，后台线程）。
 pub fn set_separators(separators: Vec<String>) {
     std::thread::spawn(move || library_store().set_separators(&separators));
+}
+
+/// 过滤阈值：短于 `secs` 的音频不进曲库（0 不过滤）；保存后重新扫描。
+pub fn set_min_duration_secs(secs: u32) {
+    std::thread::spawn(move || {
+        library_store().set_min_duration_secs(secs);
+        rescan_when_idle();
+    });
+}
+
+/// 过滤阈值：小于 `kb` KB 的音频不进曲库（0 不过滤）；保存后重新扫描。
+pub fn set_min_size_kb(kb: u32) {
+    std::thread::spawn(move || {
+        library_store().set_min_size_kb(kb);
+        rescan_when_idle();
+    });
+}
+
+/// 改完阈值重新扫描；进行中的扫描先等它结束，不然用的是旧阈值。
+fn rescan_when_idle() {
+    while library_store().is_scanning() {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    library_store().scan();
 }
 
 /// 弹出系统文件夹选择器；选中的文件夹加入曲库并扫描。返回结果说明。

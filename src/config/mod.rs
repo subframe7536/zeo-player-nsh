@@ -90,6 +90,11 @@ pub enum Appearance {
 /// 出厂流派分隔符。
 pub const DEFAULT_SEPARATORS: &[&str] = &[";"];
 
+/// 出厂过滤：短于 10 秒的音频不进曲库。
+pub const DEFAULT_MIN_DURATION_SECS: u32 = 10;
+/// 出厂过滤：小于 100 KB 的音频不进曲库。
+pub const DEFAULT_MIN_SIZE_KB: u32 = 100;
+
 /// 持久化配置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LibraryConfig {
@@ -121,10 +126,24 @@ pub struct LibraryConfig {
     /// 界面外观（跟随系统 / 浅色 / 深色）。
     #[serde(default)]
     pub appearance: Appearance,
+    /// 过滤：短于此时长（秒）的音频不进曲库（0 不过滤）。
+    #[serde(default = "default_min_duration_secs")]
+    pub min_duration_secs: u32,
+    /// 过滤：小于此大小（KB）的音频不进曲库（0 不过滤）。
+    #[serde(default = "default_min_size_kb")]
+    pub min_size_kb: u32,
 }
 
 fn default_fade_ms() -> u32 {
     crate::engine::audio::DEFAULT_FADE_MS
+}
+
+fn default_min_duration_secs() -> u32 {
+    DEFAULT_MIN_DURATION_SECS
+}
+
+fn default_min_size_kb() -> u32 {
+    DEFAULT_MIN_SIZE_KB
 }
 
 impl Default for LibraryConfig {
@@ -140,6 +159,8 @@ impl Default for LibraryConfig {
             loop_mode: crate::engine::audio::LoopMode::default(),
             lyrics_align: LyricsAlign::default(),
             appearance: Appearance::default(),
+            min_duration_secs: default_min_duration_secs(),
+            min_size_kb: default_min_size_kb(),
         }
     }
 }
@@ -366,6 +387,30 @@ impl LibraryStore {
 
     pub fn watching(&self) -> bool {
         self.config().watch
+    }
+
+    /// 过滤：短于此时长（秒）的音频不进索引。
+    pub fn min_duration_secs(&self) -> u32 {
+        self.config().min_duration_secs
+    }
+
+    /// 设置时长过滤阈值（保存；0 为不过滤）。
+    pub fn set_min_duration_secs(&self, secs: u32) {
+        let mut config = self.config.lock().unwrap();
+        config.min_duration_secs = secs;
+        self.save_config(&config);
+    }
+
+    /// 过滤：小于此大小（KB）的音频不进索引。
+    pub fn min_size_kb(&self) -> u32 {
+        self.config().min_size_kb
+    }
+
+    /// 设置大小过滤阈值（保存；0 为不过滤）。
+    pub fn set_min_size_kb(&self, kb: u32) {
+        let mut config = self.config.lock().unwrap();
+        config.min_size_kb = kb;
+        self.save_config(&config);
     }
 
     /// 打开/关闭文件夹监视（保存设置）。

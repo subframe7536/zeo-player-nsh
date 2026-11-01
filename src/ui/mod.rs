@@ -26,7 +26,6 @@ pub enum Nav {
     Artists,
     Albums,
     Genres,
-    Settings,
     /// 一个歌单（id）。
     Playlist(u64),
 }
@@ -128,13 +127,18 @@ pub fn App() -> impl IntoElement {
         // Space 等快捷键也被它吃掉）。
         .on_touch(move |e: &TouchEvent| search.outside_touch(e))
         .child(when(move || !s.hidden.get(), shell))
+        // 弹窗按叠放顺序挂载：设置在最底，「关闭窗口」的询问盖过一切。
         .child(when(
-            move || s.close_prompt.get() && !s.hidden.get(),
-            close_prompt,
+            move || s.settings.get() && !s.hidden.get(),
+            views::settings_dialog,
         ))
         .child(when(
             move || s.editor.with(Option::is_some),
             views::playlists::editor_dialog,
+        ))
+        .child(when(
+            move || s.close_prompt.get() && !s.hidden.get(),
+            close_prompt,
         ));
     // Windows 的窗口按钮在最上层（盖过全屏播放与弹窗，和系统按钮一样）。
     #[cfg(target_os = "windows")]
@@ -153,7 +157,6 @@ fn page(nav: Signal<Nav>) -> AnyElement {
             Nav::Artists => views::artists().into_element(),
             Nav::Albums => views::albums().into_element(),
             Nav::Genres => views::genres().into_element(),
-            Nav::Settings => views::settings().into_element(),
             Nav::Playlist(id) => views::playlists::page(id).into_element(),
         }
     })

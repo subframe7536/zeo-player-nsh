@@ -10,7 +10,6 @@ use std::rc::Rc;
 
 use nsh_core::prelude::*;
 
-use super::Nav;
 use super::components::button::pill_button;
 use super::components::icons::{Icon, icon};
 use super::components::page::{empty_state, page_header};
@@ -21,7 +20,7 @@ use crate::config::TrackEntry;
 
 pub(super) use self::browse::{albums, artists, genres};
 pub(super) use self::folders::folders;
-pub(super) use self::settings::settings;
+pub(super) use self::settings::dialog as settings_dialog;
 
 fn compare(a: &str, b: &str) -> std::cmp::Ordering {
     a.to_lowercase().cmp(&b.to_lowercase())
@@ -48,7 +47,7 @@ fn no_library() -> View {
         view()
             .mt(px(12.0))
             .child(pill_button(Icon::Plus, "添加文件夹…", || {
-                global::<Nav>().set(Nav::Settings)
+                settings::open(settings::Pane::Library)
             })),
     )
 }

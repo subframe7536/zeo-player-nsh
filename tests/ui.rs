@@ -26,7 +26,12 @@ fn isolate() -> bool {
         let _ = std::fs::remove_dir_all(&data);
         std::fs::create_dir_all(&data).unwrap();
         if corpus {
-            let config = serde_json::json!({ "roots": [dunce::canonicalize(CORPUS).unwrap()] });
+            // 语料只有 1–3 秒、几十 KB：library.json 里把过滤阈值写成 0。
+            let config = serde_json::json!({
+                "roots": [dunce::canonicalize(CORPUS).unwrap()],
+                "min_duration_secs": 0,
+                "min_size_kb": 0,
+            });
             std::fs::write(data.join("library.json"), config.to_string()).unwrap();
         }
         // SAFETY: 在任何线程读这些变量之前设置（Once 内，测试开始前）。
@@ -70,30 +75,63 @@ fn sidebar_navigates_between_library_views() {
     }
     app.press("专辑").unwrap();
     assert!(has(&app, "未在播放"));
+    // 设置弹窗：左栏分类 + 右栏选项，默认「外观」。
     app.press("设置").unwrap();
-    app.wait_for("音乐文件夹").unwrap();
-    for label in [
-        "曲库",
-        "添加文件夹…",
-        "重建曲库",
-        "流派标签",
-        "分号",
-        "监视文件夹变化",
-        "系统字体",
-        "关闭窗口时",
-        "淡入淡出",
-        "外观",
-    ] {
+    app.wait_for("id:settings-content >> label:外观").unwrap();
+    for label in ["曲库", "播放", "歌词", "窗口", "流派标签"] {
         assert!(has(&app, label), "{label}: {:?}", texts(&app));
     }
+    for (pane, section) in [
+        ("曲库", "音乐文件夹"),
+        ("流派标签", "分号"),
+        ("播放", "淡入淡出"),
+        ("窗口", "关闭窗口时"),
+        ("歌词", "歌词对齐"),
+    ] {
+        app.press(&format!("id:settings-nav >> role:button[{pane}]"))
+            .unwrap();
+        app.wait_for(section).unwrap();
+    }
+    app.press("id:settings-nav >> role:button[曲库]").unwrap();
+    app.wait_for("音乐文件夹").unwrap();
+    for label in ["添加文件夹…", "重建曲库", "监视文件夹变化"] {
+        assert!(has(&app, label), "{label}: {:?}", texts(&app));
+    }
+    app.press("label:关闭设置").unwrap();
+    app.wait_for_gone("音乐文件夹", Duration::from_secs(2))
+        .unwrap();
 }
 
-/// 设置 →「外观」下拉：选深色 / 浅色立即换色板（文字颜色即变），回到「系统」。
+/// 设置弹窗的搜索框：命中节的标题 / 关键词时左栏给结果行，右栏只显示
+/// 命中的节；分类名命中时整节都算命中。
+#[test]
+fn settings_search_filters_sections() {
+    let mut app = start(1200.0, 800.0);
+    app.press("设置").unwrap();
+    app.wait_for("id:settings-content >> label:外观").unwrap();
+    app.type_text("label:搜索设置", "字体").unwrap();
+    // 只有「字体」一节命中：左栏一行结果，右栏是它的内容（「外观」节被滤掉）。
+    app.wait_for("id:settings-nav >> role:button[字体]").unwrap();
+    assert!(has(&app, "系统字体"));
+    assert!(!has(&app, "或为界面固定一种"));
+    assert!(!has(&app, "添加文件夹…"));
+    // 没有命中：右栏空状态。
+    app.type_text("label:搜索设置", "zzz").unwrap();
+    app.wait_for("没有匹配的设置").unwrap();
+    // 清空：分类列表与各节都回来。
+    app.press("id:settings-nav >> label:清除搜索").unwrap();
+    app.wait_for("id:settings-content >> label:外观").unwrap();
+    assert!(has(&app, "播放"));
+}
+
+/// 设置弹窗 →「外观」分类 →「外观」下拉：选深色 / 浅色立即换色板
+/// （文字颜色即变），回到「系统」。
 #[test]
 fn appearance_select_switches_the_color_scheme() {
     let mut app = start(1200.0, 800.0);
     app.press("设置").unwrap();
-    app.wait_for("外观").unwrap();
+    app.press("id:settings-nav >> role:button[外观]").unwrap();
+    app.wait_for("id:settings-content >> label:外观").unwrap();
     // 说明文字是 muted_fg，浅色 / 深色下不同；「外观」本身在多处出现，用整句取唯一。
     let fg = |app: &Headless| {
         app.screen()
@@ -102,26 +140,27 @@ fn appearance_select_switches_the_color_scheme() {
             .color
     };
     let light = fg(&app);
-    app.press("label:外观").unwrap();
+    app.press("id:settings-content >> label:外观").unwrap();
     app.press("label:深色").unwrap();
     assert_ne!(fg(&app), light, "切到深色后界面应换深色色板");
-    app.press("label:外观").unwrap();
+    app.press("id:settings-content >> label:外观").unwrap();
     app.press("label:浅色").unwrap();
     assert_eq!(fg(&app), light, "切到浅色后界面回到浅色色板");
-    app.press("label:外观").unwrap();
+    app.press("id:settings-content >> label:外观").unwrap();
     app.press("label:系统").unwrap();
 }
 
-/// 设置 →「字体」下拉：触发器即当前字体；弹层里有搜索框与预览行，
-/// 选「系统字体」立即生效并关弹层。
+/// 设置弹窗 →「外观」分类 →「字体」下拉：触发器即当前字体；弹层里有
+/// 搜索框与预览行，选「系统字体」立即生效并关弹层。
 #[test]
 fn font_select_opens_a_searchable_popover() {
     let mut app = start(1200.0, 800.0);
     app.press("设置").unwrap();
-    app.wait_for("字体").unwrap();
+    app.press("id:settings-nav >> role:button[外观]").unwrap();
+    app.wait_for("id:settings-content >> label:字体").unwrap();
     // 弹层未开时预览行不在屏上。
     assert!(!has(&app, "系统字体 · 歌词 Aa あ"));
-    app.press("label:字体").unwrap();
+    app.press("id:settings-content >> label:字体").unwrap();
     assert!(has(&app, "系统字体 · 歌词 Aa あ"), "{:?}", texts(&app));
     app.press("label:系统字体").unwrap();
     assert!(!has(&app, "系统字体 · 歌词 Aa あ"), "选完弹层应关闭");

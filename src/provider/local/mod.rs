@@ -25,6 +25,7 @@ pub(crate) fn initial_index(config: &LibraryConfig) -> Vec<TrackEntry> {
                 .iter()
                 .any(|root| Path::new(path).starts_with(root))
         })
+        .filter(|(_, entry)| passes(entry.value.duration, entry.size, config))
         .map(|(path, entry)| track_entry(path, &entry, &config.genre_separators))
         .collect();
     sort_tracks(&mut tracks);
@@ -53,14 +54,25 @@ pub(crate) fn scan(store: &LibraryStore) -> usize {
         if let Some(name) = path.file_name() {
             *store.current.lock().unwrap() = name.to_string_lossy().into_owned();
         }
-        if let Some(entry) = read_entry(path, &config.genre_separators) {
+        if let Some(entry) = read_entry(path, &config.genre_separators)
+            && passes(entry.duration, entry.size_bytes, &config)
+        {
+            // 封面缩略图交给后台线程池预生成：扫描完浏览列表不用再转圈。
+            if entry.has_art {
+                crate::metadata::covers::request(&entry.path);
+            }
             entries.push(entry);
         }
         store.done.store(i + 1, Ordering::Relaxed);
     }
     cache.end_batch();
-    // 不在任何根目录下的条目（文件删了、根目录移除了）从缓存和数据库里去掉。
-    cache.retain(&entries.iter().map(|t| t.path.clone()).collect());
+    // 已不存在的文件从缓存和数据库里去掉；被过滤的保留元数据（阈值改回
+    // 就不用重读标签）。
+    let keep: std::collections::HashSet<String> = files
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    cache.retain(&keep);
     sort_tracks(&mut entries);
     let count = entries.len();
     *store.tracks.write().unwrap() = Arc::new(entries);
@@ -97,6 +109,12 @@ fn collect_audio_files(root: &Path, out: &mut Vec<PathBuf>) {
             out.push(entry.into_path());
         }
     }
+}
+
+/// 时长 / 大小阈值内的音频才进索引（`0` 为不过滤）。
+fn passes(duration: f64, size_bytes: u64, config: &LibraryConfig) -> bool {
+    duration >= f64::from(config.min_duration_secs)
+        && size_bytes >= u64::from(config.min_size_kb) * 1024
 }
 
 /// 读一个文件的索引条目；读不出标签/属性的文件跳过。
@@ -155,6 +173,26 @@ fn sort_tracks(entries: &mut [TrackEntry]) {
             .then(a.track.cmp(&b.track))
             .then(a.title.cmp(&b.title))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::LibraryConfig;
+
+    #[test]
+    fn filter_thresholds() {
+        let cfg = LibraryConfig::default(); // 10 秒 / 100 KB
+        assert!(passes(30.0, 500_000, &cfg));
+        assert!(!passes(5.0, 500_000, &cfg), "短于时长阈值");
+        assert!(!passes(30.0, 50_000, &cfg), "小于大小阈值");
+        assert!(!passes(5.0, 50_000, &cfg));
+        assert!(passes(10.0, 100 * 1024, &cfg), "恰好等于阈值放行");
+        let mut open = cfg;
+        open.min_duration_secs = 0;
+        open.min_size_kb = 0;
+        assert!(passes(0.1, 1, &open), "阈值为 0 时全放行");
+    }
 }
 
 #[cfg(test)]

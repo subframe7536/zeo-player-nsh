@@ -45,6 +45,9 @@ fn end_to_end_playback() {
         .add_root(root.to_string_lossy().into_owned())
         .expect("add_root");
     assert_eq!(roots.len(), 1);
+    // 语料只有 1–3 秒、几十 KB：关掉过滤阈值，不然全被滤掉。
+    library_store().set_min_duration_secs(0);
+    library_store().set_min_size_kb(0);
     let count = library_store().scan();
     assert_eq!(count, 6, "应扫到 6 个音频文件（mp3/flac/wav 含子目录）");
     let tracks = library.tracks();
