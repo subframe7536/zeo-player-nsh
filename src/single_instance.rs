@@ -6,9 +6,11 @@
 //!   `dev.subf.zeo-player.show`（`window.rs` 的 `proc` 收进来调
 //!   [`handle_message`]、`show()` 自己），找不到窗口退回广播；然后
 //!   `TerminateProcess`（不跑析构，顺带绕开已知的退出死锁）。
-//! - macOS：同 bundle id 的 `NSRunningApplication` 已有别人时激活它，并
-//!   发分布式通知 `dev.subf.zeo-player.show` 让它把窗口提到最前（藏在
-//!   托盘的窗口 `activate` 不会放出来），然后退出。Dock / `open` 由
+//! - macOS：临时目录下的 `<bundle id>.lock` 文件锁（flock）判重——拿不
+//!   到排他锁说明已有实例，按 pid 找更旧的实例激活它，并发分布式通知
+//!   `dev.subf.zeo-player.show` 让它把窗口提到最前（藏在托盘的窗口
+//!   `activate` 不会放出来），然后退出。`runningApplications` 有注册延
+//!   迟、同时启动互相看不见，故不用它判重。Dock / `open` 由
 //!   LaunchServices 挡，这里拦的是直接执行二进制或 `open -n`；拿不到
 //!   bundle id（非 .app 启动，如 cargo run --release）无从判重，放行。
 //!
@@ -82,31 +84,63 @@ mod platform {
         }
     }
 
-    /// 单实例：同 bundle id 已有别的实例时把它激活、发「显示已有窗口」
-    /// 通知，再退出自己。
+    /// macOS 14 之前的激活路径：带 ActivateIgnoringOtherApps 才抢得到前
+    /// 台；该选项在新系统被弃用，而这条路径只有旧系统会走到。
+    #[allow(deprecated)]
+    fn activate_legacy(app: &NSRunningApplication) -> bool {
+        app.activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps)
+    }
+
+    /// 单实例：固定名文件锁（对应 Windows 的命名互斥体）判重——能拿到排
+    /// 他锁的是第一份；拿不到说明已有实例，激活它、发「显示已有窗口」通
+    /// 知，再退出自己。
     pub fn enforce() {
         let Some(id) = NSBundle::mainBundle().bundleIdentifier() else {
             return;
         };
+        // per-user 临时目录下的 `<bundle id>.lock`；第一份实例一直持有
+        // 句柄，进程退出时内核自动释放，不留残骸。`runningApplications`
+        // 有注册延迟（同时启动互相看不见），只靠扫描会放行多份。
+        let contended = match std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(std::env::temp_dir().join(format!("{id}.lock")))
+        {
+            Ok(file) => match file.try_lock() {
+                // 拿到锁：第一份实例。句柄不关闭，活到进程结束。
+                Ok(()) => return std::mem::forget(file),
+                Err(std::fs::TryLockError::WouldBlock) => true,
+                // 锁不可用（文件系统不支持等）：退回按 pid 扫描。
+                Err(_) => false,
+            },
+            Err(_) => false,
+        };
         let me = NSRunningApplication::currentApplication();
-        let mut second = false;
+        // `currentApplication` 这时还没注册好，`processIdentifier` 是 -1；
+        // 自己的 pid 走 `std::process::id()`。
+        let my_pid = std::process::id() as i32;
+        let mut second = contended;
         for app in NSRunningApplication::runningApplicationsWithBundleIdentifier(&id).iter() {
-            if *app == *me {
+            // 跳过自己与 pid 更大的实例：同时启动时都拿着各自的锁，按 pid
+            // 对称只激活（并退给）更旧的那份。
+            if *app == *me || app.processIdentifier() >= my_pid {
                 continue;
             }
             second = true;
             // SAFETY: -[NSRunningApplication activateFromApplication:options:]
             // 是 macOS 14+ 的 API，先确认响应；旧系统退回 activateWithOptions:。
             let modern: bool = unsafe {
-                msg_send![app, respondsToSelector: sel!(activateFromApplication:options:)]
+                msg_send![&*app, respondsToSelector: sel!(activateFromApplication:options:)]
             };
             let _ = if modern {
+                // ActivateIgnoringOtherApps 在 macOS 14 起无效；激活已有实
+                // 例时把它所有窗口提到前面。
                 app.activateFromApplication_options(
                     &me,
-                    NSApplicationActivationOptions::ActivateIgnoringOtherApps,
+                    NSApplicationActivationOptions::ActivateAllWindows,
                 )
             } else {
-                app.activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps)
+                activate_legacy(&app)
             };
         }
         if second {
