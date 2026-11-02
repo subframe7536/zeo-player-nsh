@@ -193,6 +193,7 @@ pub fn start() {
     if STARTED.swap(true, Ordering::AcqRel) {
         return;
     }
+    crate::single_instance::enforce();
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     install_tray_handlers();
     platform::start();
@@ -492,6 +493,9 @@ mod platform {
                 return;
             };
             let object: &AnyObject = delegate.as_ref();
+            // 「显示已有窗口」分布式通知：第二份实例 post 时这个对象响应
+            // `zeoPlayerShow:`（`single_instance` 里说明）。
+            crate::single_instance::observe(object);
             let class = object.class();
             if let Some(method) = class.instance_method(sel!(windowShouldClose:)) {
                 // SAFETY: 签名与 NSWindowDelegate 的 windowShouldClose: 相同。
@@ -603,13 +607,13 @@ mod platform {
         BringWindowToTop, CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GW_OWNER,
         GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindow,
         GetWindowLongPtrW, GetWindowPlacement, GetWindowThreadProcessId, HTTOP, HTTOPLEFT,
-        HTTOPRIGHT, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, MSG, NCCALCSIZE_PARAMS,
-        PM_REMOVE, PeekMessageW, PostMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE,
-        SM_CXPADDEDBORDER, SM_CYFRAME, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWMAXIMIZED,
-        SW_SHOWNOACTIVATE, SetForegroundWindow, SetWindowLongPtrW, SetWindowPlacement,
-        ShowWindowAsync, TranslateMessage, WINDOWPLACEMENT, WM_CLOSE, WM_DESTROY, WM_EXITSIZEMOVE,
-        WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW, WM_SYSCOMMAND,
-        WNDPROC, WS_CAPTION, WS_THICKFRAME,
+        HTTOPRIGHT, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, MSG,
+        NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW, PostMessageW,
+        SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME, SW_HIDE, SW_RESTORE,
+        SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SetForegroundWindow, SetWindowLongPtrW,
+        SetWindowPlacement, ShowWindowAsync, TranslateMessage, WINDOWPLACEMENT, WM_CLOSE, WM_DESTROY,
+        WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW,
+        WM_SYSCOMMAND, WNDPROC, WS_CAPTION, WS_THICKFRAME,
     };
 
     use super::TrayState;
@@ -625,6 +629,8 @@ mod platform {
     unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
         let mut l = l;
         match msg {
+            // 第二份实例「显示已有窗口」（`single_instance` 直接投递或广播）。
+            m if crate::single_instance::handle_message(m) => return 0,
             WM_CLOSE if !super::on_close_clicked() => return 0,
             // 最小宽度（见 `MIN_WIDTH`）：先让原窗口过程填默认值，再把
             // ptMinTrackSize 抬到应用的下限（点 → 物理像素）。

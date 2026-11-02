@@ -12,6 +12,7 @@ pub mod engine;
 mod metadata;
 mod playlists;
 mod provider;
+mod single_instance;
 mod ui;
 mod window;
 
@@ -20,5 +21,9 @@ pub use ui::App;
 /// The crate's UI set (`nsh.json` `"rust"`).
 #[native_module("zeo-player/native")]
 fn native(registry: &mut Registry) {
+    // 打包 runner 在 `nsh_windows_app::main()` / `nsh_macos_app::main()`
+    // 之前调这里（`set_ui_sets` 的参数）：第二份实例在这个点退出，连
+    // NSH 的窗口都不会创建，不会闪一下。
+    single_instance::enforce();
     registry.register::<App>();
 }

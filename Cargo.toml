@@ -51,8 +51,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphic
 # macOS：替换窗口代理的 windowShouldClose:，在主线程上调度。
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSResponder"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSRunningApplication", "NSWindow", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "NSBundle", "NSDictionary", "NSDistributedNotificationCenter", "objc2-core-foundation"] }
 dispatch2 = "0.3"
 
 # 界面测试（tests/ui.rs）：无头引擎运行根组件，不带 QuickJS。

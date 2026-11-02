@@ -33,6 +33,9 @@ pub enum Nav {
 /// 应用根组件（`nsh.json` `"root"`）。
 #[component]
 pub fn App() -> impl IntoElement {
+    // 单实例兜底：真正的检查在 `native()`（窗口创建之前），这里 `Once`
+    // 幂等，防不走 `native()` 的挂载路径。
+    crate::single_instance::enforce();
     let s = store::install();
     set_title_bar(TitleBarStyle::Hidden, Some(px(TITLE_BAR)));
     #[cfg(target_os = "windows")]

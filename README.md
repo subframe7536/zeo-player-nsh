@@ -64,6 +64,7 @@
 - 第一次点关闭按钮时选择「最小化到托盘」或「退出」，选择会记住（设置 →「窗口」→「关闭窗口时」可改）。
 - 最小化后播放继续；托盘菜单显示当前曲目，可播放 / 暂停、上一首 / 下一首、打开窗口、退出；macOS 上从 Dock 点开也恢复窗口。
 - 可选「记住窗口大小和位置」：重新打开时恢复上次的窗口（设置 →「窗口」，默认开）。
+- 只允许一个实例：已打开时再启动会激活已有窗口（最小化到托盘的也会显示出来）。
 
 ## 尚未支持
 
@@ -76,5 +77,5 @@
 ```sh
 nsh run .                          # 本机运行（改代码自动重建）
 nsh package . --target macos       # 打包 .app（在 macOS 上）
-nsh package . --target windows     # 打包安装包（在 Windows 上）
+nsh package . --target windows --icon resources/icon-windows.png   # 打包安装包（在 Windows 上）
 ```
