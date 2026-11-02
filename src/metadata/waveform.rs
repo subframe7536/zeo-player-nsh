@@ -38,26 +38,39 @@ impl Default for WaveformOptions {
     }
 }
 
-type WaveCache = std::sync::Mutex<std::collections::HashMap<String, (u64, Arc<Vec<f64>>)>>;
+/// 波形条缓存上限：每条 ~0.5KB，按文件驻留不设上限会随库规模涨。
+/// 只留最近用到的（LRU，命中移到队尾）——重算要解码整个文件，播放
+/// 位置附近的几首与全屏页常看的那首基本不会 miss。
+const WAVE_CAP: usize = 256;
+type WaveCache = std::sync::Mutex<Vec<(String, u64, Arc<Vec<f64>>)>>;
 
 fn cache() -> &'static WaveCache {
     static CACHE: OnceLock<WaveCache> = OnceLock::new();
-    CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+    CACHE.get_or_init(|| std::sync::Mutex::new(Vec::new()))
 }
 
-/// 一个文件的 56 根波形条（按文件指纹缓存）。
+/// 一个文件的 56 根波形条（按文件指纹缓存，上限 [`WAVE_CAP`] 条）。
 pub fn waveform(path: &Path) -> Result<Arc<Vec<f64>>, String> {
     let key = path.to_string_lossy().into_owned();
     let stamp = std::fs::metadata(path)
         .map(|m| crate::metadata::file_stamp(&m))
         .unwrap_or(0);
-    if let Some((cached, bars)) = cache().lock().unwrap().get(&key)
-        && *cached == stamp
     {
-        return Ok(bars.clone());
+        let mut cache = cache().lock().unwrap();
+        if let Some(pos) = cache.iter().position(|(p, s, _)| p == &key && *s == stamp) {
+            let entry = cache.remove(pos);
+            let bars = entry.2.clone();
+            cache.push(entry);
+            return Ok(bars);
+        }
     }
     let bars = Arc::new(compute(path, WaveformOptions::default())?);
-    cache().lock().unwrap().insert(key, (stamp, bars.clone()));
+    let mut cache = cache().lock().unwrap();
+    cache.retain(|(p, _, _)| p != &key);
+    cache.push((key, stamp, bars.clone()));
+    while cache.len() > WAVE_CAP {
+        cache.remove(0);
+    }
     Ok(bars)
 }
 

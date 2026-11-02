@@ -1491,27 +1491,20 @@ mod tests {
     use super::*;
 
     fn entry(path: &str) -> TrackEntry {
-        TrackEntry {
+        TrackEntry(std::sync::Arc::new(crate::config::TrackShared {
             provider: crate::config::ProviderId::Local,
             path: path.into(),
             file_name: String::new(),
-            title: path.rsplit('/').next().unwrap().into(),
-            artist: String::new(),
-            album: String::new(),
             album_artist: String::new(),
             genres: Vec::new(),
-            year: None,
-            track: None,
-            disk: None,
-            duration: 0.0,
-            bit_rate: None,
-            sample_rate: None,
-            channels: None,
-            has_art: false,
             size_bytes: 0,
             modified: 0,
             stamp: 0,
-        }
+            meta: std::sync::Arc::new(crate::metadata::MetaInfo {
+                title: path.rsplit('/').next().unwrap().into(),
+                ..Default::default()
+            }),
+        }))
     }
 
     #[test]
@@ -1570,8 +1563,13 @@ mod tests {
             entry("/m/3.mp3"),
         ];
         for (t, size) in tracks.iter_mut().zip([100, 200, 300]) {
-            t.size_bytes = size;
-            t.duration = 60.0;
+            let mut shared = (*t.0).clone();
+            shared.size_bytes = size;
+            shared.meta = std::sync::Arc::new(crate::metadata::MetaInfo {
+                duration: 60.0,
+                ..shared.meta.as_ref().clone()
+            });
+            *t = TrackEntry(std::sync::Arc::new(shared));
         }
         let tree = build_tree_with(&["/m".into()], &tracks, &[], '/');
         // 没选或选中不存在时都回退到第一个根。

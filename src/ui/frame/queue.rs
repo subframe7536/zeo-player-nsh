@@ -11,7 +11,7 @@ use nsh_core::prelude::*;
 use super::super::components::button::{RADIUS_MD, icon_button};
 use super::super::components::cover::cover;
 use super::super::components::icons::{Icon, icon, icon_dyn};
-use super::super::store::{cover_of, format_time, player, store};
+use super::super::store::{cover_for, format_time, player, store};
 use super::super::theme::*;
 use crate::engine::audio::LoopMode;
 
@@ -101,7 +101,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                 }),
             })
         };
-        let src = move || path.with(|p| p.as_deref().and_then(cover_of));
+        let src = move || path.with(|p| p.as_deref().and_then(|p| cover_for(p, 36.0)));
         button()
             .h(px(ROW))
             .flex_row()

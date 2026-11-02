@@ -9,6 +9,10 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use crate::metadata::MetaCache;
 
+/// 列表封面小尺寸（≤48pt 插槽：曲目行、队列、chips、播放条）：解码后
+/// 每条约 37KB，是 400px 的 1/17——滚动的主要是小插槽，NSH 的 128MB
+/// 解码缓存因此能多装十几倍封面。
+pub const TINY: u32 = 96;
 /// 缩略图边长（像素；列表最大 200 pt，2× 屏）。
 pub const THUMB: u32 = 400;
 /// 当前曲目的大封面边长（全屏页 326 pt，2× 屏）。
@@ -17,8 +21,8 @@ pub const LARGE: u32 = 720;
 pub const BACKDROP: u32 = 64;
 const WORKERS: usize = 3;
 
-/// 已完成的（曲目路径, 缩略图路径），工作线程写、界面取走。
-type Done = Arc<Mutex<Vec<(String, Option<String>)>>>;
+/// 已完成的（曲目路径, 实际尺寸, 缩略图路径），工作线程写、界面取走。
+type Done = Arc<Mutex<Vec<(String, u32, Option<String>)>>>;
 
 /// 本地同名封面：同目录 `<曲名>.jpg/jpeg/png/webp`（大小写后缀都试）。
 const SIDE_EXTS: [&str; 8] = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"];
@@ -33,11 +37,13 @@ pub(crate) fn find_sidecar(path: &Path) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// 工作任务：`Thumb` 只生成列表缩略图，`Warm` 生成全部尺寸（队尾
-/// 预载——当前曲目的后三首，换歌时大封面 / 背景不再现算）。
+/// 工作任务：`Thumb` 只生成列表缩略图（第二元是需要的尺寸，已有
+/// 更大的直接复用——每个音频文件最多一份缓存封面），`Warm` 生成
+/// 全部尺寸（队尾预载——当前曲目的后三首，换歌时大封面 / 背景不再
+/// 现算）。
 #[derive(Clone, PartialEq, Eq, Hash)]
 enum Job {
-    Thumb(String),
+    Thumb(String, u32),
     Warm(String),
 }
 
@@ -78,18 +84,23 @@ fn pool() -> &'static Pool {
                         // 能变了，值得重算），排队中的重请求则丢掉。
                         queued.lock().unwrap().remove(&job);
                         match job {
-                            Job::Thumb(path) => {
-                                let thumb = thumbnail(Path::new(&path))
-                                    .map(|p| p.to_string_lossy().into_owned());
-                                done.lock().unwrap().push((path, thumb));
+                            Job::Thumb(path, side) => {
+                                let got = list_cover(Path::new(&path), side);
+                                done.lock().unwrap().push((
+                                    path,
+                                    got.as_ref().map(|(s, _)| *s).unwrap_or(side),
+                                    got.map(|(_, p)| p.to_string_lossy().into_owned()),
+                                ));
                             }
                             Job::Warm(path) => {
                                 let p = Path::new(&path);
-                                let thumb = thumbnail(p);
-                                large(p);
-                                backdrop(p);
-                                let thumb = thumb.map(|p| p.to_string_lossy().into_owned());
-                                done.lock().unwrap().push((path, thumb));
+                                let got = list_cover(p, TINY);
+                                artwork_uri(p);
+                                done.lock().unwrap().push((
+                                    path,
+                                    got.as_ref().map(|(s, _)| *s).unwrap_or(TINY),
+                                    got.map(|(_, p)| p.to_string_lossy().into_owned()),
+                                ));
                             }
                         }
                     }
@@ -115,11 +126,13 @@ fn enqueue(job: Job, front: bool) {
     cv.notify_one();
 }
 
-/// 请求 `path` 的缩略图（结果经 [`take_done`] 取回）。工作线程顺手算
-/// 封面主色调写库，色调结果经 [`take_dominant`] 取回。高优先级：界面
+/// 请求 `path` 的列表封面（结果经 [`take_done`] 取回）：`side` 是
+/// 需要的边长，已缓存的更大文件直接复用（每个音频文件最多一份缓存
+/// 封面，升级后小文件由 [`prune_smaller`] 删掉）。工作线程顺手算封面
+/// 主色调写库，色调结果经 [`take_dominant`] 取回。高优先级：界面
 /// 可见的封面插到队首，不排在扫描预热后面。
-pub fn request(path: &str) {
-    enqueue(Job::Thumb(path.to_owned()), true);
+pub fn request(path: &str, side: u32) {
+    enqueue(Job::Thumb(path.to_owned(), side), true);
 }
 
 /// 队尾预载：`path` 的全部封面尺寸（缩略图 + 大封面 + 背景）都提前
@@ -128,13 +141,14 @@ pub fn request_warm(path: &str) {
     enqueue(Job::Warm(path.to_owned()), true);
 }
 
-/// 低优先级请求（扫描时给整库预热缩略图）：排到队尾。
+/// 低优先级请求（扫描时给整库预热缩略图）：只出 [`TINY`]——行级插槽
+/// 够用且生成快，需要大图的曲目由界面请求时升档重算。排到队尾。
 pub fn request_low(path: &str) {
-    enqueue(Job::Thumb(path.to_owned()), false);
+    enqueue(Job::Thumb(path.to_owned(), TINY), false);
 }
 
-/// 取走已完成的（曲目路径, 缩略图路径）。
-pub fn take_done() -> Vec<(String, Option<String>)> {
+/// 取走已完成的（曲目路径, 实际尺寸, 缩略图路径）。
+pub fn take_done() -> Vec<(String, u32, Option<String>)> {
     std::mem::take(&mut *pool().done.lock().unwrap())
 }
 
@@ -240,22 +254,15 @@ fn fnv(bytes: &[u8]) -> u64 {
     })
 }
 
-/// `path` 已缓存的大封面与背景（两个文件都在才返回）：只查文件存在
-/// 与否、不生成——引擎换曲时同步调它，热缓存的封面直接进快照、不露
-/// 占位符；色调补算 / 生成仍走后台（`load_covers` / 工作池）。
-pub fn cached(path: &Path) -> Option<(PathBuf, PathBuf)> {
+/// `path` 已缓存的列表封面（尺寸, 文件）（只查文件，不生成）：每个
+/// 音频文件最多一份，两个名字都可能命中，取大的那份。
+pub fn cached_list(path: &Path) -> Option<(u32, PathBuf)> {
     let key = cache_key(path)?;
     let dir = cache_dir();
-    let large = dir.join(format!("{key:016x}-{LARGE}.jpg"));
-    let bg = dir.join(format!("{key:016x}-bg{BACKDROP}.jpg"));
-    (large.is_file() && bg.is_file()).then_some((large, bg))
-}
-
-/// `path` 已缓存的列表缩略图（只查文件，不生成）。
-pub fn cached_thumb(path: &Path) -> Option<PathBuf> {
-    let key = cache_key(path)?;
-    let out = cache_dir().join(format!("{key:016x}-{THUMB}.jpg"));
-    out.is_file().then_some(out)
+    [THUMB, TINY]
+        .iter()
+        .map(|s| (*s, dir.join(format!("{key:016x}-{s}.jpg"))))
+        .find(|(_, f)| f.is_file())
 }
 
 /// 删掉 `path` 已生成的各尺寸封面（删记录 / 删文件时调）：缓存键
@@ -266,6 +273,7 @@ pub fn evict(path: &Path) {
     };
     let dir = cache_dir();
     for name in [
+        format!("{key:016x}-{TINY}.jpg"),
         format!("{key:016x}-{THUMB}.jpg"),
         format!("{key:016x}-{LARGE}.jpg"),
         format!("{key:016x}-bg{BACKDROP}.jpg"),
@@ -274,35 +282,147 @@ pub fn evict(path: &Path) {
     }
 }
 
-/// `path` 的封面缩略图文件（[`THUMB`] 像素）；没有封面为 `None`。
-pub fn thumbnail(path: &Path) -> Option<PathBuf> {
-    cover_file(path, THUMB)
-}
-
-/// 全屏页与系统媒体会话用的大封面（[`LARGE`] 像素）。
-pub fn large(path: &Path) -> Option<PathBuf> {
-    cover_file(path, LARGE)
-}
-
-/// 全屏页的背景：封面缩到 [`BACKDROP`] 像素并在这里高斯模糊好。系统解码
-/// 不会放大图片，所以它在内存里也只有几十 KB，由图层拉伸铺满窗口；
-/// 不必在窗口尺寸上实时模糊（那要几十 MB）。
-pub fn backdrop(path: &Path) -> Option<PathBuf> {
-    let key = cache_key(path)?;
-    let out = cache_dir().join(format!("{key:016x}-bg{BACKDROP}.jpg"));
-    if out.is_file() {
-        return Some(out);
+/// 删掉比 `keep` 小的列表封面文件（`drain_covers` 把信号换到大文件
+/// 之后调）：每个音频文件最多一份缓存封面，升档后旧的小图清掉。
+pub fn prune_smaller(path: &Path, keep: u32) {
+    let Some(key) = cache_key(path) else {
+        return;
+    };
+    let dir = cache_dir();
+    for side in [TINY, THUMB] {
+        if side < keep {
+            let _ = std::fs::remove_file(dir.join(format!("{key:016x}-{side}.jpg")));
+        }
     }
-    let small = image::open(cover_file(path, THUMB)?).ok()?;
-    let img = small
-        .resize_to_fill(BACKDROP, BACKDROP, image::imageops::FilterType::Triangle)
-        .blur(BACKDROP as f32 / 10.0);
-    let tmp = out.with_extension("tmp");
-    img.to_rgb8()
-        .save_with_format(&tmp, image::ImageFormat::Jpeg)
-        .ok()?;
-    std::fs::rename(&tmp, &out).ok()?;
-    Some(out)
+}
+
+/// `path` 的全屏大封面 `data:` URI：原图读到内存、缩到 [`LARGE`] 像素
+/// 以内、JPEG 编码、base64 成串，不落盘——只有全屏页显示 / 队尾预载
+/// 才实时读元数据；结果进小 LRU（播放位置附近几首），解码副本交给
+/// NSH 图片缓存（有自己的 LRU 上限）。
+pub fn artwork_uri(path: &Path) -> Option<String> {
+    let key = cache_key(path)?;
+    let name = path.to_string_lossy().into_owned();
+    {
+        let mut cache = art_cache().lock().unwrap();
+        if let Some(pos) = cache.iter().position(|(p, k, _)| p == &name && *k == key) {
+            let entry = cache.remove(pos);
+            let uri = entry.2.clone();
+            cache.push(entry);
+            return Some(uri);
+        }
+    }
+    let uri = art_data_uri(path)?;
+    let mut cache = art_cache().lock().unwrap();
+    cache.retain(|(p, _, _)| p != &name);
+    cache.push((name, key, uri.clone()));
+    while cache.len() > ART_CAP {
+        cache.remove(0);
+    }
+    Some(uri)
+}
+
+/// `path` 的全屏大封面已在内存（LRU 命中才给）：引擎换曲时同步调它，
+/// 热封面直接进快照不露占位符；生成走 [`artwork_uri`]（工作线程）。
+pub fn cached_artwork(path: &Path) -> Option<String> {
+    let key = cache_key(path)?;
+    let name = path.to_string_lossy();
+    let mut cache = art_cache().lock().unwrap();
+    let pos = cache
+        .iter()
+        .position(|(p, k, _)| p == name.as_ref() && *k == key)?;
+    let entry = cache.remove(pos);
+    let uri = entry.2.clone();
+    cache.push(entry);
+    Some(uri)
+}
+
+/// 大封面 URI 的小缓存：只留播放位置附近的几首（当前曲目 + 队尾预载，
+/// 同歌词缓存的规模）；每条是一个 ~150KB 的 base64 串。
+const ART_CAP: usize = 8;
+type ArtCache = Mutex<Vec<(String, u64, String)>>;
+
+fn art_cache() -> &'static ArtCache {
+    static CACHE: OnceLock<ArtCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// 读封面源 → 缩到 [`LARGE`] → JPEG data URI（解不开的格式按原始字节
+/// 直接进 URI，交给系统解码，同 `cover_file` 的 Raw 分支）。
+fn art_data_uri(path: &Path) -> Option<String> {
+    match cover_source(path)? {
+        CoverSrc::Img(img) => {
+            let img = if img.width() > LARGE || img.height() > LARGE {
+                img.resize(LARGE, LARGE, image::imageops::FilterType::Triangle)
+            } else {
+                img
+            };
+            let rgb = image::DynamicImage::ImageRgb8(img.to_rgb8());
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 85)
+                .encode_image(&rgb)
+                .ok()?;
+            Some(format!("data:image/jpeg;base64,{}", base64(&bytes.into_inner())))
+        }
+        CoverSrc::Raw(bytes) => {
+            let mime = crate::metadata::read_artwork(path)
+                .and_then(|(_, m)| m)
+                .unwrap_or_else(|| "image/jpeg".to_owned());
+            Some(format!("data:{mime};base64,{}", base64(&bytes)))
+        }
+    }
+}
+
+/// RFC 4648 base64（data URI 用；不引入新依赖，几十行自实现）。
+fn base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let (a, b, c) = (
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        );
+        let n = (u32::from(a) << 16) | (u32::from(b) << 8) | u32::from(c);
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// `path` 的列表封面文件路径（没有则按 [`TINY`] 生成）：引擎给全屏
+/// 背景与系统媒体会话拿文件用——背景拉伸铺满窗口，96px 足够。
+pub fn list_cover_pub(path: &Path) -> Option<String> {
+    list_cover(path, TINY).map(|(_, f)| f.to_string_lossy().into_owned())
+}
+
+/// `path` 的列表封面（尺寸, 文件）：已有 ≥ `side` 的直接复用（每个
+/// 音频文件最多一份缓存封面），否则按 `side` 生成。生成 `THUMB` 始终
+/// 用封面源重算——小图放大质量不够。
+fn list_cover(path: &Path, side: u32) -> Option<(u32, PathBuf)> {
+    let key = cache_key(path)?;
+    let dir = cache_dir();
+    for s in [TINY, THUMB] {
+        if s >= side {
+            let f = dir.join(format!("{key:016x}-{s}.jpg"));
+            if f.is_file() {
+                // 已在但色调未算（老库 / 灰封面）：补算一次写库。
+                ensure_hue(path, &f);
+                return Some((s, f));
+            }
+        }
+    }
+    Some((side, cover_file(path, side)?))
 }
 
 fn cache_key(path: &Path) -> Option<u64> {
@@ -507,7 +627,7 @@ mod tests {
         unsafe { std::env::set_var("ZEO_PLAYER_CACHE_DIR", "/tmp/zeo-player-test-cache") };
         let _ = std::fs::remove_dir_all("/tmp/zeo-player-test-cache");
         let started = std::time::Instant::now();
-        let Some(thumb) = thumbnail(&file) else {
+        let Some(thumb) = cover_file(&file, THUMB) else {
             eprintln!("跳过：{} 没有封面", file.display());
             return;
         };
@@ -516,7 +636,7 @@ mod tests {
         assert!(img.width() <= THUMB && img.height() <= THUMB);
         let size = std::fs::metadata(&thumb).unwrap().len();
         let again = std::time::Instant::now();
-        assert_eq!(thumbnail(&file), Some(thumb.clone()));
+        assert_eq!(cover_file(&file, THUMB), Some(thumb.clone()));
         eprintln!(
             "{} → {}×{} {size} B，首次 {first:?}，缓存 {:?}",
             file.display(),

@@ -17,7 +17,7 @@ use lofty::prelude::ItemKey;
 use lofty::tag::Tag;
 
 /// 完整元数据（ap-spec AudioMetadata + 库索引需要的字段）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct MetaInfo {
     pub title: String,
     pub artist: String,

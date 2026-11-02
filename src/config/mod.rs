@@ -25,30 +25,46 @@ pub enum ProviderId {
     Local,
 }
 
-/// 库索引里的一条曲目（TSX TrackInfo 的 Rust 侧形态）。
+/// 一条曲目各处共享的数据：`Arc` 一份，克隆只加引用计数——分组 /
+/// 搜索 / 歌单 / 队列持有的都是同一份。`meta` 与元数据缓存共享同一个
+/// `Arc<MetaInfo>`，标签字符串不再复制两遍；标签字段（`title`、
+/// `artist`、`duration`、`has_art`…）经 `Deref` 直读。
 #[derive(Debug, Clone, PartialEq)]
-pub struct TrackEntry {
+pub struct TrackShared {
     /// 来源提供方。
     pub provider: ProviderId,
     pub path: String,
     pub file_name: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
+    /// 专辑歌手（标签缺省回退曲目歌手；拆组与排序用）。
     pub album_artist: String,
+    /// 按流派分隔符拆好的流派列表（`split_genres`，设置改了会重算）。
     pub genres: Vec<String>,
-    pub year: Option<u32>,
-    pub track: Option<u32>,
-    pub disk: Option<u32>,
-    pub duration: f64,
-    pub bit_rate: Option<u32>,
-    pub sample_rate: Option<u32>,
-    pub channels: Option<u32>,
-    pub has_art: bool,
     pub size_bytes: u64,
     pub modified: u64,
     /// 文件指纹（[`crate::metadata::file_stamp`]），内容一变就变。
     pub stamp: u64,
+    /// 完整标签，与元数据缓存共享。
+    pub meta: Arc<crate::metadata::MetaInfo>,
+}
+
+impl std::ops::Deref for TrackShared {
+    type Target = crate::metadata::MetaInfo;
+
+    fn deref(&self) -> &Self::Target {
+        &self.meta
+    }
+}
+
+/// 库索引里的一条曲目（TSX TrackInfo 的 Rust 侧形态）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackEntry(pub Arc<TrackShared>);
+
+impl std::ops::Deref for TrackEntry {
+    type Target = TrackShared;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 /// 点窗口的关闭按钮时做什么。
@@ -158,6 +174,9 @@ pub struct LibraryConfig {
     /// 本地同名图片（jpg / jpeg / png / webp）优先于内嵌封面。
     #[serde(default = "default_true")]
     pub prefer_local_covers: bool,
+    /// 列表里显示封面；关掉后行 / 网格 / 队列都只画占位图（省解码内存）。
+    #[serde(default = "default_true")]
+    pub show_covers: bool,
     /// 「删除文件」不经过回收站、直接删除（不可恢复）。
     #[serde(default)]
     pub delete_permanently: bool,
@@ -216,6 +235,7 @@ impl Default for LibraryConfig {
             min_size_kb: default_min_size_kb(),
             prefer_local_lyrics: default_true(),
             prefer_local_covers: default_true(),
+            show_covers: default_true(),
             delete_permanently: false,
             remember_frame: true,
             window_frame: None,
@@ -453,6 +473,17 @@ impl LibraryStore {
         self.save_config(&config);
     }
 
+    /// 列表是否显示封面（关闭后行 / 网格 / 队列只画占位图）。
+    pub fn show_covers(&self) -> bool {
+        self.config().show_covers
+    }
+
+    pub fn set_show_covers(&self, on: bool) {
+        let mut config = self.config.lock().unwrap();
+        config.show_covers = on;
+        self.save_config(&config);
+    }
+
     /// 「删除文件」是否不经过回收站、直接删除。
     pub fn delete_permanently(&self) -> bool {
         self.config().delete_permanently
@@ -670,13 +701,13 @@ impl LibraryStore {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| t.file_name.clone());
-                TrackEntry {
+                TrackEntry(Arc::new(TrackShared {
                     path,
                     file_name,
                     stamp,
                     modified,
-                    ..t.clone()
-                }
+                    ..(*t.0).clone()
+                }))
             })
             .collect();
         if rows.is_empty() {
@@ -717,11 +748,13 @@ impl LibraryStore {
         let updated: Vec<TrackEntry> = current
             .iter()
             .map(|t| {
-                let mut t = t.clone();
                 if let Ok(meta) = MetaCache::global().get(Path::new(&t.path)) {
-                    t.genres = split_genres(&meta.genres, &clean);
+                    let mut shared = (*t.0).clone();
+                    shared.genres = split_genres(&meta.genres, &clean);
+                    TrackEntry(Arc::new(shared))
+                } else {
+                    t.clone()
                 }
-                t
             })
             .collect();
         *self.tracks.write().unwrap() = Arc::new(updated);
@@ -769,7 +802,7 @@ mod tests {
 
     /// 造一条只带路径 / 大小 / 修改时间的曲目。
     fn entry(path: &str, size: u64) -> TrackEntry {
-        TrackEntry {
+        TrackEntry(Arc::new(TrackShared {
             provider: ProviderId::Local,
             path: path.to_owned(),
             file_name: std::path::Path::new(path)
@@ -777,23 +810,13 @@ mod tests {
                 .unwrap()
                 .to_string_lossy()
                 .into_owned(),
-            title: String::new(),
-            artist: String::new(),
-            album: String::new(),
             album_artist: String::new(),
             genres: Vec::new(),
-            year: None,
-            track: None,
-            disk: None,
-            duration: 0.0,
-            bit_rate: None,
-            sample_rate: None,
-            channels: None,
-            has_art: false,
             size_bytes: size,
             modified: 0,
             stamp: 0,
-        }
+            meta: Arc::new(crate::metadata::MetaInfo::default()),
+        }))
     }
 
     fn test_store(dir: PathBuf, roots: Vec<String>, tracks: Vec<TrackEntry>) -> LibraryStore {

@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use nsh_core::prelude::*;
 
-use super::super::store::{cover_of, format_time, is_liked, store, toggle_like};
+use super::super::store::{cover_for, format_time, is_liked, store, toggle_like};
 use super::super::theme::*;
 use super::cover::cover;
 use super::icons::{Icon, icon_dyn};
@@ -262,7 +262,7 @@ pub fn track_row(
                 )
         }))
         .child(cols.cover.then(|| {
-            let src = move || track.with(|t| t.as_ref().and_then(|t| cover_of(&t.path)));
+            let src = move || track.with(|t| t.as_ref().and_then(|t| cover_for(&t.path, 40.0)));
             cover(src, Some(40.0), 6.0)
         }))
         .child(

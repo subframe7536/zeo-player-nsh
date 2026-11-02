@@ -52,15 +52,18 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
     let swap = Swap::install();
     let lyrics_shown = lyrics_shown();
 
-    // 底：深灰，封面放大模糊，再压一层暗色，保证白字对比。背景图是预先
-    // 模糊好的 64 px 小图（covers::backdrop），拉伸铺满：解码后只有十几
-    // KB，不在窗口尺寸上实时模糊。上下两层：`under` 是上一张，`top` 是
-    // 当前这张（见 `Swap::backdrop`）。
+    // 底：深灰，封面放大模糊，再压一层暗色，保证白字对比。背景图就是
+    // 列表封面的 96px 小文件（covers::list_cover_pub），拉伸铺满加滤镜
+    // 模糊：解码后只有十几 KB，也不单独落一张预模糊的盘。上下两层：
+    // `under` 是上一张，`top` 是当前这张（见 `Swap::backdrop`）。
     let layer = |path: Signal<Option<SharedString>>, alpha: &AnimatedValue| {
         view()
             .absolute()
-            .inset(px(0.0))
+            // 多出窗口一圈：滤镜模糊在图层边缘会淡出成透明，外扩后淡出
+            // 发生在屏幕外。
+            .inset(px(-40.0))
             .bind_opacity(alpha)
+            .style_with(|st| st.blur(px(32.0)))
             .child(when(
                 move || path.with(Option::is_some),
                 move || {

@@ -564,7 +564,7 @@ mod tests {
         year: Option<u32>,
         duration: f64,
     ) -> TrackEntry {
-        TrackEntry {
+        TrackEntry(std::sync::Arc::new(crate::config::TrackShared {
             provider: crate::config::ProviderId::Local,
             path: path.to_owned(),
             file_name: Path::new(path)
@@ -572,27 +572,27 @@ mod tests {
                 .unwrap()
                 .to_string_lossy()
                 .into_owned(),
-            title: Path::new(path)
-                .file_stem()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned(),
-            artist: artist.to_owned(),
-            album: "Album".to_owned(),
             album_artist: String::new(),
             genres: genres.iter().map(|g| (*g).to_owned()).collect(),
-            year,
-            track: None,
-            disk: None,
-            duration,
-            bit_rate: Some(320),
-            sample_rate: Some(44_100),
-            channels: Some(2),
-            has_art: false,
             size_bytes: 8_000_000,
             modified: 1_000_000,
             stamp: 0,
-        }
+            meta: std::sync::Arc::new(crate::metadata::MetaInfo {
+                title: Path::new(path)
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+                artist: artist.to_owned(),
+                album: "Album".to_owned(),
+                year,
+                duration,
+                bit_rate: Some(320),
+                sample_rate: Some(44_100),
+                channels: Some(2),
+                ..Default::default()
+            }),
+        }))
     }
 
     fn library() -> Vec<TrackEntry> {

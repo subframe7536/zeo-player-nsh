@@ -11,7 +11,7 @@ use super::super::components::cover::{cover, cover_with};
 use super::super::components::icons::Icon;
 use super::super::components::page::{empty_state, page_header};
 use super::super::components::tracks::{Columns, track_columns};
-use super::super::store::{cover_of, format_total, play_list, store};
+use super::super::store::{cover_for, format_total, play_list, store};
 use super::super::theme::*;
 use super::{by_disc_track, compare, hero, no_library, total_duration, track_list};
 use crate::config::TrackEntry;
@@ -105,9 +105,13 @@ fn avatar(
                 .text_color(muted_fg()),
         )
         .child(when(
-            move || cover().and_then(|p| cover_of(&p)).is_some(),
+            move || cover().and_then(|p| cover_for(&p, size.unwrap_or(168.0))).is_some(),
             move || {
-                image(move || cover().and_then(|p| cover_of(&p)).unwrap_or_default())
+                image(move || {
+                    cover()
+                        .and_then(|p| cover_for(&p, size.unwrap_or(168.0)))
+                        .unwrap_or_default()
+                })
                     .absolute()
                     .inset(px(0.0))
                     .resize_mode(ResizeMode::Cover)
@@ -269,7 +273,8 @@ pub fn Albums() -> impl IntoElement {
                     move || list.clone()
                 });
                 let cover_path = group.cover.clone();
-                let cover_src = computed(move || cover_path.as_deref().and_then(cover_of));
+                let cover_src =
+                    computed(move || cover_path.as_deref().and_then(|p| cover_for(&p, 200.0)));
                 let meta = [
                     group.year.map(|y| y.to_string()),
                     Some(format!("{} 首", group.tracks.len())),
@@ -317,7 +322,11 @@ pub fn Albums() -> impl IntoElement {
                         .active(|st| st.opacity(0.75))
                         .on_press(move |_: &()| selected.set(group.get_untracked().map(|g| g.key)))
                         .child(
-                            cover(move || cover_path().and_then(|p| cover_of(&p)), None, 10.0)
+                            cover(
+                                move || cover_path().and_then(|p| cover_for(&p, 184.0)),
+                                None,
+                                10.0,
+                            )
                                 .shadow_md(),
                         )
                         .child(
@@ -451,7 +460,7 @@ pub fn Genres() -> impl IntoElement {
                         .active(|st| st.opacity(0.7))
                         .on_press(move |_: &()| selected.set(Some(key.clone())))
                         .child(cover_with(
-                            move || art.get().and_then(|p| cover_of(&p)),
+                            move || art.get().and_then(|p| cover_for(&p, 32.0)),
                             32.0,
                             16.0,
                             Icon::Tag,

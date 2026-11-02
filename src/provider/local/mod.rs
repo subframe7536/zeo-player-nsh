@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::config::{LibraryConfig, LibraryStore, ProviderId, TrackEntry, split_genres};
+use crate::config::{
+    LibraryConfig, LibraryStore, ProviderId, TrackEntry, TrackShared, split_genres,
+};
 use crate::metadata::{CacheEntry, MetaCache};
 
 /// 基线音频扩展名（opus/ogg 暂缓，恢复时加回）。
@@ -130,19 +132,16 @@ fn read_entry(path: &Path, separators: &[String]) -> Option<TrackEntry> {
     ))
 }
 
-/// 缓存条目 → 索引条目。
+/// 缓存条目 → 索引条目：标签 `Arc` 与元数据缓存共享，不复制字符串。
 fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> TrackEntry {
     let meta = &entry.value;
-    TrackEntry {
+    TrackEntry(Arc::new(TrackShared {
         provider: ProviderId::Local,
         file_name: Path::new(&path)
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default(),
         path,
-        title: meta.title.clone(),
-        artist: meta.artist.clone(),
-        album: meta.album.clone(),
         album_artist: {
             let aa = meta.album_artist.trim();
             if aa.is_empty() {
@@ -152,18 +151,11 @@ fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> Track
             }
         },
         genres: split_genres(&meta.genres, separators),
-        year: meta.year,
-        track: meta.track,
-        disk: meta.disk,
-        duration: meta.duration,
-        bit_rate: meta.bit_rate,
-        sample_rate: meta.sample_rate,
-        channels: meta.channels,
-        has_art: meta.has_art,
         size_bytes: entry.size,
         modified: entry.modified,
         stamp: entry.stamp,
-    }
+        meta: meta.clone(),
+    }))
 }
 
 /// 索引顺序：歌手、专辑、碟号、音轨号、标题。

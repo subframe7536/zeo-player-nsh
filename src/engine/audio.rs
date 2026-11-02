@@ -932,24 +932,25 @@ fn load_track(
                     .map(|i| i as i64)
                     .unwrap_or(0)
             };
-            // 封面文件已在缓存里（队尾预载 / 播过 / 扫过）就直接进快照：
-            // 同一帧里曲目信息与封面一起换，界面不会闪占位符；后台
-            // `load_covers` 照旧跑（色调补算、媒体会话、冷缓存生成）。
-            let cached = crate::metadata::covers::cached(&path);
+            // 封面已在内存（队尾预载 / 播过的大图 URI；扫过 / 预热的列表
+            // 封面文件）就直接进快照：同一帧里曲目信息与封面一起换，界面
+            // 不会闪占位符；后台 `load_covers` 照旧跑（色调补算、媒体会话、
+            // 冷缓存生成）。
+            let artwork = crate::metadata::covers::cached_artwork(&path);
+            let backdrop = crate::metadata::covers::cached_list(&path);
             {
                 let mut t = shared.track.lock().unwrap();
                 t.path = Some(path.to_string_lossy().into_owned());
                 t.title = meta.title.clone();
                 t.artist = meta.artist.clone();
                 t.album = meta.album.clone();
-                // 封面在就绪后再生成（缩小的文件，不放原图字节）。
-                t.artwork = cached
+                // 大图是按需读元数据生成的 data URI，不落盘；背景复用
+                // 列表封面的 96px 文件。
+                t.artwork = artwork;
+                t.backdrop = backdrop
                     .as_ref()
-                    .map(|(large, _)| large.to_string_lossy().into_owned());
-                t.backdrop = cached
-                    .as_ref()
-                    .map(|(_, bg)| bg.to_string_lossy().into_owned());
-                t.covers_ready = cached.is_some();
+                    .map(|(_, f)| f.to_string_lossy().into_owned());
+                t.covers_ready = t.artwork.is_some() && t.backdrop.is_some();
                 t.duration = meta.duration;
                 t.queue = queue;
                 t.queue_index = actual_index;
@@ -957,7 +958,9 @@ fn load_track(
             }
             shared.ready.store(true, Ordering::Relaxed);
             // 封面由引擎循环在缓冲填起来之后生成（`load_covers`）。
-            media.set_artwork_file(cached.map(|(large, _)| file_url(&large.to_string_lossy())));
+            media.set_artwork_file(
+                backdrop.map(|(_, f)| file_url(&f.to_string_lossy())),
+            );
             publish_media(shared, media, true);
         }
         Err(err) => set_error(shared, &err),
@@ -965,10 +968,11 @@ fn load_track(
     shared.loading.store(false, Ordering::Relaxed);
 }
 
-/// 给当前曲目生成封面：缩到 720 px 的 JPEG 缓存文件（界面与系统媒体会话
-/// 共用）和全屏背景小图。解码 + 模糊在冷缓存时要几百毫秒：挪出引擎线程
-/// （不然饿死音频回调、也排不进正在预热的缩略图池），线程随换曲自生自灭，
-/// `cover_gen` 让晚到的旧结果失效。
+/// 给当前曲目生成封面：720 px 的 JPEG `data:` URI（界面显示用，实时读
+/// 元数据不落盘）和全屏背景（复用列表封面的 96px 文件，顺手生成它）。
+/// 读标签 + 解码缩放在冷缓存时要几百毫秒：挪出引擎线程（不然饿死音频
+/// 回调、也排不进正在预热的缩略图池），线程随换曲自生自灭，`cover_gen`
+/// 让晚到的旧结果失效。
 fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
     let Some(path) = shared.track.lock().unwrap().path.clone() else {
         return;
@@ -981,9 +985,8 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
             return;
         }
         let file = std::path::Path::new(&path);
-        let cover = crate::metadata::covers::large(file).map(|p| p.to_string_lossy().into_owned());
-        let backdrop =
-            crate::metadata::covers::backdrop(file).map(|p| p.to_string_lossy().into_owned());
+        let cover = crate::metadata::covers::artwork_uri(file);
+        let backdrop = crate::metadata::covers::list_cover_pub(file);
         {
             let mut t = shared.track.lock().unwrap();
             if shared.cover_gen.load(Ordering::Relaxed) != gen_id
@@ -991,11 +994,11 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
             {
                 return;
             }
-            t.artwork = cover.clone();
-            t.backdrop = backdrop;
+            t.artwork = cover;
+            t.backdrop = backdrop.clone();
             t.covers_ready = true;
         }
-        media.set_artwork_file(cover.map(|c| file_url(&c)));
+        media.set_artwork_file(backdrop.map(|c| file_url(&c)));
         publish_media(&shared, &media, true);
     });
 }

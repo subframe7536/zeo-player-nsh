@@ -91,6 +91,8 @@ pub struct LibraryState {
     /// 本地同名 `.lrc` / 图片是否优先于内嵌歌词 / 封面。
     pub prefer_local_lyrics: bool,
     pub prefer_local_covers: bool,
+    /// 列表是否显示封面（关掉省解码内存）。
+    pub show_covers: bool,
     /// 「删除文件」是否不经过回收站、直接删除。
     pub delete_permanently: bool,
     /// 重新打开时恢复上次的窗口大小与位置。
@@ -117,6 +119,7 @@ fn library_state() -> LibraryState {
         theme_color: lib.theme_color(),
         prefer_local_lyrics: lib.prefer_local_lyrics(),
         prefer_local_covers: lib.prefer_local_covers(),
+        show_covers: lib.show_covers(),
         delete_permanently: lib.delete_permanently(),
         remember_frame: lib.remember_frame(),
     }
@@ -191,7 +194,9 @@ thread_local! {
     static STORE: Cell<Option<Store>> = const { Cell::new(None) };
     /// 已请求封面的曲目上次的文件指纹（内容变了就重新生成）。
     static COVER_STAMPS: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
-    static COVERS: RefCell<HashMap<String, Signal<Option<SharedString>>>> = RefCell::new(HashMap::new());
+    /// 每个曲目一份封面信号，带已请求过的最大尺寸（升档去重）。
+    static COVERS: RefCell<HashMap<String, (u32, Signal<Option<SharedString>>)>> =
+        RefCell::new(HashMap::new());
 }
 
 /// 界面状态（在 [`install`] 之后可用）。
@@ -450,15 +455,22 @@ pub fn install() -> Store {
         let tracks = s.tracks.get();
         let stamps: HashMap<&str, u64> =
             tracks.iter().map(|t| (t.path.as_str(), t.stamp)).collect();
-        let requested: Vec<String> = COVERS.with(|c| c.borrow().keys().cloned().collect());
+        let requested: Vec<(String, u32)> = COVERS.with(|c| {
+            c.borrow()
+                .iter()
+                .map(|(p, (side, _))| (p.clone(), *side))
+                .collect()
+        });
         COVER_STAMPS.with(|known| {
             let mut known = known.borrow_mut();
-            for path in requested {
+            for (path, side) in requested {
                 let Some(&stamp) = stamps.get(path.as_str()) else {
                     continue;
                 };
                 match known.insert(path.clone(), stamp) {
-                    Some(old) if old != stamp => crate::metadata::covers::request(&path),
+                    Some(old) if old != stamp => {
+                        crate::metadata::covers::request(&path, side);
+                    }
                     _ => {}
                 }
             }
@@ -570,7 +582,7 @@ fn request_accent(s: &Store, path: Option<&str>) {
         None => {
             s.accent.set(None);
             s.tint.set(None);
-            crate::metadata::covers::request(path);
+            crate::metadata::covers::request(path, crate::metadata::covers::TINY);
         }
     }
 }
@@ -736,11 +748,23 @@ pub fn set_prefer_local_covers(on: bool) {
     std::thread::spawn(move || {
         library_store().set_prefer_local_covers(on);
         // 先写配置再请求：缓存键按新开关算，已显示的信号拿到新来源的图。
-        let known: Vec<String> = COVERS.with(|c| c.borrow().keys().cloned().collect());
-        for path in known {
-            crate::metadata::covers::request(&path);
+        let known: Vec<(String, u32)> = COVERS.with(|c| {
+            c.borrow()
+                .iter()
+                .map(|(p, (side, _))| (p.clone(), *side))
+                .collect()
+        });
+        for (path, side) in known {
+            crate::metadata::covers::request(&path, side);
         }
     });
+}
+
+/// 列表是否显示封面（保存）：关掉后行 / 网格 / 队列只画占位图，
+/// 省掉所有列表封面的解码内存；打开即恢复（信号还在，值现成）。
+pub fn set_show_covers(on: bool) {
+    store().library.update(|l| l.show_covers = on);
+    std::thread::spawn(move || library_store().set_show_covers(on));
 }
 
 /// 关闭窗口时的行为（保存）。
@@ -1149,11 +1173,16 @@ pub fn rebuild() {
         return;
     }
     // 已显示的封面保留；重建完成后重新生成，信号再收到新文件。
-    let known: Vec<String> = COVERS.with(|c| c.borrow().keys().cloned().collect());
+    let known: Vec<(String, u32)> = COVERS.with(|c| {
+        c.borrow()
+            .iter()
+            .map(|(p, (side, _))| (p.clone(), *side))
+            .collect()
+    });
     std::thread::spawn(move || {
         library_store().rebuild();
-        for path in known {
-            crate::metadata::covers::request(&path);
+        for (path, side) in known {
+            crate::metadata::covers::request(&path, side);
         }
     });
 }
@@ -1227,26 +1256,48 @@ pub async fn pick_folders() -> Option<String> {
 
 // --- 封面 ---------------------------------------------------------------------
 
-/// `path` 所在曲目的封面缩略图（文件路径）。首次读取时交给后台线程池
-/// 生成；每个曲目一个信号，生成后只有读它的绑定再运行。信号属于根组件，
-/// 列表单元格复用或销毁都不会丢掉进行中的请求。
-pub fn cover_of(path: &str) -> Option<SharedString> {
+/// `path` 的列表封面（文件路径）：`pt` ≤ 48 的插槽（曲目行、队列、
+/// chips、播放条）给 96px 小图，更大的（网格 ~184pt、详情页 hero）
+/// 升档到 400px——每个音频文件最多一份缓存封面，升档后小文件删掉。
+/// 首次读取时交给后台线程池生成；每个曲目一个信号，生成后只有读它
+/// 的绑定再运行。信号属于根组件，列表单元格复用或销毁都不会丢掉
+/// 进行中的请求。
+pub fn cover_for(path: &str, pt: f32) -> Option<SharedString> {
     if std::env::var_os("ZEO_PLAYER_BENCH_NO_COVERS").is_some() {
         return None;
     }
+    // 「列表显示封面」关掉了就只画占位图：不建信号、不发请求，列表
+    // 完全不解码封面。读库信号让调用处的闭包订阅它，切换即重渲。
+    if !store().library.with(|l| l.show_covers) {
+        return None;
+    }
+    let side = if pt <= 48.0 {
+        crate::metadata::covers::TINY
+    } else {
+        crate::metadata::covers::THUMB
+    };
     let hit = COVERS.with(|c| c.borrow().get(path).copied());
     let cover = match hit {
-        Some(cover) => cover,
+        Some((have, cover)) => {
+            // 升档：先记下已请求的尺寸，重复调用不再排队。
+            if have < side {
+                COVERS.with(|c| c.borrow_mut().insert(path.to_owned(), (side, cover)));
+                crate::metadata::covers::request(path, side);
+            }
+            cover
+        }
         None => {
             let owner = store().owner;
             let cover = owner.run(|| signal(None::<SharedString>));
-            COVERS.with(|c| c.borrow_mut().insert(path.to_owned(), cover));
-            // 缩略图已在磁盘缓存（扫描预热 / 队尾预载 / 播过）就先填上，
+            let mut have = side;
+            // 封面已在磁盘缓存（扫描预热 / 队尾预载 / 播过）就先填上，
             // 免得闪一次占位符；请求照旧入队（色调补算 / 指纹变更重算）。
-            if let Some(thumb) = crate::metadata::covers::cached_thumb(Path::new(path)) {
-                cover.set(Some(thumb.to_string_lossy().into_owned().into()));
+            if let Some((s, file)) = crate::metadata::covers::cached_list(Path::new(path)) {
+                cover.set(Some(file.to_string_lossy().into_owned().into()));
+                have = have.max(s);
             }
-            crate::metadata::covers::request(path);
+            COVERS.with(|c| c.borrow_mut().insert(path.to_owned(), (have, cover)));
+            crate::metadata::covers::request(path, side);
             cover
         }
     };
@@ -1254,10 +1305,17 @@ pub fn cover_of(path: &str) -> Option<SharedString> {
 }
 
 fn drain_covers() {
-    for (track, thumb) in crate::metadata::covers::take_done() {
-        if let Some(cover) = COVERS.with(|c| c.borrow().get(&track).copied()) {
-            // None（无封面 / 来源换掉了）也要写：清掉可能已过期的旧图。
-            cover.set(thumb.map(SharedString::from));
+    for (track, side, file) in crate::metadata::covers::take_done() {
+        if let Some((have, cover)) = COVERS.with(|c| c.borrow().get(&track).copied()) {
+            let keep = side.max(have);
+            if side >= have {
+                COVERS.with(|c| c.borrow_mut().insert(track.clone(), (keep, cover)));
+                // None（无封面 / 来源换掉了）也要写：清掉可能已过期的旧图。
+                cover.set(file.map(SharedString::from));
+            }
+            // 每个音频文件最多一份列表封面：信号已换到大文件（或升档
+            // 请求已记下），小文件删掉。
+            crate::metadata::covers::prune_smaller(Path::new(&track), keep);
         }
     }
 }

@@ -313,7 +313,7 @@ mod tests {
 
     /// 造一条只带路径 / 大小 / 修改时间的曲目（配对只用这三个字段）。
     fn track(path: &str, size: u64, modified: u64) -> TrackEntry {
-        TrackEntry {
+        TrackEntry(std::sync::Arc::new(crate::config::TrackShared {
             provider: ProviderId::Local,
             path: path.to_owned(),
             file_name: Path::new(path)
@@ -321,23 +321,13 @@ mod tests {
                 .unwrap()
                 .to_string_lossy()
                 .into_owned(),
-            title: String::new(),
-            artist: String::new(),
-            album: String::new(),
             album_artist: String::new(),
             genres: Vec::new(),
-            year: None,
-            track: None,
-            disk: None,
-            duration: 0.0,
-            bit_rate: None,
-            sample_rate: None,
-            channels: None,
-            has_art: false,
             size_bytes: size,
             modified,
             stamp: 0,
-        }
+            meta: std::sync::Arc::new(crate::metadata::MetaInfo::default()),
+        }))
     }
 
     /// 落一个已知大小 + 修改时间（秒）的文件，返回其路径字符串。

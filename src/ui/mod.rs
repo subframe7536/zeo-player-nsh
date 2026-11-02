@@ -291,6 +291,8 @@ fn bench(open_full: Rc<dyn Fn()>) {
     if std::env::var("ZEO_PLAYER_BENCH").as_deref() == Ok("close") {
         return bench_close();
     }
+    // `scroll`：只跑浏览 + 滚网格，不放歌不开全屏（测列表滚动内存）。
+    let scroll_only = std::env::var("ZEO_PLAYER_BENCH").as_deref() == Ok("scroll");
     let nav = global::<Nav>();
     spawn(async move {
         let step = |name: &str| eprintln!("ZEO_PLAYER_BENCH step {name}");
@@ -326,6 +328,10 @@ fn bench(open_full: Rc<dyn Fn()>) {
             nav.set(Nav::Folders);
             step("left");
             wait(10).await;
+        }
+        if scroll_only {
+            step("done");
+            return;
         }
         let tracks = store::store().tracks.get_untracked();
         store::play_list(&tracks, 0);
