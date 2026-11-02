@@ -157,7 +157,13 @@ fn settings_search_filters_sections() {
         .unwrap();
     assert!(has(&app, "系统字体"));
     assert!(!has(&app, "或为界面固定一种"));
-    assert!(!has(&app, "添加文件夹…"));
+    // 空曲库时主窗口空状态里也有「添加文件夹…」（没语料的平台），只看
+    // 设置内容区里它被滤掉。
+    app.wait_for_gone(
+        "id:settings-content >> text:添加文件夹…",
+        Duration::from_secs(2),
+    )
+    .unwrap();
     // 没有命中：右栏空状态。
     app.type_text("label:搜索设置", "zzz").unwrap();
     app.wait_for("没有匹配的设置").unwrap();
@@ -238,6 +244,9 @@ fn accent_swatches_switch_and_persist_the_theme_color() {
 fn cover_mode_tints_the_playing_track_title() {
     let _guard = play_lock();
     let mut app = start_inner(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
     // 先等封面线程把主色调算出来（写进全局元数据缓存）：之后播放时
     // request_accent 走同步快路径，不依赖可能被别的用例抢先取走的
     // drain 通知。
