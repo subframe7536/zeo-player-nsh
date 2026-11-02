@@ -31,11 +31,7 @@ pub fn scrub(
 }
 
 /// 纵向拖动取比例（0 在底部）：同 [`scrub`]，沿高度量。
-fn vscrub(
-    area: View,
-    on_move: impl Fn(f64) + 'static,
-    on_release: impl Fn(f64) + 'static,
-) -> View {
+fn vscrub(area: View, on_move: impl Fn(f64) + 'static, on_release: impl Fn(f64) + 'static) -> View {
     let height = signal(1.0_f32);
     let fraction = move |y: f32| {
         let h = height.get_untracked();

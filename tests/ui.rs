@@ -359,7 +359,10 @@ fn folders_page_tree_ops() {
     app.type_text("label:名称", "改名后").unwrap();
     app.press("role:button[重命名]").unwrap();
     app.wait_for("text:改名后").unwrap();
-    assert!(renamed.is_dir() && !made.exists(), "重命名应改磁盘上的目录名");
+    assert!(
+        renamed.is_dir() && !made.exists(),
+        "重命名应改磁盘上的目录名"
+    );
 
     // 删除：确认弹窗先取消（目录还在），再确认（没了）。
     app.right_click("label:改名后").unwrap();
@@ -372,7 +375,8 @@ fn folders_page_tree_ops() {
     app.right_click("label:改名后").unwrap();
     app.press("role:menuitem[删除文件夹…]").unwrap();
     app.press("role:button[移到回收站]").unwrap();
-    app.wait_for_gone("text:改名后", Duration::from_secs(5)).unwrap();
+    app.wait_for_gone("text:改名后", Duration::from_secs(5))
+        .unwrap();
     assert!(!renamed.exists(), "确认删除后目录应没了");
 
     // 曲目行右键菜单里有「重命名文件…」，弹窗能开能取消（不动共享文件）。

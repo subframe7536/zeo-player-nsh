@@ -44,11 +44,11 @@ jobs:
       - run: nsh package . --target ${{ matrix.target }}
       - name: Zip (macOS)
         if: runner.os == 'macOS'
-        run: ditto -c -k --keepParent ".nsh/out/Zeo Player.app" .nsh/out/ZeoPlayer-macos-arm64.zip
+        run: ditto -c -k --keepParent ".nsh/out/ZeoPlayer.app" .nsh/out/ZeoPlayer-macos-arm64.zip
       - name: Rename (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Move-Item ".nsh/out/Zeo Player.zip" .nsh/out/ZeoPlayer-windows-x64.zip
+        run: Move-Item ".nsh/out/ZeoPlayer.zip" .nsh/out/ZeoPlayer-windows-x64.zip
       # archive: false uploads the zip itself instead of wrapping it in a
       # second artifact zip; the artifact is named after the file.
       - uses: actions/upload-artifact@v7

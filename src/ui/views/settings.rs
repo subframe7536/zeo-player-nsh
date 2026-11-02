@@ -1496,12 +1496,13 @@ fn pane_row(p: Pane, pane: Signal<Pane>, rail: bool) -> AnyElement {
             .w_full()
             .items_center()
             .child(super::super::components::button::tipped(
-                b.size(px(40.0))
-                    .items_center()
-                    .justify_center()
-                    .child(icon(p.glyph(), 17.0, move || {
+                b.size(px(40.0)).items_center().justify_center().child(icon(
+                    p.glyph(),
+                    17.0,
+                    move || {
                         if active() { primary() } else { sidebar_fg() }
-                    })),
+                    },
+                )),
                 p.title(),
             ))
             .into_element();
@@ -1613,9 +1614,10 @@ fn nav_column(pane: Signal<Pane>, query: Signal<String>) -> View {
         .transition_colors()
         .duration(300.0)
         .test_id("settings-nav")
-        .child(when(move || !rail(), move || {
-            view().p(px(10.0)).child(search_box(query))
-        }))
+        .child(when(
+            move || !rail(),
+            move || view().p(px(10.0)).child(search_box(query)),
+        ))
         .child(
             scroll().flex_1().child(
                 view()

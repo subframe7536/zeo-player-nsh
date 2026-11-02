@@ -8,7 +8,6 @@ use nsh_base::{context_menu, menu, submenu};
 use nsh_core::prelude::*;
 
 use super::super::Nav;
-use super::{item, popup, separator};
 use super::super::components::button::{
     Size, Variant, icon_button, outline_button, pill_button, text_button,
 };
@@ -21,6 +20,7 @@ use super::super::components::page::{empty_state, page_header};
 use super::super::components::tracks::{Columns, track_columns};
 use super::super::store::{self, Draft, format_total, play_list, store};
 use super::super::theme::*;
+use super::{item, popup, separator};
 use crate::config::{TrackEntry, unix_now};
 use crate::playlists::{Condition, Field, FieldType, Op, Playlist, Rule, Sort};
 
@@ -230,15 +230,17 @@ pub fn sidebar_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
                     lists.iter().map(|p| sidebar_row(p, rail)).collect();
                 if lists.iter().all(|p| p.favorite) {
                     rows.push(
-                        view().opacity(fade).child(
-                            text("点 + 新建歌单，或在曲目上点右键添加。")
-                                .text_size(px(12.0))
-                                .line_height(px(18.0))
-                                .text_color(faint())
-                                .px(px(10.0))
-                                .py(px(4.0)),
-                        )
-                        .into_element(),
+                        view()
+                            .opacity(fade)
+                            .child(
+                                text("点 + 新建歌单，或在曲目上点右键添加。")
+                                    .text_size(px(12.0))
+                                    .line_height(px(18.0))
+                                    .text_color(faint())
+                                    .px(px(10.0))
+                                    .py(px(4.0)),
+                            )
+                            .into_element(),
                     );
                 }
                 rows
@@ -280,8 +282,9 @@ fn sidebar_row(p: &Playlist, rail: impl Fn() -> bool + Copy + 'static) -> AnyEle
     };
     // 按钮不能挂 `window_drag(false)`（`Interactive` 不在组件元素上），
     // 同 `page_header` 的返回键：裸 view 包一层。
-    let row = view().window_drag(false).child(
-        super::super::frame::adaptive_row(
+    let row = view()
+        .window_drag(false)
+        .child(super::super::frame::adaptive_row(
             rail,
             glyph,
             name.clone().into(),
@@ -291,8 +294,7 @@ fn sidebar_row(p: &Playlist, rail: impl Fn() -> bool + Copy + 'static) -> AnyEle
                 store().search_open.set(false);
                 nav.set(Nav::Playlist(id));
             },
-        ),
-    );
+        ));
     // 「我喜欢」不能改名或删除：没有右键菜单。
     if favorite {
         return row.into_element();

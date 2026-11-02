@@ -168,7 +168,13 @@ pub(crate) fn adaptive_row(
                     .text_size(px(14.0))
                     .line_height(px(14.0))
                     .font_weight(FontWeight::MEDIUM)
-                    .text_color(move || if selected() { theme::fg() } else { sidebar_fg() }),
+                    .text_color(move || {
+                        if selected() {
+                            theme::fg()
+                        } else {
+                            sidebar_fg()
+                        }
+                    }),
             ),
         )
 }

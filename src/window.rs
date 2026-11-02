@@ -360,7 +360,7 @@ mod platform {
     use objc2::runtime::{AnyObject, Bool, Imp, Sel};
     use objc2::{MainThreadMarker, msg_send, sel};
     use objc2_app_kit::{NSApplication, NSWindow};
-    use objc2_foundation::{NSString, NSSize};
+    use objc2_foundation::{NSSize, NSString};
 
     use super::TrayState;
 
@@ -596,14 +596,14 @@ mod platform {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GW_OWNER,
         GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindow,
-        GetWindowLongPtrW, GetWindowThreadProcessId, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsIconic,
-        IsWindowVisible, IsZoomed, MINMAXINFO, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW,
-        PostMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME, SW_HIDE,
-        SW_RESTORE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SetForegroundWindow,
-        SetWindowLongPtrW, SetWindowPlacement, ShowWindowAsync, TranslateMessage,
-        GetWindowPlacement, WINDOWPLACEMENT, WM_CLOSE, WM_DESTROY, WM_EXITSIZEMOVE,
-        WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW,
-        WM_SYSCOMMAND, WNDPROC, WS_CAPTION, WS_THICKFRAME,
+        GetWindowLongPtrW, GetWindowPlacement, GetWindowThreadProcessId, HTTOP, HTTOPLEFT,
+        HTTOPRIGHT, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, MSG, NCCALCSIZE_PARAMS,
+        PM_REMOVE, PeekMessageW, PostMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE,
+        SM_CXPADDEDBORDER, SM_CYFRAME, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWMAXIMIZED,
+        SW_SHOWNOACTIVATE, SetForegroundWindow, SetWindowLongPtrW, SetWindowPlacement,
+        ShowWindowAsync, TranslateMessage, WINDOWPLACEMENT, WM_CLOSE, WM_DESTROY, WM_EXITSIZEMOVE,
+        WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW, WM_SYSCOMMAND,
+        WNDPROC, WS_CAPTION, WS_THICKFRAME,
     };
 
     use super::TrayState;

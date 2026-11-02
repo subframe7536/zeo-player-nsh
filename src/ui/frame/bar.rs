@@ -247,11 +247,14 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                     ),
                     "静音",
                 ))
-                .child(slider(volume, input(), muted_fg(), fg(), set_volume, set_volume).w(px(96.0)))
+                .child(
+                    slider(volume, input(), muted_fg(), fg(), set_volume, set_volume).w(px(96.0)),
+                )
         }))
-        .child(when(move || !fits_volume(), move || {
-            volume_popover(volume_open)
-        }))
+        .child(when(
+            move || !fits_volume(),
+            move || volume_popover(volume_open),
+        ))
         .child(tipped(super::queue::queue_button(queue_open), "播放队列"))
         .child(tipped(
             icon_button(
@@ -344,7 +347,14 @@ fn volume_popover(open: Signal<bool>) -> AnyElement {
                 .px(px(8.0))
                 .py(px(10.0))
                 .gap(px(8.0))
-                .child(vslider(volume, input(), muted_fg(), fg(), set_volume, set_volume))
+                .child(vslider(
+                    volume,
+                    input(),
+                    muted_fg(),
+                    fg(),
+                    set_volume,
+                    set_volume,
+                ))
                 .child(icon_button(glyph, 15.0, "静音", muted_fg, toggle_mute)),
         )
         .into_element()

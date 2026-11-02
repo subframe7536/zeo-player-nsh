@@ -47,7 +47,13 @@ fn content_width() -> f32 {
     let folders = global::<super::super::Nav>().get() == super::super::Nav::Folders
         && !s.search_open.get()
         && s.search.with(|q| q.trim().is_empty());
-    window().width.0 - sidebar_width() - if folders { super::super::theme::FOLDERS_TREE } else { 0.0 }
+    window().width.0
+        - sidebar_width()
+        - if folders {
+            super::super::theme::FOLDERS_TREE
+        } else {
+            0.0
+        }
 }
 
 /// 窄窗口里依次收起：专辑列（< 760 pt）、大小列（< 600 pt）、序号列（< 420 pt）。

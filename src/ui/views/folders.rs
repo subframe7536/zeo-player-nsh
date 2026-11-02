@@ -22,9 +22,7 @@ use super::super::components::form::{
 };
 use super::super::components::icons::{Icon, icon, icon_dyn};
 use super::super::components::page::{empty_state, page_header};
-use super::super::components::tracks::{
-    Columns, ROW, format_bytes, track_columns, track_row,
-};
+use super::super::components::tracks::{Columns, ROW, format_bytes, track_columns, track_row};
 use super::super::now_playing::{REVEAL_LABEL, reveal};
 use super::super::store::{self, Same, play_list, player, scan, store};
 use super::super::theme::*;
@@ -269,9 +267,8 @@ fn flatten_with(
         out: &mut Vec<TreeRow>,
     ) {
         // 严格后代（`path/` 前缀）才算祖先展开。
-        let under = selected.is_some_and(|s| {
-            s.starts_with(&format!("{}{sep}", node.path.trim_end_matches(sep)))
-        });
+        let under = selected
+            .is_some_and(|s| s.starts_with(&format!("{}{sep}", node.path.trim_end_matches(sep))));
         let open = expanded.contains(&node.path) || under;
         out.push(TreeRow {
             path: node.path.clone(),
@@ -562,7 +559,11 @@ fn rename_dest(path: &str, dir: bool, name: &str, sep: char) -> Result<String, S
             .extension()
             .map(|e| e.to_string_lossy().into_owned())
             .unwrap_or_default();
-        if ext.is_empty() || name.to_lowercase().ends_with(&format!(".{}", ext.to_lowercase())) {
+        if ext.is_empty()
+            || name
+                .to_lowercase()
+                .ends_with(&format!(".{}", ext.to_lowercase()))
+        {
             name.to_owned()
         } else {
             format!("{name}.{ext}")
@@ -703,8 +704,7 @@ impl Ops {
     /// 后台改名：文件可能被播放器握着（Windows），停掉后多试几次；成
     /// 功再修曲库引用、重扫并定位。
     fn rename(&self, src: String, dest: String, dir: bool) {
-        let (cwd, expanded, message, extra) =
-            (self.cwd, self.expanded, self.message, self.extra);
+        let (cwd, expanded, message, extra) = (self.cwd, self.expanded, self.message, self.extra);
         let ui = store::poster();
         std::thread::spawn(move || {
             stop_if_playing_under(&src);
@@ -744,8 +744,7 @@ impl Ops {
     fn run_delete(&self, path: String) {
         self.close();
         let permanent = library_store().delete_permanently();
-        let (cwd, expanded, message, extra) =
-            (self.cwd, self.expanded, self.message, self.extra);
+        let (cwd, expanded, message, extra) = (self.cwd, self.expanded, self.message, self.extra);
         let ui = store::poster();
         std::thread::spawn(move || {
             stop_if_playing_under(&path);
@@ -802,7 +801,11 @@ fn name_dialog(ops: Rc<Ops>, op: FileOp, close: impl Fn() + Copy + 'static) -> A
     let (heading, default, confirm) = match &op {
         FileOp::NewFolder { .. } => ("新建文件夹", String::new(), "创建"),
         FileOp::Rename { path, dir } => (
-            if *dir { "重命名文件夹" } else { "重命名文件" },
+            if *dir {
+                "重命名文件夹"
+            } else {
+                "重命名文件"
+            },
             rename_default(path, *dir),
             "重命名",
         ),
@@ -846,7 +849,13 @@ fn name_dialog(ops: Rc<Ops>, op: FileOp, close: impl Fn() + Copy + 'static) -> A
         )
         .child(
             dialog_footer()
-                .child(text_button(Variant::Outline, Size::Default, None, "取消", close))
+                .child(text_button(
+                    Variant::Outline,
+                    Size::Default,
+                    None,
+                    "取消",
+                    close,
+                ))
                 .child(text_button(
                     Variant::Default,
                     Size::Default,
@@ -885,7 +894,13 @@ fn delete_folder_dialog(
         )
         .child(
             dialog_footer()
-                .child(text_button(Variant::Outline, Size::Default, None, "取消", close))
+                .child(text_button(
+                    Variant::Outline,
+                    Size::Default,
+                    None,
+                    "取消",
+                    close,
+                ))
                 .child(text_button(
                     Variant::Destructive,
                     Size::Default,
@@ -907,8 +922,7 @@ fn tree_menu(trigger: View, row: Memo<Option<TreeRow>>, ops: Rc<Ops>) -> AnyElem
         .open(gate.open())
         .on_open_change(gate.menu_change());
     let path = move || row.with_untracked(|r| r.as_ref().map(|r| r.path.clone()));
-    let is_root = row
-        .with_untracked(|r| r.as_ref().is_some_and(|r| r.depth == 0));
+    let is_root = row.with_untracked(|r| r.as_ref().is_some_and(|r| r.depth == 0));
     let message = ops.message;
     let open = move |make: fn(String) -> FileOp| {
         let ops = ops.clone();
@@ -928,10 +942,7 @@ fn tree_menu(trigger: View, row: Memo<Option<TreeRow>>, ops: Rc<Ops>) -> AnyElem
             item(
                 "重命名…",
                 Some(Icon::Edit),
-                open(|p| FileOp::Rename {
-                    path: p,
-                    dir: true,
-                }),
+                open(|p| FileOp::Rename { path: p, dir: true }),
             )
         }))
         .child(item(REVEAL_LABEL, Some(Icon::Reveal), {
@@ -1026,12 +1037,7 @@ pub fn Folders() -> impl IntoElement {
 
     let rows = computed(move || {
         let selected = here.with(|p| p.path.clone());
-        let r = flatten_with(
-            &tree.get(),
-            &expanded.get(),
-            selected.as_deref(),
-            SEP,
-        );
+        let r = flatten_with(&tree.get(), &expanded.get(), selected.as_deref(), SEP);
         Rc::new(r)
     });
     let files = computed(move || here.with(|p| p.files.clone()));
@@ -1113,49 +1119,44 @@ pub fn Folders() -> impl IntoElement {
         })
         .transition_colors()
         .duration(300.0)
-        .style_when(move || active.with(|a| a.is_some()), |st| {
-            st.cursor(Cursor::Grabbing)
-        })
+        .style_when(
+            move || active.with(|a| a.is_some()),
+            |st| st.cursor(Cursor::Grabbing),
+        )
         .on_file_drag_enter(move || dropping.set(true))
         .on_file_drag_leave(move || dropping.set(false))
         .on_file_drop(on_drop)
         .child(
             when(move || s.library.with(|l| l.roots.is_empty()), no_library).otherwise(move || {
-                let (select, toggle, ctx, ops) = (
-                    select.clone(),
-                    toggle.clone(),
-                    ctx.clone(),
-                    ops.clone(),
-                );
+                let (select, toggle, ctx, ops) =
+                    (select.clone(), toggle.clone(), ctx.clone(), ops.clone());
                 let cell_ctx = ctx.clone();
                 let cell_ops = ops.clone();
-                let tree_list = virtual_list(
-                    computed(move || rows.with(|r| r.len())),
-                    move |at| {
-                        let row = computed(move || rows.with(|r| r.get(at.index()).cloned()));
-                        tree_cell(
-                            row,
-                            here,
-                            cell_ctx.clone(),
-                            cell_ops.clone(),
-                            select.clone(),
-                            toggle.clone(),
-                        )
-                    },
-                )
+                let tree_list = virtual_list(computed(move || rows.with(|r| r.len())), move |at| {
+                    let row = computed(move || rows.with(|r| r.get(at.index()).cloned()));
+                    tree_cell(
+                        row,
+                        here,
+                        cell_ctx.clone(),
+                        cell_ops.clone(),
+                        select.clone(),
+                        toggle.clone(),
+                    )
+                })
                 // 路径作 key：cell 按行绑定（回收时行不变），树行右键
                 // 菜单里的行才不会错位。
-                .keys(move || rows.get().iter().map(|r| r.path.clone()).collect::<Vec<_>>())
+                .keys(move || {
+                    rows.get()
+                        .iter()
+                        .map(|r| r.path.clone())
+                        .collect::<Vec<_>>()
+                })
                 .estimated_item_size(px(TREE_ROW))
                 .content_padding_x(px(8.0))
                 .content_padding_bottom(px(BAR_SPACE))
                 .element_ref(&list_ref)
                 .on_scroll(move |e: &ScrollEvent| scroll.set(e.offset.y.0))
-                .empty(empty_state(
-                    Icon::Folder,
-                    "没有文件夹",
-                    "",
-                ))
+                .empty(empty_state(Icon::Folder, "没有文件夹", ""))
                 .flex_1();
                 let tree_pane = view()
                     .w(px(FOLDERS_TREE))
@@ -1219,9 +1220,8 @@ pub fn Folders() -> impl IntoElement {
                         Some(actions.into_element()),
                     ))
                     .child(track_columns(FOLDER_COLS));
-                let file_list = virtual_list(
-                    computed(move || files.with(|f| f.len())),
-                    move |at| {
+                let file_list =
+                    virtual_list(computed(move || files.with(|f| f.len())), move |at| {
                         let index = computed(move || files.with(|f| f.get(at.index()).copied()));
                         let track = computed(move || {
                             index.with(|i| i.and_then(|i| s.tracks.with(|t| t.get(i).cloned())))
@@ -1267,17 +1267,16 @@ pub fn Folders() -> impl IntoElement {
                                 }))
                             }) as Rc<dyn Fn(&str)>)
                         })
-                    },
-                )
-                .estimated_item_size(px(ROW))
-                .content_padding_bottom(px(BAR_SPACE))
-                .content_padding_x(px(20.0))
-                .flex_1()
-                .empty(empty_state(
-                    Icon::Folder,
-                    "这个文件夹没有曲目",
-                    "它包含的音乐可能在子文件夹里，在左侧树里选一个子文件夹。",
-                ));
+                    })
+                    .estimated_item_size(px(ROW))
+                    .content_padding_bottom(px(BAR_SPACE))
+                    .content_padding_x(px(20.0))
+                    .flex_1()
+                    .empty(empty_state(
+                        Icon::Folder,
+                        "这个文件夹没有曲目",
+                        "它包含的音乐可能在子文件夹里，在左侧树里选一个子文件夹。",
+                    ));
                 let right = view()
                     .flex_1()
                     .min_w(px(0.0))
@@ -1295,9 +1294,8 @@ pub fn Folders() -> impl IntoElement {
         .child(when(
             move || active.with(|a| a.is_some()),
             move || {
-                let name = move || {
-                    active.with(|a| a.as_ref().map(|d| d.name.clone()).unwrap_or_default())
-                };
+                let name =
+                    move || active.with(|a| a.as_ref().map(|d| d.name.clone()).unwrap_or_default());
                 let dir = move || active.with(|a| a.as_ref().is_some_and(|d| d.dir));
                 view()
                     .absolute()
@@ -1332,13 +1330,10 @@ pub fn Folders() -> impl IntoElement {
             },
         ))
         // 增删改弹窗（新建 / 重命名输入名，删除先确认）。
-        .child(when(
-            move || op.with(|o| o.is_some()),
-            {
-                let ops = ops_dialog;
-                move || op_dialog(ops.clone())
-            },
-        ))
+        .child(when(move || op.with(|o| o.is_some()), {
+            let ops = ops_dialog;
+            move || op_dialog(ops.clone())
+        }))
 }
 
 fn rescan_button() -> nsh_base::ButtonElement {
@@ -1359,9 +1354,7 @@ fn tree_cell(
     select: Rc<dyn Fn(&str)>,
     toggle: Rc<dyn Fn(&str, bool)>,
 ) -> AnyElement {
-    let name = move || {
-        row.with(|r| r.as_ref().map(|r| r.name.clone()).unwrap_or_default())
-    };
+    let name = move || row.with(|r| r.as_ref().map(|r| r.name.clone()).unwrap_or_default());
     let depth = move || row.with(|r| r.as_ref().map(|r| r.depth).unwrap_or(0));
     let has_children = move || row.with(|r| r.as_ref().is_some_and(|r| r.has_children));
     let open = move || row.with(|r| r.as_ref().is_some_and(|r| r.open));
@@ -1419,9 +1412,7 @@ fn tree_cell(
                     .justify_center()
                     .rounded(px(4.0))
                     .role(AccessibilityRole::Button)
-                    .label(move || {
-                        format!("{}{}", if open() { "收起 " } else { "展开 " }, name())
-                    })
+                    .label(move || format!("{}{}", if open() { "收起 " } else { "展开 " }, name()))
                     .hover(|st| st.bg(hover()))
                     .on_press(move |_: &()| {
                         if let Some(r) = row.get_untracked() {
@@ -1445,23 +1436,26 @@ fn tree_cell(
         .child(icon(Icon::Folder, 15.0, move || {
             if selected() { primary() } else { muted_fg() }
         }))
-        .child(view().flex_1().min_w(px(0.0)).child(
-            text(name)
-                .number_of_lines(1)
-                .text_size(px(13.0))
-                .line_height(px(13.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(move || {
-                    if selected() { fg() } else { muted_fg() }
-                }),
-        ))
-        .child(when(move || count() > 0, move || {
-            text(move || count().to_string())
-                .text_size(px(11.0))
-                .line_height(px(11.0))
-                .tabular_nums()
-                .text_color(faint())
-        }));
+        .child(
+            view().flex_1().min_w(px(0.0)).child(
+                text(name)
+                    .number_of_lines(1)
+                    .text_size(px(13.0))
+                    .line_height(px(13.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(move || if selected() { fg() } else { muted_fg() }),
+            ),
+        )
+        .child(when(
+            move || count() > 0,
+            move || {
+                text(move || count().to_string())
+                    .text_size(px(11.0))
+                    .line_height(px(11.0))
+                    .tabular_nums()
+                    .text_color(faint())
+            },
+        ));
     tree_menu(
         cell.pan_values(Some(&ctx.gx), Some(&ctx.gy))
             .claim_touches(ctx.claim())
@@ -1602,10 +1596,7 @@ mod tests {
         let both = vec![entry("/m/1.mp3"), entry("/x/2.mp3")];
         let two = build_tree_with(&["/m".into(), "/x".into()], &both, &[], '/');
         assert_eq!(two.len(), 2);
-        assert_eq!(
-            place_with(&two, None, '/').path.as_deref(),
-            Some("/m")
-        );
+        assert_eq!(place_with(&two, None, '/').path.as_deref(), Some("/m"));
         assert_eq!(format_bytes(1536 * 1024), "1.5 MB");
         assert_eq!(audio_format("/m/a.flac"), "FLAC");
         assert_eq!(audio_format("C:\\m\\b.Mp3"), "MP3");
@@ -1750,7 +1741,10 @@ mod tests {
         assert_eq!(kids, vec!["a", "b"]);
         let a = &tree[0].children["a\u{0}a"];
         assert_eq!(
-            a.children.values().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            a.children
+                .values()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["deep"]
         );
         assert_eq!(tree.len(), 1);

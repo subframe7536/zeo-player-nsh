@@ -118,9 +118,7 @@ fn on_event(result: notify::Result<notify::Event>) {
 /// `path` 在 `dir` 下面（严格后代）。
 fn is_under(path: &str, dir: &str) -> bool {
     let sep = std::path::MAIN_SEPARATOR;
-    path.len() > dir.len()
-        && path.starts_with(dir)
-        && path.as_bytes()[dir.len()] == sep as u8
+    path.len() > dir.len() && path.starts_with(dir) && path.as_bytes()[dir.len()] == sep as u8
 }
 
 /// `p` 是 `t` 这条曲目移动后的文件吗：大小 + 修改时间一致（rename /
@@ -148,11 +146,7 @@ fn find_dest(
     taken: &[(String, String)],
     tracks: &[TrackEntry],
 ) -> Option<String> {
-    let free = |p: &&String| {
-        !taken
-            .iter()
-            .any(|(_, t)| p.as_str() == t || is_under(p, t))
-    };
+    let free = |p: &&String| !taken.iter().any(|(_, t)| p.as_str() == t || is_under(p, t));
     if let Some(t) = tracks.iter().find(|t| t.path == from) {
         let mut hit = presents
             .iter()
@@ -363,8 +357,7 @@ mod tests {
     }
 
     fn temp(tag: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("zeo-watch-test-{}-{tag}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("zeo-watch-test-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -373,9 +366,18 @@ mod tests {
     #[test]
     fn is_under_checks_segments() {
         let sep = std::path::MAIN_SEPARATOR;
-        assert!(is_under(&format!("{sep}m{sep}a{sep}b"), &format!("{sep}m{sep}a")));
-        assert!(!is_under(&format!("{sep}m{sep}ab"), &format!("{sep}m{sep}a")));
-        assert!(!is_under(&format!("{sep}m{sep}a"), &format!("{sep}m{sep}a")));
+        assert!(is_under(
+            &format!("{sep}m{sep}a{sep}b"),
+            &format!("{sep}m{sep}a")
+        ));
+        assert!(!is_under(
+            &format!("{sep}m{sep}ab"),
+            &format!("{sep}m{sep}a")
+        ));
+        assert!(!is_under(
+            &format!("{sep}m{sep}a"),
+            &format!("{sep}m{sep}a")
+        ));
     }
 
     #[test]
@@ -414,7 +416,11 @@ mod tests {
         let to_str = to.to_string_lossy().into_owned();
         let tracks = vec![
             track(&format!("{sep}m{sep}album{sep}a.flac"), 10, 1700000000),
-            track(&format!("{sep}m{sep}album{sep}sub{sep}b.flac"), 20, 1700000001),
+            track(
+                &format!("{sep}m{sep}album{sep}sub{sep}b.flac"),
+                20,
+                1700000001,
+            ),
         ];
         assert_eq!(
             find_dest(
@@ -447,16 +453,9 @@ mod tests {
         let stray = write_file(&dir, "new.flac", 5, 1700000000);
         let to_str = to.to_string_lossy().into_owned();
         let from_dir = format!("{sep}m{sep}album");
-        let tracks = vec![track(
-            &format!("{from_dir}{sep}a.flac"),
-            10,
-            1700000000,
-        )];
+        let tracks = vec![track(&format!("{from_dir}{sep}a.flac"), 10, 1700000000)];
         // 文件夹 + 子项各自一条 Any 事件；外加一条「到达」的新文件。
-        let mut gones = vec![
-            from_dir.clone(),
-            format!("{from_dir}{sep}a.flac"),
-        ];
+        let mut gones = vec![from_dir.clone(), format!("{from_dir}{sep}a.flac")];
         let presents = vec![to_str.clone(), to_a, stray.clone()];
         let (pairs, dirty) = pair_moves(&mut gones, &presents, &tracks);
         assert_eq!(pairs, vec![(from_dir, to_str)]);
@@ -559,7 +558,9 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
         }
         assert!(
-            lib.tracks().iter().any(|t| t.path.ends_with("renamed.flac")),
+            lib.tracks()
+                .iter()
+                .any(|t| t.path.ends_with("renamed.flac")),
             "改名后索引直接换路径"
         );
         assert!(

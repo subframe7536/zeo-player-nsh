@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Zeo Player is a local-first desktop music player written as a pure-Rust NSH (Native Shell) app for macOS (AppKit) and Windows (Win32 / Direct2D). `README.md` is user-facing — keep implementation details out of it and put them here.
+ZeoPlayer is a local-first desktop music player written as a pure-Rust NSH (Native Shell) app for macOS (AppKit) and Windows (Win32 / Direct2D). `README.md` is user-facing — keep implementation details out of it and put them here.
 
 ## Rules
 
@@ -30,7 +30,7 @@ Zeo Player is a local-first desktop music player written as a pure-Rust NSH (Nat
 nsh check .        # cargo check + type check
 nsh test .         # unit tests + tests/ui.rs (headless UI tests)
 nsh run .          # run the app with rebuild on change
-nsh package . --target macos    # .nsh/out/Zeo Player.app (ad-hoc signed)
+nsh package . --target macos    # .nsh/out/ZeoPlayer.app (ad-hoc signed)
 nsh package . --target windows  # Windows installer
 ```
 

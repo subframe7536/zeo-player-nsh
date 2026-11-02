@@ -1,4 +1,4 @@
-//! Zeo Player 的界面（纯 Rust）：侧栏导航 + 内容区 + 浮动播放条；全屏播放为
+//! ZeoPlayer 的界面（纯 Rust）：侧栏导航 + 内容区 + 浮动播放条；全屏播放为
 //! 带淡入的覆盖层。
 
 mod components;
@@ -11,10 +11,10 @@ mod views;
 
 use std::rc::Rc;
 
-use nsh_core::{ContextMenuEvent, TouchEvent};
 use nsh_core::desktop::TitleBarStyle;
 use nsh_core::element::desktop::set_title_bar;
 use nsh_core::prelude::*;
+use nsh_core::{ContextMenuEvent, TouchEvent};
 
 use theme::*;
 
@@ -163,8 +163,7 @@ pub fn App() -> impl IntoElement {
 
 fn page(nav: Signal<Nav>, search_page: frame::SearchFocus) -> AnyElement {
     let s = store::store();
-    let search_mode =
-        move || s.search_open.get() || !s.search.with(|q| q.trim().is_empty());
+    let search_mode = move || s.search_open.get() || !s.search.with(|q| q.trim().is_empty());
     // 输入框挂在 `dynamic` 外面：输入时只重建下面的结果，框本身不重建
     // （不然每个键击都把焦点弄丢）。
     view()

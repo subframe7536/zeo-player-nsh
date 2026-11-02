@@ -982,10 +982,7 @@ impl MenuGate {
     }
 
     /// `popover` 的 `.on_open_change(..)`：请求写回本地信号与令牌。
-    pub fn popover_change(
-        self,
-        local: Signal<bool>,
-    ) -> impl Fn(&nsh_base::PopoverEvent) + 'static {
+    pub fn popover_change(self, local: Signal<bool>) -> impl Fn(&nsh_base::PopoverEvent) + 'static {
         let (id, open) = (self.id, self.open);
         move |e| {
             if let nsh_base::PopoverEvent::OpenChange(next, _) = e {

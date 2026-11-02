@@ -1,6 +1,6 @@
 //! 封面缩略图：内嵌封面解码、缩放到 [`THUMB`] 像素、存为 JPEG 缓存文件
-//! （数据目录下的 `covers`：macOS `~/Library/Application Support/Zeo Player/covers`，
-//! Windows `%APPDATA%\Zeo Player\covers`；按 路径 + 修改时间 + 大小 + 文件指纹 命名）。
+//! （数据目录下的 `covers`：macOS `~/Library/Application Support/ZeoPlayer/covers`，
+//! Windows `%APPDATA%\ZeoPlayer\covers`；按 路径 + 修改时间 + 大小 + 文件指纹 命名）。
 //! 后台线程池处理请求，结果由 UI 轮询取走。
 
 use std::collections::{HashSet, VecDeque};
