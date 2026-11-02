@@ -263,9 +263,15 @@ mod tray {
         static TRAY: RefCell<Option<Tray>> = const { RefCell::new(None) };
     }
 
-    /// 应用图标缩到托盘尺寸（RGBA）。
+    /// 应用图标缩到托盘尺寸（RGBA）。Windows 用满幅版（`icon-windows.png`），
+    /// macOS 留白版（`icon.png`）在托盘里会比别的图标小一圈。
     fn icon() -> Option<Icon> {
-        let img = image::load_from_memory(include_bytes!("../resources/icon.png")).ok()?;
+        let bytes: &[u8] = if cfg!(target_os = "windows") {
+            include_bytes!("../resources/icon-windows.png")
+        } else {
+            include_bytes!("../resources/icon.png")
+        };
+        let img = image::load_from_memory(bytes).ok()?;
         let img = img
             .resize(64, 64, image::imageops::FilterType::Triangle)
             .to_rgba8();

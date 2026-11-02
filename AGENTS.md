@@ -22,7 +22,21 @@ ZeoPlayer is a local-first desktop music player written as a pure-Rust NSH (Nati
 - 单行 `text()` 一律配 `.line_height(px(字号))`（leading-none）：默认行高约 1.2× 字号，中文/拉丁字形墨水在行盒里偏下约 0.75 pt，居中行里能看出来。会折行的正文/提示保持默认行高。
 - `store()`（含 `store::later`、`Owner`、环境）是线程局部的，只能在根组件所在线程调；后台线程收尾要回界面侧时，在界面侧先拿 `store::poster()` 的 `Post` 把手带进线程，`post(f)` 由 `install` 的轮询循环执行（每实例一条通道，并行 UI 测试不互串）。看当前曲用 `player().state()`，不用 `store().track`。
 - 文件 / 文件夹移动或改名用 `LibraryStore::move_path`，删除 / 摘除用 `remove_under`：索引、`MetaCache`、SQLite 直接换 / 清路径（不重读标签、不整库重扫）；歌单路径用 `store::move_playlist_paths` / `remove_playlist_paths_under` 同步。watcher 的单路径改名事件按（大小, mtime）指纹配对后同样走 `move_path`，配不上的才重扫。macOS 回收站走 `trash` 的 `DeleteMethod::NsFileManager`（默认的 Finder/osascript 要辅助功能权限）。
-- 应用图标：`resources/icon.svg` 是源文件；`resources/icon.png` 是它的 1024px 渲染（`sips -s format png -z 1024 1024 resources/icon.svg --out resources/icon.png`），`nsh.json` 的 `icon` 与托盘（`window.rs`）都指向 PNG——NSH 打包在 Windows 上用 image crate 解码、不认 SVG（macOS 收 SVG，但为了两端一致都用 PNG）。标题栏 logo 直接嵌 `icon.svg`（`ui::components::icons::logo_svg`）。换图标改 `icon.svg` 并重渲染 PNG。
+- 应用图标：`resources/icon.svg` 是唯一源文件，图形满幅（Windows 惯例铺满画布）；两张 PNG 都是它的渲染产物，平台差异只在渲染时——`icon-windows.png` 直接渲 1024，`icon.png` 缩到 824 再垫透明边回 1024（macOS 惯例留边距）。`nsh.json` 的 `icon` 指 `icon.png`（macOS 打包与托盘）；Windows 打包用 `nsh package --target windows --icon resources/icon-windows.png` 覆盖，Windows 托盘按 `cfg` 嵌 `icon-windows.png`（`window.rs`）。NSH 打包在 Windows 上用 image crate 解码、不认 SVG，所以两端都出 PNG。**透明区的 RGB 必须从一张 `rx=0` 的满底渲染里并回来**：SVG 渲出的透明像素是 `00 00 00 00`（透明黑），缩到任务栏尺寸时黑 RGB 会双线性渗进边缘半透明像素，四角出灰线（NSH 打包用 image crate 按通道独立缩放、不预乘 alpha）。渲染命令（Windows 没有 sips，用 `pnpm dlx sharp-cli` 渲 SVG；ffmpeg 已用于测试音频）：
+  ```sh
+  sed 's/rx="[0-9.]*"/rx="0"/' resources/icon.svg > .nsh/tmp/icon-square.svg
+  sips -s format png -z 1024 1024 .nsh/tmp/icon-square.svg --out .nsh/tmp/icon-square.png   # macOS
+  sips -s format png -z 1024 1024 resources/icon.svg --out .nsh/tmp/icon-normal.png
+  pnpm dlx sharp-cli -i .nsh/tmp/icon-square.svg -o .nsh/tmp/icon-square.png                # Windows
+  pnpm dlx sharp-cli -i resources/icon.svg -o .nsh/tmp/icon-normal.png
+  ffmpeg -i .nsh/tmp/icon-square.png -i .nsh/tmp/icon-normal.png -filter_complex \
+    "[1:v]format=rgba,alphaextract[a];[0:v]format=rgb24[rgb];[rgb][a]alphamerge[out]" \
+    -map "[out]" resources/icon-windows.png
+  ffmpeg -i .nsh/tmp/icon-square.png -i resources/icon-windows.png -filter_complex \
+    "[1:v]scale=824:824,format=rgba,pad=1024:1024:100:100:color=black@0,alphaextract[a];[0:v]format=rgb24[rgb];[rgb][a]alphamerge[out]" \
+    -map "[out]" resources/icon.png
+  ```
+  标题栏 logo 直接嵌 `icon.svg`（`ui::components::icons::logo_svg`）。换图标改 `icon.svg` 并重渲染两张 PNG。
 
 ## Commands
 
@@ -31,7 +45,7 @@ nsh check .        # cargo check + type check
 nsh test .         # unit tests + tests/ui.rs (headless UI tests)
 nsh run .          # run the app with rebuild on change
 nsh package . --target macos    # .nsh/out/ZeoPlayer.app (ad-hoc signed)
-nsh package . --target windows  # Windows installer
+nsh package . --target windows --icon resources/icon-windows.png  # Windows installer（满幅图标）
 ```
 
 - Dev builds (`nsh run`, debug `cargo run`) use the repo's `.nsh/dev-data` instead of the system data dir; `ZEO_PLAYER_DATA_DIR` overrides everything.
@@ -63,4 +77,5 @@ Workarounds live in the app; don't patch NSH crates locally. When a limitation i
 - **没有 slider / select 组件。** nsh-base 0.3.0 只有 progress、switch、checkbox 等；文档里的 Slider、Select 在 NSH 主分支未发布。下拉用 `menu` + 自画触发器（`form.rs` 的 `trigger_shell`/`trigger_chevron`/`select_trigger`），滑块用 `components::slider` 自组，没有键盘调节与「可调节」无障碍角色。发布对应版本后随 CLI 一起换上。
 - **组件元素不能挂 tooltip。** nsh-base 的 `ButtonElement` 等没有实现 `Interactive`，没有 `.tooltip(..)`；在外面包一层 view 挂提示（`button::tipped`）。另外 `popover` 的触发器若是 nsh-base `button`，按压被按钮吃掉、弹层打不开——队列按钮与字体下拉因此用普通 view 做触发器。
 - **Windows 局部重绘下背景模糊留下亮块。** 局部重绘只清空并重画变化区域，而 `backdropFilter` 按模糊半径多取一圈上一帧的像素（那里已盖着播放条自己的半透明底色），于是每次重绘都留下一块更亮的直角矩形。Windows 上播放条不加背景模糊，用不透明 card 色（`ui::theme::bar`、`ui::frame::bar::player_bar`）。
+- **应用图标不能按平台给。** `nsh.json` 的 `icon` 全平台一张方形 PNG，各平台只做转换（macOS → icns、Windows → 缩几档嵌 exe），没有按 target 分别配图标的入口；而两端的图标惯例冲突——macOS 图形占 824/1024 留边距，Windows 满幅铺满，同一张图必有一端显小或显大。应用在 `nsh package . --target windows` 时用 `--icon resources/icon-windows.png` 传满幅渲染（两张 PNG 都由 `icon.svg` 渲出，见上面「应用图标」条）。希望 NSH 支持按平台给图标（如 `"icon": {"macos": ..., "windows": ...}`）。
 - **右键按下不产生 PressOutside。** macOS（`RightMouseDown`）与 Windows（`WM_RBUTTONDOWN`）都只发 `ContextMenu` 事件、不发 touch Start，overlay 的 `onPressOutside` 对右键不触发——开着的菜单不会被关掉，再开一个就叠两层。应用侧互斥：所有 `menu()`/`context_menu()`/`popover()` 走 `store::menu_control()` 拿 `MenuGate`（共享 `store().menu_open` 令牌，开新挤掉旧的；popover 用 `gate.open_with(local)`/`gate.popover_change(local)`/`effect(gate.evicted(local))` 同步本地开关信号），根 view 上的兜底 `on_context_menu` 把「点在没有菜单的区域」也清掉。希望上游让右键（或在另一 overlay 外的 ContextMenu 事件）也算 PressOutside，或提供全局「只开一个菜单」。
