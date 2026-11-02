@@ -397,7 +397,7 @@ fn covers_source_section() -> View {
     ))
     .child(pref_row(
         "在列表中显示封面",
-        "关闭后曲目行、网格与队列只显示占位图；列表不再解码封面，滚动大曲库更省内存。",
+        "关闭后曲目行、网格与队列只显示标题首字，不再解码封面，滚动大曲库更省内存。",
         move || s.library.with(|l| l.show_covers),
         super::super::store::set_show_covers,
     ))

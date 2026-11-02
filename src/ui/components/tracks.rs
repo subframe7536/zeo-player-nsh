@@ -8,7 +8,7 @@ use nsh_core::prelude::*;
 
 use super::super::store::{cover_for, format_time, is_liked, store, toggle_like};
 use super::super::theme::*;
-use super::cover::cover;
+use super::cover::{cover_initial, initial_letter};
 use super::icons::{Icon, icon_dyn};
 use crate::config::TrackEntry;
 
@@ -263,7 +263,14 @@ pub fn track_row(
         }))
         .child(cols.cover.then(|| {
             let src = move || track.with(|t| t.as_ref().and_then(|t| cover_for(&t.path, 40.0)));
-            cover(src, Some(40.0), 6.0)
+            let letter = move || {
+                track.with(|t| {
+                    t.as_ref()
+                        .map(|t| initial_letter(&t.title, &t.path))
+                        .unwrap_or_default()
+                })
+            };
+            cover_initial(src, letter, Some(40.0), 6.0)
         }))
         .child(
             view()

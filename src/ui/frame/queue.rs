@@ -9,7 +9,7 @@ use nsh_base::{button, popover};
 use nsh_core::prelude::*;
 
 use super::super::components::button::{RADIUS_MD, icon_button};
-use super::super::components::cover::cover;
+use super::super::components::cover::{cover_initial, initial_letter};
 use super::super::components::icons::{Icon, icon, icon_dyn};
 use super::super::store::{cover_for, format_time, player, store};
 use super::super::theme::*;
@@ -102,6 +102,7 @@ fn queue_panel(open: Signal<bool>) -> View {
             })
         };
         let src = move || path.with(|p| p.as_deref().and_then(|p| cover_for(p, 36.0)));
+        let letter = move || initial_letter(&title(), &path.get().unwrap_or_default());
         button()
             .h(px(ROW))
             .flex_row()
@@ -133,7 +134,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                     }),
                 ),
             )
-            .child(cover(src, Some(36.0), 6.0))
+            .child(cover_initial(src, letter, Some(36.0), 6.0))
             .child(
                 view()
                     .flex_1()

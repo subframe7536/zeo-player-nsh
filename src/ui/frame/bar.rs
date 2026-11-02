@@ -11,8 +11,8 @@ use super::super::components::cover::cover;
 use super::super::components::icons::{Icon, icon_dyn};
 use super::super::components::slider::{slider, vslider};
 use super::super::store::{
-    cover_for, format_time, player, progress_fraction, seek_to, set_volume, shown_time, store,
-    toggle_mute,
+    cover_for_always, format_time, player, progress_fraction, seek_to, set_volume, shown_time,
+    store, toggle_mute,
 };
 use super::super::theme::*;
 use crate::engine::audio::LoopMode;
@@ -43,10 +43,11 @@ fn fits_times() -> bool {
 pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
     let s = store();
     let has_track = move || s.track.with(|t| t.path.is_some());
-    // 48pt 用列表封面的小档（96px）：720px 大封面留给全屏页。
+    // 48pt 用封面的小档（96px）：720px 大封面留给全屏页；「列表显示
+    // 封面」开关只管列表，播放条一直显示当前曲目封面。
     let artwork = move || {
         s.track
-            .with(|t| t.path.as_deref().and_then(|p| cover_for(p, 48.0)))
+            .with(|t| t.path.as_deref().and_then(|p| cover_for_always(p, 48.0)))
     };
     let expand = on_expand.clone();
 

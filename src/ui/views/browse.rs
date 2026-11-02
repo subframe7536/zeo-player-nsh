@@ -7,7 +7,7 @@ use std::rc::Rc;
 use nsh_core::prelude::*;
 
 use super::super::components::button::pill_button;
-use super::super::components::cover::{cover, cover_with};
+use super::super::components::cover::cover_initial;
 use super::super::components::icons::Icon;
 use super::super::components::page::{empty_state, page_header};
 use super::super::components::tracks::{Columns, track_columns};
@@ -284,9 +284,15 @@ pub fn Albums() -> impl IntoElement {
                 .flatten()
                 .collect::<Vec<_>>()
                 .join(" · ");
+                let first = group.title.chars().next().map(String::from).unwrap_or_default();
                 let header = hero(
                     "专辑",
-                    cover(move || cover_src.get(), Some(200.0), 12.0),
+                    cover_initial(
+                        move || cover_src.get(),
+                        move || first.clone(),
+                        Some(200.0),
+                        12.0,
+                    ),
                     group.title.clone(),
                     group.subtitle.clone(),
                     meta,
@@ -322,8 +328,15 @@ pub fn Albums() -> impl IntoElement {
                         .active(|st| st.opacity(0.75))
                         .on_press(move |_: &()| selected.set(group.get_untracked().map(|g| g.key)))
                         .child(
-                            cover(
+                            cover_initial(
                                 move || cover_path().and_then(|p| cover_for(&p, 184.0)),
+                                move || {
+                                    title()
+                                        .chars()
+                                        .next()
+                                        .map(String::from)
+                                        .unwrap_or_default()
+                                },
                                 None,
                                 10.0,
                             )
@@ -446,6 +459,7 @@ pub fn Genres() -> impl IntoElement {
                 let chips = list.iter().map(|g| {
                     let key = g.key.clone();
                     let art = stored(g.cover.clone());
+                    let first = g.title.chars().next().map(String::from).unwrap_or_default();
                     nsh_base::button()
                         .flex_row()
                         .items_center()
@@ -459,11 +473,11 @@ pub fn Genres() -> impl IntoElement {
                         .hover(|st| st.bg(hover()))
                         .active(|st| st.opacity(0.7))
                         .on_press(move |_: &()| selected.set(Some(key.clone())))
-                        .child(cover_with(
+                        .child(cover_initial(
                             move || art.get().and_then(|p| cover_for(&p, 32.0)),
-                            32.0,
+                            move || first.clone(),
+                            Some(32.0),
                             16.0,
-                            Icon::Tag,
                         ))
                         .child(
                             text(g.title.clone())

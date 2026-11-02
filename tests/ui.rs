@@ -279,6 +279,58 @@ fn cover_mode_tints_the_playing_track_title() {
     zeo_player::engine::Player::global().pause();
 }
 
+/// 「在列表中显示封面」关掉：曲目行的封面图元素消失，改显示标题首字符
+/// （占位框一直在，开关切回图片恢复）；播放条的当前曲目封面不受影响
+/// 一直显示。设置是全局持久化的，测完开回来。
+#[test]
+fn list_rows_show_title_initial_when_covers_are_off() {
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("zeo-player-test-music").unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+    let img = "role:button[测试歌曲] >> id:cover-img";
+    let letter = "role:button[测试歌曲] >> text:测";
+    let bar_img = "role:button[展开播放页] >> id:cover-img";
+    // 默认开：语料曲目带内嵌封面，图片元素在；首字占位垫在底下。
+    app.wait_until("封面图已就位", Duration::from_secs(10), |s| {
+        s.count(img).unwrap_or(0) == 1
+    })
+    .unwrap();
+    assert_eq!(app.screen().count(letter).unwrap(), 1);
+    // 播起来：播放条的封面不受列表开关影响，断言它一直有图。
+    double_press(&mut app, "role:button[测试歌曲]");
+    app.wait_until("播放条封面已就位", Duration::from_secs(10), |s| {
+        s.count(bar_img).unwrap_or(0) == 1
+    })
+    .unwrap();
+    // 设置 → 封面 → 关掉「在列表中显示封面」：行内图片没了，只剩首字；
+    // 播放条封面还在。
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[封面]").unwrap();
+    app.wait_for("role:switch[在列表中显示封面]").unwrap();
+    app.press("role:switch[在列表中显示封面]").unwrap();
+    app.press("label:关闭设置").unwrap();
+    app.wait_until("行内封面图应消失", Duration::from_secs(5), |s| {
+        s.count(img).unwrap_or(1) == 0
+    })
+    .unwrap();
+    assert_eq!(app.screen().count(letter).unwrap(), 1);
+    assert_eq!(app.screen().count(bar_img).unwrap(), 1, "播放条封面应一直显示");
+    // 开回来（别把关闭状态留给同进程的其他用例）。
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[封面]").unwrap();
+    app.press("role:switch[在列表中显示封面]").unwrap();
+    app.press("label:关闭设置").unwrap();
+    app.wait_until("封面图应回来", Duration::from_secs(10), |s| {
+        s.count(img).unwrap_or(0) == 1
+    })
+    .unwrap();
+    zeo_player::engine::Player::global().pause();
+}
+
 /// 设置弹窗 →「外观」分类 →「字体」下拉：触发器即当前字体；弹层里有
 /// 搜索框与预览行，选「系统字体」立即生效并关弹层。
 #[test]

@@ -1257,18 +1257,24 @@ pub async fn pick_folders() -> Option<String> {
 // --- 封面 ---------------------------------------------------------------------
 
 /// `path` 的列表封面（文件路径）：`pt` ≤ 48 的插槽（曲目行、队列、
-/// chips、播放条）给 96px 小图，更大的（网格 ~184pt、详情页 hero）
-/// 升档到 400px——每个音频文件最多一份缓存封面，升档后小文件删掉。
-/// 首次读取时交给后台线程池生成；每个曲目一个信号，生成后只有读它
-/// 的绑定再运行。信号属于根组件，列表单元格复用或销毁都不会丢掉
-/// 进行中的请求。
+/// chips）给 96px 小图，更大的（网格 ~184pt、详情页 hero）升档到
+/// 400px——每个音频文件最多一份缓存封面，升档后小文件删掉。首次读取
+/// 时交给后台线程池生成；每个曲目一个信号，生成后只有读它的绑定再
+/// 运行。信号属于根组件，列表单元格复用或销毁都不会丢掉进行中的请求。
+/// 「列表显示封面」开关只管列表，关掉时这里返回 `None`——不建信号、
+/// 不发请求，列表完全不解码封面；读库信号让调用处的闭包订阅它，切换
+/// 即重渲。
 pub fn cover_for(path: &str, pt: f32) -> Option<SharedString> {
-    if std::env::var_os("ZEO_PLAYER_BENCH_NO_COVERS").is_some() {
+    if !store().library.with(|l| l.show_covers) {
         return None;
     }
-    // 「列表显示封面」关掉了就只画占位图：不建信号、不发请求，列表
-    // 完全不解码封面。读库信号让调用处的闭包订阅它，切换即重渲。
-    if !store().library.with(|l| l.show_covers) {
+    cover_for_always(path, pt)
+}
+
+/// 与 [`cover_for`] 相同但不受「列表显示封面」开关影响：播放条的当前
+/// 曲目封面一直显示（开关只管列表渲染）。
+pub fn cover_for_always(path: &str, pt: f32) -> Option<SharedString> {
+    if std::env::var_os("ZEO_PLAYER_BENCH_NO_COVERS").is_some() {
         return None;
     }
     let side = if pt <= 48.0 {
