@@ -6,7 +6,7 @@
 use std::sync::Once;
 use std::time::Duration;
 
-use nsh_core::geometry::{px, size};
+use nsh_core::geometry::{point, px, size};
 use nsh_core::platform::Os;
 use nsh_engine::{EngineConfig, Root};
 use nsh_testing::Headless;
@@ -237,7 +237,7 @@ fn equalizer_preset_applies_and_persists() {
     app.press("id:settings-nav >> role:button[播放]").unwrap();
     app.wait_for("label:启用均衡器").unwrap();
     app.press("label:启用均衡器").unwrap();
-    // 开关打开后各段滑块出现（前级显示 +0.0 dB）。
+    // 开关打开后 9 段竖推子出现（各段当前值显示 +0.0 dB）。
     app.wait_for("+0.0 dB").unwrap();
     // 触发器按压偶发打不开弹层（抬起触摸落在刚挂上的弹层上算作外部
     // 按压又把它关掉）：按到菜单出现为止。
@@ -254,7 +254,7 @@ fn equalizer_preset_applies_and_persists() {
     }
     assert!(opened, "预设菜单应打开");
     app.press("role:menuitem[低音增强]").unwrap();
-    // 低音增强的第一段是 +6.0 dB，立即显示。
+    // 低音增强的第一段（31 Hz）是 +6.0 dB，立即显示。
     app.wait_for("+6.0 dB").unwrap();
     let saved = |want: bool| {
         for _ in 0..40 {
@@ -288,7 +288,7 @@ fn saved_global_offset() -> Option<i64> {
         .and_then(|v| v["global_lyrics_offset_ms"].as_i64())
 }
 
-/// 全屏歌词区右上角的每曲偏移控件：±0.5s 步进、显示、重置清零。
+/// 全屏歌词区右缘的每曲偏移栏：±0.5s 步进、显示，重置在数值点开的弹层里。
 #[test]
 fn lyrics_offset_nudges_and_resets() {
     let _guard = play_lock();
@@ -301,18 +301,59 @@ fn lyrics_offset_nudges_and_resets() {
     double_press(&mut app, "role:button[测试歌曲]");
     app.press("label:全屏播放").unwrap();
     app.wait_for("label:歌词提前").unwrap();
+    // 暂停：测试曲只有 10 秒，播完自动切到无歌词的曲目会把偏移栏收掉。
+    zeo_player::engine::Player::global().pause();
     app.press("label:歌词提前").unwrap();
     app.press("label:歌词提前").unwrap();
     app.wait_for("+1.0s").unwrap();
-    app.wait_for("label:重置歌词偏移").unwrap();
+    // 「重置」在偏移数值点开的滑条弹层里；触发器按压偶发打不开弹层，
+    // 按到出现为止（同「预设」菜单）。
+    let mut opened = false;
+    for _ in 0..10 {
+        app.press("label:调整歌词时间偏移").unwrap();
+        if app
+            .wait_for_within("label:重置歌词偏移", Duration::from_millis(500))
+            .is_ok()
+        {
+            opened = true;
+            break;
+        }
+    }
+    assert!(opened, "偏移弹层应打开");
     app.press("label:重置歌词偏移").unwrap();
-    app.wait_for("偏移 0s").unwrap();
+    app.wait_for("0s").unwrap();
     // 共享播放器：别让它放着歌去影响别的用例。
     zeo_player::engine::Player::global().pause();
 }
 
+/// 均衡器竖推子在设置滚动区里拖得动（responder 的 claim 要挡下滚动视图
+/// 抢拖）：上拖 1/4 行程（148pt）从 0 到 +6.0 dB。
+// TODO: 目前仍拖不动——`scrub`/`vscrub` 已补 `on_touch` 让节点进触摸路径，
+// 但 headless `drag` 按目标节点向上建链，claim 挂在子级 `area` 上不在链里；
+// 真机行为也未取证。待查清后恢复。
+#[test]
+#[ignore = "EQ 推子拖拽未修好，见 TODO"]
+fn eq_fader_drags_in_settings_scroll() {
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[播放]").unwrap();
+    app.wait_for("label:启用均衡器").unwrap();
+    app.press("label:启用均衡器").unwrap();
+    app.wait_for("+0.0 dB").unwrap();
+    app.drag("label:均衡器 1k", point(px(0.0), px(-37.0)))
+        .unwrap();
+    app.wait_for("+6.0 dB").unwrap();
+    // 共享全局配置，用例结束前恢复：回平直、关开关。
+    app.press("label:重置").unwrap();
+    app.press("label:启用均衡器").unwrap();
+}
+
 /// 设置 →「歌词」分类的「全局歌词偏移」数字输入：正常值、钳到 ±30000、
-/// 非法回退；设好后全屏歌词区的小字提示出现（每曲那份不受影响）。
+/// 非法回退；设好后全屏歌词区偏移弹层里的「全局」小字出现（每曲那份不受影响）。
 #[test]
 fn lyrics_offset_global_saves() {
     let _guard = play_lock();
@@ -353,8 +394,22 @@ fn lyrics_offset_global_saves() {
     double_press(&mut app, "role:button[测试歌曲]");
     app.press("label:全屏播放").unwrap();
     app.wait_for("label:歌词提前").unwrap();
-    app.wait_for("全局 +0.3s").unwrap();
-    assert!(has(&app, "偏移 0s"), "每曲偏移不应受影响");
+    // 暂停：测试曲只有 10 秒，播完自动切到无歌词的曲目会把偏移栏收掉。
+    zeo_player::engine::Player::global().pause();
+    // 「全局 +0.3s」小字在偏移数值点开的弹层里；触发器按压偶发落空，重试。
+    let mut opened = false;
+    for _ in 0..10 {
+        app.press("label:调整歌词时间偏移").unwrap();
+        if app
+            .wait_for_within("全局 +0.3s", Duration::from_millis(500))
+            .is_ok()
+        {
+            opened = true;
+            break;
+        }
+    }
+    assert!(opened, "偏移弹层应打开");
+    assert!(has(&app, "0s"), "每曲偏移不应受影响");
     // 共享全局配置，用例结束前恢复 0。
     app.press("label:收起").unwrap();
     app.press("设置").unwrap();

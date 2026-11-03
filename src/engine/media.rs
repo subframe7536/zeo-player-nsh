@@ -9,21 +9,15 @@ use playwire::{Capabilities, Event, MediaControls, PlaybackState, PlayerConfig, 
 
 use crate::engine::audio::{EngineCmd, Snapshot};
 
-/// 指示媒体线程操作的内部消息。
-enum Op {
-    Publish(Box<PlaybackState>),
-    Artwork(Option<String>),
-}
-
 #[derive(Clone)]
 pub struct MediaSession {
-    tx: Sender<Op>,
+    tx: Sender<Box<PlaybackState>>,
 }
 
 impl MediaSession {
     /// 启动媒体会话与它的串行线程；事件转成引擎命令。
     pub fn start(cmd_tx: Sender<EngineCmd>) -> MediaSession {
-        let (tx, rx) = std::sync::mpsc::channel::<Op>();
+        let (tx, rx) = std::sync::mpsc::channel::<Box<PlaybackState>>();
         std::thread::Builder::new()
             .name("zeo-player-media".into())
             .spawn(move || {
@@ -70,40 +64,16 @@ impl MediaSession {
                         return;
                     }
                 };
-                let mut artwork_file: Option<String> = None;
-                let mut last_track_id: Option<String> = None;
-                while let Ok(op) = rx.recv() {
-                    match op {
-                        Op::Artwork(url) => artwork_file = url,
-                        Op::Publish(state) => {
-                            let mut state = *state;
-                            // 换曲时带上封面（后端也会 diff，重复发布无害）。
-                            let changed = state
-                                .track
-                                .as_ref()
-                                .map(|track| last_track_id.as_deref() != Some(track.id.as_str()))
-                                .unwrap_or(false);
-                            if changed {
-                                let id = state.track.as_ref().unwrap().id.clone();
-                                if let Some(track) = state.track.as_mut() {
-                                    track.artwork_url = artwork_file.clone().unwrap_or_default();
-                                }
-                                last_track_id = Some(id);
-                            }
-                            if let Err(err) = controls.set_state(&state) {
-                                eprintln!("zeo-player: 媒体状态发布失败: {err}");
-                            }
-                        }
+                // 后端按 Track 整体 diff（含 artwork_url），重发同曲目的
+                // 封面更新会触发新一轮元数据，不需要单独的成功通知。
+                while let Ok(state) = rx.recv() {
+                    if let Err(err) = controls.set_state(&state) {
+                        eprintln!("zeo-player: 媒体状态发布失败: {err}");
                     }
                 }
             })
             .ok();
         MediaSession { tx }
-    }
-
-    /// 更新媒体会话封面文件（file://）。
-    pub fn set_artwork_file(&self, url: Option<String>) {
-        let _ = self.tx.send(Op::Artwork(url));
     }
 
     /// 发布快照到系统媒体面。
@@ -114,13 +84,18 @@ impl MediaSession {
         };
         // 循环模式都在端点回绕（单曲是重播自己）：有多于一首就能切。
         let can_switch = track.queue.len() > 1;
+        // 封面现查最大的那份列表缓存（升档 96→400 后 96 文件会被删，
+        // 冷缓存则晚于换曲才生成）：随每次发布带上，没有就清空缩略图。
+        let artwork_url = crate::metadata::covers::cached_list(std::path::Path::new(path))
+            .map(|(_, f)| file_url(&f.to_string_lossy()))
+            .unwrap_or_default();
         let state = PlaybackState {
             track: Some(Track {
                 id: path.clone(),
                 title: track.title.clone(),
                 artists: vec![track.artist.clone()],
                 album: track.album.clone(),
-                artwork_url: String::new(),
+                artwork_url,
                 url: String::new(),
             }),
             playing: snapshot.is_playing,
@@ -142,6 +117,51 @@ impl MediaSession {
                 can_seek: true,
             },
         };
-        let _ = self.tx.send(Op::Publish(Box::new(state)));
+        let _ = self.tx.send(Box::new(state));
+    }
+}
+
+/// 本地路径 → `file://` URI：分隔 `/` 与盘符 `:` 保留原样，其余非
+/// unreserved 字节按 UTF-8 百分号编码——WinRT `Uri::CreateUri` 与
+/// `NSURL` 不接受裸空格 / 非 ASCII（数据目录的用户名段可能含这些）。
+fn file_url(path: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let path = path.replace('\\', "/");
+    let mut out = String::with_capacity(path.len() + 8);
+    out.push_str(if path.starts_with('/') { "file://" } else { "file:///" });
+    for &b in path.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                out.push(b as char)
+            }
+            _ => {
+                out.push('%');
+                out.push(HEX[(b >> 4) as usize] as char);
+                out.push(HEX[(b & 0x0f) as usize] as char);
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `file://` URI：盘符与分隔符保留，空格 / 非 ASCII / 特殊字符编码。
+    #[test]
+    fn file_url_escapes_non_unreserved() {
+        assert_eq!(
+            file_url("C:\\Users\\John Doe\\covers\\ab-96.jpg"),
+            "file:///C:/Users/John%20Doe/covers/ab-96.jpg"
+        );
+        assert_eq!(
+            file_url("C:/Users/张三/covers/ab-96.jpg"),
+            "file:///C:/Users/%E5%BC%A0%E4%B8%89/covers/ab-96.jpg"
+        );
+        assert_eq!(
+            file_url("/Users/me/Music/a#b%100.jpg"),
+            "file:///Users/me/Music/a%23b%25100.jpg"
+        );
     }
 }

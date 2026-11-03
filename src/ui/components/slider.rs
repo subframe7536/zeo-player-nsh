@@ -3,6 +3,7 @@
 
 use std::rc::Rc;
 
+use nsh_core::TouchEvent;
 use nsh_core::prelude::*;
 
 /// 横向拖动取比例（0..1）：按下/移动调 `on_move`，抬起调 `on_release`。
@@ -23,6 +24,9 @@ pub fn scrub(
     let on_move = Rc::new(on_move);
     let grant = on_move.clone();
     area.on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
+        // 进触摸路径的门票：claim 只协商已在路径上的节点，不挂 on_touch
+        // 的话 responder 永远不被问到（事件掩码里没有 Touch）。
+        .on_touch(|_: &TouchEvent| {})
         .claim_touches(TouchClaim::on_start())
         .keep_touches(true)
         .on_responder_grant(move |e: &ResponderEvent| grant(fraction(e.location.x.0)))
@@ -44,6 +48,8 @@ fn vscrub(area: View, on_move: impl Fn(f64) + 'static, on_release: impl Fn(f64) 
     let on_move = Rc::new(on_move);
     let grant = on_move.clone();
     area.on_layout(move |frame: &Bounds<Points>| height.set(frame.size.height.0))
+        // 同 [`scrub`]：先挂 on_touch 进路径，claim 才生效。
+        .on_touch(|_: &TouchEvent| {})
         .claim_touches(TouchClaim::on_start())
         .keep_touches(true)
         .on_responder_grant(move |e: &ResponderEvent| grant(fraction(e.location.y.0)))
@@ -109,6 +115,57 @@ pub fn slider(
             on_release(f);
         },
     )
+}
+
+/// 双极竖推子（均衡器）：细轨道、thumb 常显、填充从中心（0.5）向 thumb
+/// 长——正增益向上、负增益向下，0 位不填色。宽 / 高由调用方给，
+/// 整块都是拖动区；fraction 0..1，0.5 是中点。
+pub fn fader(
+    fraction: impl Fn() -> f64 + Copy + 'static,
+    track: AdaptiveColor,
+    fill: AdaptiveColor,
+    thumb: AdaptiveColor,
+    on_move: impl Fn(f64) + 'static,
+    on_release: impl Fn(f64) + 'static,
+) -> View {
+    let at = move || relative(fraction().clamp(0.0, 1.0) as f32);
+    let span = move || {
+        let f = fraction().clamp(0.0, 1.0) as f32;
+        (relative(f.min(0.5)), relative((f - 0.5).abs()))
+    };
+    let rail = view()
+        .w(px(TRACK_H))
+        .h_full()
+        .rounded_full()
+        .bg(track)
+        .overflow_hidden()
+        .pointer_events(PointerEvents::None)
+        .child(
+            view()
+                .absolute()
+                .w_full()
+                .bottom(move || span().0)
+                .h(move || span().1)
+                .bg(fill),
+        );
+    let knob = view()
+        .absolute()
+        .left(relative(0.5))
+        .ml(px(-THUMB / 2.0))
+        .bottom(at)
+        .mb(px(-THUMB / 2.0))
+        .size(px(THUMB))
+        .rounded_full()
+        .bg(thumb)
+        .shadow_sm()
+        .pointer_events(PointerEvents::None);
+    let area = view()
+        .w_full()
+        .h_full()
+        .items_center()
+        .child(rail)
+        .child(knob);
+    vscrub(area, on_move, on_release)
 }
 
 /// 竖向滑块（窄播放条的音量弹层用）：同 [`slider`] 竖过来，填充从底部

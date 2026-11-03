@@ -126,7 +126,7 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
                             .flex_1()
                             .items_center()
                             .pl(px(16.0))
-                            .pr(px(28.0))
+                            .pr(px(0.0))
                             .pt(move || px(top_inset()))
                             .pb(px(LYRICS_BOTTOM))
                             .child(lyrics_column(&swap))

@@ -44,6 +44,22 @@ pub(super) fn lyrics_source_section() -> View {
     ))
 }
 
+/// 歌词行时间戳：全屏页歌词行悬停时在行尾显示该行时间（占位，不被长歌词盖住）。
+pub(super) fn lyrics_timestamps_section() -> View {
+    let s = store();
+    setting_section(
+        "歌词行时间戳",
+        "全屏播放页的歌词行悬停时，行尾显示该行的时间；点击行跳到那里。",
+        None,
+    )
+    .child(pref_row(
+        "显示行时间戳",
+        "悬停歌词行时显示该行时间戳；关闭后不再显示。",
+        move || s.library.with(|l| l.config.lyrics_timestamps),
+        super::super::super::store::set_lyrics_timestamps,
+    ))
+}
+
 /// 全局歌词偏移：所有曲目统一提前 / 延后（毫秒；与每首曲目的手动偏移相加生效）。
 pub(super) fn lyrics_offset_section() -> View {
     let s = store();
@@ -54,14 +70,21 @@ pub(super) fn lyrics_offset_section() -> View {
         draft.set(ms.to_string());
     });
     // 提交（回车 / 失焦）：解析失败回退为当前值，成功则钳到 ±30000 并规范化草稿。
-    let commit = move || match draft.get().trim().trim_start_matches('+').parse::<i64>() {
-        Ok(ms) => {
-            let ms = ms.clamp(-30000, 30000);
-            super::super::super::store::set_global_lyrics_offset(ms);
-            draft.set(ms.to_string());
+    // 弹窗拆到一半输入框还会收一次失焦，那时 draft 已随 owner 销毁。
+    let owner = Owner::current();
+    let commit = move || {
+        if !owner.is_live() {
+            return;
         }
-        Err(_) => {
-            draft.set(s.library.with(|l| l.config.global_lyrics_offset_ms).to_string())
+        match draft.get().trim().trim_start_matches('+').parse::<i64>() {
+            Ok(ms) => {
+                let ms = ms.clamp(-30000, 30000);
+                super::super::super::store::set_global_lyrics_offset(ms);
+                draft.set(ms.to_string());
+            }
+            Err(_) => {
+                draft.set(s.library.with(|l| l.config.global_lyrics_offset_ms).to_string())
+            }
         }
     };
     let field = input_field(true)

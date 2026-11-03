@@ -7,9 +7,14 @@ use std::time::Duration;
 
 use nsh_core::prelude::*;
 
-use super::super::components::button::on_dark;
+use nsh_base::popover;
+
+use super::super::components::button::{RADIUS_MD, on_dark};
 use super::super::components::icons::{Icon, icon};
-use super::super::store::{format_time, nudge_lyrics_offset, seek_to, store};
+use super::super::components::slider::slider;
+use super::super::store::{
+    format_time, menu_control, nudge_lyrics_offset, seek_to, set_lyrics_offset, store,
+};
 use super::super::theme::*;
 use super::{Reveal, Swap};
 use crate::config::LyricsAlign;
@@ -49,88 +54,175 @@ fn fmt_offset(ms: i64) -> String {
     format!("{sign}{:.1}s", ms.unsigned_abs() as f64 / 1000.0)
 }
 
-/// 右上角的偏移控件：[−] 每曲偏移 [+]（非 0 时带「重置」）；只显示与调
-/// 节每曲那份，全局偏移在其下小字提示。默认半透明不抢歌词。
-fn offset_controls() -> AnyElement {
+/// 右边缘的偏移栏（占位、常显）：竖排 [+] 数值 [−]，数值点开横向滑条
+/// 弹层（同音量弹层的路子）；± 按 0.5 秒步进，全局偏移与「重置」在弹层里。
+fn offset_rail() -> AnyElement {
     let s = store();
-    view()
-        .absolute()
-        .top(px(12.0))
-        .right(px(12.0))
+    let open = signal(false);
+    let gate = menu_control();
+    effect(gate.evicted(open));
+    let value = move || {
+        let v = s.lyrics_offset.get();
+        if v == 0 {
+            "0s".to_owned()
+        } else {
+            fmt_offset(v)
+        }
+    };
+    // ±30 秒折成 0..1，吸附到 0.1 秒。
+    let fraction = move || (s.lyrics_offset.get() as f64 + 30000.0) / 60000.0;
+    let apply = move |f: f64| {
+        set_lyrics_offset(((f * 60000.0 - 30000.0) / 100.0).round() as i64 * 100)
+    };
+    // 触发器用普通 view（nsh-base 的 button 会吃掉按压，popover 收不到，
+    // 同队列 / 音量按钮）。
+    let trigger = view()
+        .h(px(28.0))
+        .px(px(4.0))
         .items_center()
-        .gap(px(2.0))
-        .opacity(0.5)
-        .hover(|st| st.opacity(1.0))
-        .transition_opacity()
+        .justify_center()
+        .rounded(px(RADIUS_MD))
+        .role(AccessibilityRole::Button)
+        .label("调整歌词时间偏移")
+        .style_when(move || open.get(), |st| st.bg(white_a(0.10)))
+        .hover(|st| st.bg(white_a(0.08)))
+        .active(|st| st.opacity(0.8))
+        .transition_colors()
         .duration(150.0)
         .child(
-            on_dark(28.0)
-                .accessibility_label("歌词延后")
-                .on_press(|_: &()| nudge_lyrics_offset(Some(-500)))
-                .child(icon(Icon::Minus, 14.0, || white_a(0.85))),
-        )
-        .child(
-            view()
-                .items_center()
-                .child(
-                    text(move || {
-                        let v = s.lyrics_offset.get();
-                        if v == 0 {
-                            "偏移 0s".to_owned()
-                        } else {
-                            fmt_offset(v)
-                        }
-                    })
-                    .text_size(px(12.0))
-                    .line_height(px(12.0))
-                    .tabular_nums()
-                    .text_color(white_a(0.8)),
-                )
-                .child(dynamic(move || {
-                    let g = s.library.with(|l| l.config.global_lyrics_offset_ms);
-                    (g != 0).then(|| {
-                        text(format!("全局 {}", fmt_offset(g)))
-                            .text_size(px(11.0))
-                            .line_height(px(11.0))
-                            .text_color(white_a(0.4))
-                            .into_element()
-                    })
-                })),
-        )
+            text(move || value())
+                .text_size(px(11.0))
+                .line_height(px(11.0))
+                .tabular_nums()
+                .text_color(white_a(0.8)),
+        );
+    let panel = view()
+        .items_center()
+        .gap(px(2.0))
+        .py(px(4.0))
+        .px(px(4.0))
+        .rounded(px(10.0))
+        .bg(white_a(0.06))
         .child(
             on_dark(28.0)
                 .accessibility_label("歌词提前")
                 .on_press(|_: &()| nudge_lyrics_offset(Some(500)))
                 .child(icon(Icon::Plus, 14.0, || white_a(0.85))),
         )
-        .child(dynamic(move || {
-            (s.lyrics_offset.get() != 0).then(|| {
-                nsh_base::button()
-                    .h(px(28.0))
-                    .px(px(8.0))
-                    .flex_shrink_0()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(8.0))
-                    .transition_colors()
-                    .duration(150.0)
-                    .hover(|st| st.bg(white_a(0.08)))
-                    .active(|st| st.opacity(0.6))
-                    .accessibility_label("重置歌词偏移")
-                    .on_press(|_: &()| nudge_lyrics_offset(None))
-                    .child(
-                        text("重置")
-                            .text_size(px(11.0))
-                            .line_height(px(11.0))
-                            .text_color(white_a(0.7)),
-                    )
-                    .into_element()
-            })
-        }))
+        .child(
+            popover()
+                .open(gate.open_with(open))
+                .on_open_change(gate.popover_change(open))
+                .placement(Placement::Left)
+                .align(Align::Center)
+                .offset(px(12.0))
+                .margin(px(8.0))
+                .popup_style(|st| {
+                    st.rounded(px(RADIUS_MD))
+                        .border_1()
+                        .border_color(border())
+                        .bg(nsh_base::theme().popover)
+                        .shadow_md()
+                        .overflow_hidden()
+                })
+                .trigger(trigger)
+                .child(
+                    view()
+                        .w(px(232.0))
+                        .px(px(14.0))
+                        .py(px(12.0))
+                        .gap(px(8.0))
+                        .child(
+                            view()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(
+                                    text(move || value())
+                                        .text_size(px(13.0))
+                                        .line_height(px(13.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .tabular_nums()
+                                        .text_color(fg()),
+                                )
+                                .child(dynamic(move || {
+                                    let g = s
+                                        .library
+                                        .with(|l| l.config.global_lyrics_offset_ms);
+                                    (g != 0).then(|| {
+                                        text(format!("全局 {}", fmt_offset(g)))
+                                            .text_size(px(11.0))
+                                            .line_height(px(11.0))
+                                            .text_color(muted_fg())
+                                            .into_element()
+                                    })
+                                }))
+                                .child(view().flex_1())
+                                .child(dynamic(move || {
+                                    (s.lyrics_offset.get() != 0).then(|| {
+                                        nsh_base::button()
+                                            .h(px(24.0))
+                                            .px(px(8.0))
+                                            .flex_shrink_0()
+                                            .items_center()
+                                            .justify_center()
+                                            .rounded(px(6.0))
+                                            .transition_colors()
+                                            .duration(150.0)
+                                            .hover(|st| st.bg(hover()))
+                                            .active(|st| st.opacity(0.7))
+                                            .accessibility_label("重置歌词偏移")
+                                            .on_press(|_: &()| {
+                                                nudge_lyrics_offset(None)
+                                            })
+                                            .child(
+                                                text("重置")
+                                                    .text_size(px(11.0))
+                                                    .line_height(px(11.0))
+                                                    .text_color(muted_fg()),
+                                            )
+                                            .into_element()
+                                    })
+                                })),
+                        )
+                        .child(slider(fraction, input(), fg(), fg(), apply, apply).w_full())
+                        .child(
+                            view()
+                                .flex_row()
+                                .child(
+                                    text("延后 30s")
+                                        .text_size(px(10.0))
+                                        .line_height(px(10.0))
+                                        .text_color(muted_fg()),
+                                )
+                                .child(view().flex_1())
+                                .child(
+                                    text("提前 30s")
+                                        .text_size(px(10.0))
+                                        .line_height(px(10.0))
+                                        .text_color(muted_fg()),
+                                ),
+                        ),
+                ),
+        )
+        .child(
+            on_dark(28.0)
+                .accessibility_label("歌词延后")
+                .on_press(|_: &()| nudge_lyrics_offset(Some(-500)))
+                .child(icon(Icon::Minus, 14.0, || white_a(0.85))),
+        );
+    view()
+        .h_full()
+        .w(px(48.0))
+        .flex_shrink_0()
+        .justify_center()
+        .items_center()
+        .child(panel)
         .into_element()
 }
 
-/// 右半区：有歌词时滚动列表，载入中一行提示。
+/// 右半区：有歌词时滚动列表，载入中一行提示；有时间轴的歌词在右边缘
+/// 放偏移栏（占位、常显，不被歌词盖住）。
 pub(super) fn lyrics_column(swap: &Swap) -> View {
     let s = store();
     let has_lines = move || {
@@ -144,23 +236,32 @@ pub(super) fn lyrics_column(swap: &Swap) -> View {
     view()
         .w_full()
         .h_full()
+        .flex_row()
         .bind_opacity(&swap.content)
         .bind_translate_x(&swap.lyrics_shift)
-        .child(when(has_lines, lyrics_scroller).otherwise(move || {
-            view().flex_1().items_center().justify_center().child(
-                text(move || {
-                    if s.lyrics.with(Option::is_none) && s.track.with(|t| t.path.is_some()) {
-                        "正在载入歌词…"
-                    } else {
-                        "暂无歌词"
-                    }
-                })
-                .text_size(px(15.0))
-                .line_height(px(15.0))
-                .text_color(white_a(0.4)),
-            )
-        }))
-        .child(when(timed, offset_controls))
+        .child(
+            view()
+                .flex_1()
+                .h_full()
+                .min_w(px(0.0))
+                .child(when(has_lines, lyrics_scroller).otherwise(move || {
+                    view().flex_1().items_center().justify_center().child(
+                        text(move || {
+                            if s.lyrics.with(Option::is_none)
+                                && s.track.with(|t| t.path.is_some())
+                            {
+                                "正在载入歌词…"
+                            } else {
+                                "暂无歌词"
+                            }
+                        })
+                        .text_size(px(15.0))
+                        .line_height(px(15.0))
+                        .text_color(white_a(0.4)),
+                    )
+                })),
+        )
+        .child(when(timed, offset_rail))
 }
 
 /// 行级歌词：跟随时间滚动（当前行停在 [`ANCHOR`] 处），用户滚动后 3 s
@@ -409,43 +510,51 @@ fn lyrics_scroller() -> View {
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(white_a(TRANSLATION_ALPHA))
             }));
-        // 时间戳：浮在行的最右侧（右对齐时在最左侧）、垂直居中，只在这一行
-        // 悬停时出现；不占布局，也不挡点击。
-        let stamp = seekable.then(|| {
-            view()
-                .absolute()
-                .top(px(0.0))
-                .bottom(px(0.0))
-                .style_with(move |st| {
-                    if align() == LyricsAlign::Right {
-                        st.left(px(0.0))
-                    } else {
-                        st.right(px(0.0))
-                    }
-                })
-                .justify_center()
-                .pointer_events(PointerEvents::None)
-                .opacity(0.0)
-                .group_hover(|st| st.opacity(1.0))
-                .transition_opacity()
-                .duration(150.0)
-                .child(
+        // 时间戳：占位在行尾（右对齐时在行首）、垂直居中，悬停浮现。槽位
+        // 在布局里占位置，长歌词盖不到它；开关关掉时槽都不留，也不挡点击。
+        let stamp = move |on_left: bool| {
+            dynamic(move || {
+                (seekable
+                    && s.library.with(|l| {
+                        l.config.lyrics_timestamps
+                            && (l.config.lyrics_align == LyricsAlign::Right) == on_left
+                    }))
+                .then(|| {
                     view()
-                        .h(px(22.0))
-                        .px(px(8.0))
-                        .justify_center()
-                        .rounded(px(6.0))
-                        .bg(AdaptiveColor::rgb(0x1c2230, 0x1c2230).opacity(0.75))
+                        .flex_shrink_0()
+                        .self_center()
+                        .style_with(move |st| {
+                            if on_left {
+                                st.pr(px(6.0))
+                            } else {
+                                st.pl(px(6.0))
+                            }
+                        })
+                        .pointer_events(PointerEvents::None)
+                        .opacity(0.0)
+                        .group_hover(|st| st.opacity(1.0))
+                        .transition_opacity()
+                        .duration(150.0)
                         .child(
-                            text(format_time(time))
-                                .text_size(px(12.0))
-                                .line_height(px(12.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .tabular_nums()
-                                .text_color(white_a(0.8)),
-                        ),
-                )
-        });
+                            view()
+                                .h(px(22.0))
+                                .px(px(8.0))
+                                .justify_center()
+                                .rounded(px(6.0))
+                                .bg(AdaptiveColor::rgb(0x1c2230, 0x1c2230).opacity(0.75))
+                                .child(
+                                    text(format_time(time))
+                                        .text_size(px(12.0))
+                                        .line_height(px(12.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .tabular_nums()
+                                        .text_color(white_a(0.8)),
+                                ),
+                        )
+                        .into_element()
+                })
+            })
+        };
         let fade = move || {
             let viewport = viewport.get();
             let y = scroll_y.get();
@@ -456,7 +565,7 @@ fn lyrics_scroller() -> View {
             })
         };
         // `on_layout` 只能挂在裸 view 上（`Interactive` 不在组件元素上）：
-        // 外层量位置、包按钮。按钮管按压与无障碍，时间戳仍在最外层的绝对定位。
+        // 外层量位置、包按钮。按钮管按压与无障碍，时间戳槽在按钮内容行里。
         view()
             .w_full()
             .group()
@@ -470,20 +579,30 @@ fn lyrics_scroller() -> View {
                         String::new()
                     })
                     // 当前行与前后一句清晰，再远越模糊（见 `lyric_blur`）。颜色
-                    // 在文字上：原文随高亮变化，译文始终不变。时间戳在这层之外，
+                    // 在文字上：原文随高亮变化，译文始终不变。时间戳槽在这层之外，
                     // 不跟着模糊。
                     .child(
                         view()
                             .w_full()
-                            .style_with(move |st| {
-                                // 鼠标在歌词区时不模糊（移入移出有过渡）；否则按与
-                                // 高亮行的距离模糊。
-                                let blur = lyric_blur(timed, distance()) * (1.0 - clear.get());
-                                st.blur(px(blur))
-                            })
-                            .transition_all()
-                            .duration(300.0)
-                            .child(content_view),
+                            .flex_row()
+                            .items_center()
+                            .child(stamp(true))
+                            .child(
+                                view()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .style_with(move |st| {
+                                        // 鼠标在歌词区时不模糊（移入移出有过渡）；否则按与
+                                        // 高亮行的距离模糊。
+                                        let blur =
+                                            lyric_blur(timed, distance()) * (1.0 - clear.get());
+                                        st.blur(px(blur))
+                                    })
+                                    .transition_all()
+                                    .duration(300.0)
+                                    .child(content_view),
+                            )
+                            .child(stamp(false)),
                     )
                     .on_press(move |_: &()| {
                         if seekable {
@@ -504,7 +623,6 @@ fn lyrics_scroller() -> View {
                         }
                     }),
             )
-            .child(stamp)
             .on_layout(move |frame: &Bounds<Points>| {
                 let mut ys = line_ys.borrow_mut();
                 if ys.len() <= index {

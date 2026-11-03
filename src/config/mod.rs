@@ -174,6 +174,9 @@ pub struct LibraryConfig {
     /// 全局歌词偏移（毫秒，正值 = 歌词提前显示；与每首曲目的手动偏移相加生效）。
     #[serde(default)]
     pub global_lyrics_offset_ms: i64,
+    /// 全屏歌词行悬停时显示该行时间戳（占位在行尾，长歌词盖不住）。
+    #[serde(default = "default_true")]
+    pub lyrics_timestamps: bool,
     /// 本地同名图片（jpg / jpeg / png / webp）优先于内嵌封面。
     #[serde(default = "default_true")]
     pub prefer_local_covers: bool,
@@ -247,6 +250,7 @@ impl Default for LibraryConfig {
             min_size_kb: default_min_size_kb(),
             prefer_local_lyrics: default_true(),
             global_lyrics_offset_ms: 0,
+            lyrics_timestamps: true,
             prefer_local_covers: default_true(),
             show_covers: default_true(),
             delete_permanently: false,
@@ -469,6 +473,11 @@ impl LibraryStore {
     /// 设置全局歌词偏移（保存）。
     pub fn set_global_lyrics_offset_ms(&self, ms: i64) {
         self.update_config(|c| c.global_lyrics_offset_ms = ms);
+    }
+
+    /// 全屏歌词行时间戳（悬停显示）开关。
+    pub fn set_lyrics_timestamps(&self, on: bool) {
+        self.update_config(|c| c.lyrics_timestamps = on);
     }
 
     /// 本地同名图片文件是否优先于内嵌封面。

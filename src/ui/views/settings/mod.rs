@@ -251,6 +251,12 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         pane: Pane::Lyrics,
+        title: "歌词行时间戳",
+        keys: "歌词 时间戳 行 悬停 时间 跳转 timestamp",
+        build: lyrics::lyrics_timestamps_section,
+    },
+    Section {
+        pane: Pane::Lyrics,
         title: "全局歌词偏移",
         keys: "歌词 偏移 全局 提前 延后 同步 offset 蓝牙 延迟",
         build: lyrics::lyrics_offset_section,

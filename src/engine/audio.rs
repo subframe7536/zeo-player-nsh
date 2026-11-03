@@ -1258,10 +1258,8 @@ fn load_track(
                 error: None,
             });
             shared.ready.store(true, Ordering::Relaxed);
-            // 封面由引擎循环在缓冲填起来之后生成（`load_covers`）。
-            media.set_artwork_file(
-                backdrop.map(|(_, f)| file_url(&f.to_string_lossy())),
-            );
+            // 封面由引擎循环在缓冲填起来之后生成（`load_covers`）；媒体
+            // 会话的封面在 `publish` 里现查缓存，不用单独喂。
             publish_media(shared, media, true);
         }
         Err(err) => set_error(shared, &err),
@@ -1301,19 +1299,8 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
             t.covers_ready = true;
             *slot = Arc::new(t);
         }
-        media.set_artwork_file(backdrop.map(|c| file_url(&c)));
         publish_media(&shared, &media, true);
     });
-}
-
-/// 本地路径 → `file://` URL（Windows 盘符路径同样处理）。
-fn file_url(path: &str) -> String {
-    let path = path.replace('\\', "/");
-    if path.starts_with('/') {
-        format!("file://{path}")
-    } else {
-        format!("file:///{path}")
-    }
 }
 
 /// 作废缓冲里还没播的样本，并把位置基线设为 `seconds`。

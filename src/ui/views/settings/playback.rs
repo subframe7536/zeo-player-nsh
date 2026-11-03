@@ -4,7 +4,7 @@ use nsh_core::prelude::*;
 
 use super::super::super::components::button::{Size, Variant, text_button};
 use super::super::super::components::form::{input_field, select};
-use super::super::super::components::slider::slider;
+use super::super::super::components::slider::fader;
 use super::super::super::store::store;
 use super::super::super::theme::*;
 use super::{pref_row, setting_section};
@@ -256,28 +256,27 @@ fn eq_preset_name(bands: &[f32; 10]) -> String {
         .unwrap_or_else(|| "自定义".to_owned())
 }
 
-/// 一条 EQ 滑块：标签 | slider | 当前值（`+3.5 dB`）。
-fn eq_row(
+/// 推子滑杆的高度与每列的拖动区宽。
+const EQ_FADER_H: f32 = 148.0;
+const EQ_FADER_W: f32 = 48.0;
+
+/// 一条推子列：竖推子 + 标签 + 当前值（`+3.5 dB`）。
+fn eq_fader(
     label: &'static str,
     a11y: &'static str,
     get: impl Fn() -> f32 + Copy + 'static,
     apply: impl Fn(f64) + Copy + 'static,
 ) -> View {
     view()
-        .flex_row()
+        .flex_1()
+        .min_w(px(0.0))
         .items_center()
-        .gap(px(10.0))
+        .gap(px(5.0))
         .child(
-            text(label)
-                .w(px(36.0))
-                .text_size(px(13.0))
-                .line_height(px(13.0))
-                .text_color(muted_fg()),
-        )
-        .child(
-            slider(
-                move || ((get() + crate::engine::eq::MAX_DB) / (2.0 * crate::engine::eq::MAX_DB))
-                    as f64,
+            fader(
+                move || {
+                    ((get() + crate::engine::eq::MAX_DB) / (2.0 * crate::engine::eq::MAX_DB)) as f64
+                },
                 input(),
                 muted_fg(),
                 fg(),
@@ -285,19 +284,48 @@ fn eq_row(
                 apply,
             )
             .label(a11y)
-            .flex_1(),
+            .w(px(EQ_FADER_W))
+            .h(px(EQ_FADER_H)),
+        )
+        .child(
+            text(label)
+                .text_size(px(12.0))
+                .line_height(px(12.0))
+                .text_color(muted_fg()),
         )
         .child(
             text(move || format!("{:+.1} dB", get()))
-                .w(px(60.0))
-                .text_size(px(13.0))
-                .line_height(px(13.0))
+                .text_size(px(10.0))
+                .line_height(px(10.0))
                 .tabular_nums()
-                .text_color(fg()),
+                .text_color(faint()),
         )
 }
 
-/// 均衡器：10 段 peaking + 前级（±12 dB），拖动立即生效。
+/// 左侧 dB 标尺：数值对齐推子行程（不画刻度线）。
+fn db_scale() -> View {
+    const LABEL_H: f32 = 10.0;
+    let mut col = view().w(px(36.0)).h(px(EQ_FADER_H)).flex_shrink_0();
+    for db in [12_i32, 6, 0, -6, -12] {
+        // 行程比例（0 底 1 顶）→ 标签顶边：标签中心落在行程点上。
+        let top = (1.0 - (db + 12) as f32 / 24.0) * (EQ_FADER_H - LABEL_H);
+        col = col.child(
+            view().absolute().top(px(top)).right(px(0.0)).child(
+                text(if db == 0 {
+                    "0 dB".to_owned()
+                } else {
+                    format!("{db:+} dB")
+                })
+                .text_size(px(LABEL_H))
+                .line_height(px(LABEL_H))
+                .text_color(faint()),
+            ),
+        );
+    }
+    col
+}
+
+/// 均衡器：前级 + 10 段竖推子（31–16k，±12 dB，拖动立即生效）。
 pub(super) fn eq_section() -> View {
     let s = store();
     let cfg = move || s.library.with(|l| l.config.eq);
@@ -314,23 +342,21 @@ pub(super) fn eq_section() -> View {
         eq_enabled_set,
     ))
     .child(when(on, move || {
-        let mut rows = view().gap(px(6.0)).child(eq_row(
+        let mut faders = view().flex_1().flex_row().child(eq_fader(
             "前级",
             "均衡器 前级",
             move || s.library.with(|l| l.config.eq.preamp_db),
             move |f| {
-                let db = snap_db((f * 24.0 - 12.0) as f32);
-                edit_eq(|c| c.preamp_db = db);
+                edit_eq(|c| c.preamp_db = snap_db((f * 24.0 - 12.0) as f32));
             },
         ));
         for (i, label) in EQ_LABELS.iter().enumerate() {
-            rows = rows.child(eq_row(
+            faders = faders.child(eq_fader(
                 label,
                 EQ_A11Y[i],
                 move || s.library.with(|l| l.config.eq.bands[i]),
                 move |f| {
-                    let db = snap_db((f * 24.0 - 12.0) as f32);
-                    edit_eq(|c| c.bands[i] = db);
+                    edit_eq(|c| c.bands[i] = snap_db((f * 24.0 - 12.0) as f32));
                 },
             ));
         }
@@ -370,6 +396,13 @@ pub(super) fn eq_section() -> View {
                         }),
                     )),
             )
-            .child(rows)
+            .child(
+                view()
+                    .flex_row()
+                    .w_full()
+                    .gap(px(10.0))
+                    .child(db_scale())
+                    .child(faders),
+            )
     }))
 }

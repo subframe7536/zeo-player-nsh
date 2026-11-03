@@ -559,19 +559,29 @@ pub fn set_lyrics_align(align: crate::config::LyricsAlign) {
     std::thread::spawn(move || library_store().set_lyrics_align(align));
 }
 
-/// 当前曲目的歌词偏移加 `delta_ms`（钳到 ±30000）并保存；`None` 时清零。
-/// 没有正在播放的曲目时不做。
-pub fn nudge_lyrics_offset(delta_ms: Option<i64>) {
+/// 当前曲目的歌词偏移设为 `ms`（钳到 ±30000）并保存；没有正在播放的
+/// 曲目时不做。
+pub fn set_lyrics_offset(ms: i64) {
     let Some(path) = player().state().track.path.clone() else {
         return;
     };
-    let s = store();
-    let v = match delta_ms {
-        Some(d) => (s.lyrics_offset.get() + d).clamp(-30000, 30000),
-        None => 0,
-    };
-    s.lyrics_offset.set(v);
+    let v = ms.clamp(-30000, 30000);
+    store().lyrics_offset.set(v);
     crate::db::later(move || crate::db::set_lyrics_offset(&path, v));
+}
+
+/// 当前曲目的歌词偏移加 `delta_ms`（钳到 ±30000）并保存；`None` 时清零。
+pub fn nudge_lyrics_offset(delta_ms: Option<i64>) {
+    match delta_ms {
+        Some(d) => set_lyrics_offset(store().lyrics_offset.get() + d),
+        None => set_lyrics_offset(0),
+    }
+}
+
+/// 全屏歌词行悬停显示时间戳（立即生效并保存）。
+pub fn set_lyrics_timestamps(on: bool) {
+    update_config(|c| c.lyrics_timestamps = on);
+    std::thread::spawn(move || library_store().set_lyrics_timestamps(on));
 }
 
 /// 全局歌词偏移（立即生效并保存；钳到 ±30000 毫秒）。
