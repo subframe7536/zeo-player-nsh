@@ -180,6 +180,9 @@ pub struct LibraryConfig {
     /// 「删除文件」不经过回收站、直接删除（不可恢复）。
     #[serde(default)]
     pub delete_permanently: bool,
+    /// 输出设备变化（拔耳机、切默认设备）时暂停播放。
+    #[serde(default = "default_true")]
+    pub pause_on_device_change: bool,
     /// 重新打开时恢复上次的窗口大小与位置。
     #[serde(default = "default_true")]
     pub remember_frame: bool,
@@ -237,6 +240,7 @@ impl Default for LibraryConfig {
             prefer_local_covers: default_true(),
             show_covers: default_true(),
             delete_permanently: false,
+            pause_on_device_change: true,
             remember_frame: true,
             window_frame: None,
         }
@@ -471,6 +475,15 @@ impl LibraryStore {
 
     pub fn set_delete_permanently(&self, on: bool) {
         self.update_config(|c| c.delete_permanently = on);
+    }
+
+    /// 输出设备变化时是否暂停播放。
+    pub fn pause_on_device_change(&self) -> bool {
+        self.config().pause_on_device_change
+    }
+
+    pub fn set_pause_on_device_change(&self, on: bool) {
+        self.update_config(|c| c.pause_on_device_change = on);
     }
 
     pub fn close_action(&self) -> CloseAction {

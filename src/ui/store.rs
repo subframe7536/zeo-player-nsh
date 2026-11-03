@@ -499,6 +499,7 @@ pub fn install() -> Store {
     crate::window::set_remember_frame(library_store().remember_frame());
     set_color_scheme(color_scheme(library_store().appearance()));
     player().set_fade_ms(library_store().fade_ms());
+    player().set_pause_on_device_change(library_store().pause_on_device_change());
     player().set_loop_mode(library_store().loop_mode());
     // 在设好循环模式之后：随机模式下恢复的队列按它重新洗牌。
     player().restore_last();
@@ -650,6 +651,13 @@ pub fn set_prefer_local_lyrics(on: bool) {
 pub fn set_delete_permanently(on: bool) {
     update_config(|c| c.delete_permanently = on);
     std::thread::spawn(move || library_store().set_delete_permanently(on));
+}
+
+/// 输出设备变化时暂停播放（立即生效并保存）。
+pub fn set_pause_on_device_change(on: bool) {
+    update_config(|c| c.pause_on_device_change = on);
+    player().set_pause_on_device_change(on);
+    std::thread::spawn(move || library_store().set_pause_on_device_change(on));
 }
 
 /// 「删除文件」确认弹窗的请求：记下路径与当前的删除方式（回收站 / 直接删）。

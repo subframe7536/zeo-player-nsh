@@ -5,7 +5,7 @@ use nsh_core::prelude::*;
 use super::super::super::components::form::input_field;
 use super::super::super::store::store;
 use super::super::super::theme::*;
-use super::setting_section;
+use super::{pref_row, setting_section};
 
 /// 播放：淡入淡出时长（毫秒，数字输入；0 为关闭，上限 5000）。
 pub(super) fn playback_section() -> View {
@@ -71,4 +71,20 @@ pub(super) fn playback_section() -> View {
                     .text_color(muted_fg()),
             ),
     )
+}
+
+/// 输出设备：拔下耳机或切换系统默认输出设备时的行为。
+pub(super) fn device_section() -> View {
+    let s = store();
+    setting_section(
+        "输出设备",
+        "拔下耳机或切换系统默认输出设备时的行为。",
+        None,
+    )
+    .child(pref_row(
+        "设备变化时暂停",
+        "关闭后会在新的默认设备上继续播放。设备全部断开时总会暂停。",
+        move || s.library.with(|l| l.config.pause_on_device_change),
+        super::super::super::store::set_pause_on_device_change,
+    ))
 }

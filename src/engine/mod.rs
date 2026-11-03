@@ -198,6 +198,20 @@ impl Player {
         self.engine.shared.loop_mode()
     }
 
+    /// 输出设备变化（拔耳机、切默认设备）时是否暂停播放。
+    pub fn set_pause_on_device_change(&self, on: bool) {
+        self.engine
+            .shared
+            .pause_on_device_change
+            .store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 测试用：注入一个输出设备事件。
+    #[cfg(test)]
+    pub(crate) fn simulate_device_event(&self, ev: crate::engine::audio::DeviceEvent) {
+        self.engine.send(EngineCmd::Device(ev));
+    }
+
     /// 当前状态快照。
     pub fn state(&self) -> Snapshot {
         self.engine.snapshot()

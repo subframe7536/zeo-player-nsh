@@ -62,6 +62,11 @@ impl Ring {
             .set((0..capacity.max(1)).map(|_| AtomicU32::new(0)).collect());
     }
 
+    /// 分配的容量（样本数；未分配为 0）。
+    fn capacity(&self) -> usize {
+        self.slots.get().map_or(0, |s| s.len())
+    }
+
     /// 待播的样本数。
     pub fn len(&self) -> usize {
         let w = self.write.load(Ordering::Acquire);
@@ -161,6 +166,17 @@ impl LoopMode {
     }
 }
 
+/// 输出设备的变化（cpal 错误回调转来）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceEvent {
+    /// 已自动改道到新的默认设备，流照常（macOS）。
+    Rerouted,
+    /// 流失效，要在新的默认设备上重建（Windows 换默认设备）。
+    Invalidated,
+    /// 没有可用的输出设备。
+    Lost,
+}
+
 pub enum EngineCmd {
     Load {
         path: PathBuf,
@@ -185,6 +201,8 @@ pub enum EngineCmd {
     Previous,
     /// 设置循环模式（队列按新模式重排，当前曲目不变）。
     SetLoopMode(LoopMode),
+    /// 输出设备事件（见 [`DeviceEvent`]）。
+    Device(DeviceEvent),
 }
 
 /// 曲目公开状态（跨线程读）：冷字段——换曲 / 封面就绪 / 队列 / 出错
@@ -230,6 +248,8 @@ pub struct Shared {
     pub loop_mode: AtomicU8,
     /// 封面线程代次：换曲 +1，晚到的旧结果自检失效。
     pub cover_gen: AtomicU64,
+    /// 输出设备变化时是否暂停（设置项；设备丢失时无论如何都暂停）。
+    pub pause_on_device_change: AtomicBool,
 }
 
 impl Shared {
@@ -299,13 +319,15 @@ impl EngineHandle {
             track: Mutex::new(Arc::new(TrackPublic::default())),
             loop_mode: AtomicU8::new(0),
             cover_gen: AtomicU64::new(0),
+            pause_on_device_change: AtomicBool::new(true),
         });
         let media = MediaSession::start(tx.clone());
         std::thread::Builder::new()
             .name("zeo-player-audio".into())
             .spawn({
                 let shared = shared.clone();
-                move || run(rx, shared, media)
+                let tx = tx.clone();
+                move || run(rx, tx, shared, media)
             })
             .expect("spawn audio thread");
         EngineHandle { tx, shared }
@@ -423,45 +445,158 @@ impl ResamplerState {
     }
 }
 
-fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: MediaSession) {
-    // 输出流：默认设备 + 默认配置（f32）。
-    let mut dev_rate: u32 = 48_000;
-    let mut dev_channels: usize = 2;
-    let mut _stream = None;
+/// 当前输出：流 + 设备格式。`stream` 为 `None` 时没有可用设备。
+struct Output {
+    stream: Option<cpal::Stream>,
+    rate: u32,
+    channels: usize,
+}
+
+/// 在系统默认设备上打开输出流（失败时 `stream: None`，格式沿用 `fallback`）。
+fn open_output(
+    shared: &Arc<Shared>,
+    tx: &std::sync::mpsc::Sender<EngineCmd>,
+    fallback: (u32, usize),
+) -> Output {
+    let mut rate = fallback.0;
+    let mut channels = fallback.1;
+    let mut stream = None;
     match cpal::default_host().default_output_device() {
         Some(device) => match device.default_output_config() {
             Ok(config) => {
-                dev_rate = config.sample_rate();
-                dev_channels = config.channels() as usize;
+                rate = config.sample_rate();
+                channels = config.channels() as usize;
                 let stream_config: cpal::StreamConfig = config.into();
                 let build = device.build_output_stream(
                     stream_config,
                     {
                         let shared = shared.clone();
-                        let dev_channels = dev_channels;
-                        move |data: &mut [f32], _| output_callback(&shared, data, dev_channels)
+                        move |data: &mut [f32], _| output_callback(&shared, data, channels)
                     },
-                    |err| eprintln!("zeo-player cpal: {err}"),
+                    {
+                        let tx = tx.clone();
+                        move |err| {
+                            eprintln!("zeo-player cpal: {err}");
+                            let event = match err.kind() {
+                                cpal::ErrorKind::DeviceChanged => DeviceEvent::Rerouted,
+                                cpal::ErrorKind::StreamInvalidated => DeviceEvent::Invalidated,
+                                cpal::ErrorKind::DeviceNotAvailable => DeviceEvent::Lost,
+                                _ => return,
+                            };
+                            let _ = tx.send(EngineCmd::Device(event));
+                        }
+                    },
                     None,
                 );
                 match build {
-                    Ok(stream) => {
-                        stream.play().ok();
-                        _stream = Some(stream);
+                    Ok(s) => {
+                        s.play().ok();
+                        stream = Some(s);
                     }
-                    Err(err) => set_error(&shared, &format!("音频输出打开失败: {err}")),
+                    Err(err) => set_error(shared, &format!("音频输出打开失败: {err}")),
                 }
             }
-            Err(err) => set_error(&shared, &format!("音频设备读取失败: {err}")),
+            Err(err) => set_error(shared, &format!("音频设备读取失败: {err}")),
         },
-        None => set_error(&shared, "没有可用的音频输出设备"),
+        None => set_error(shared, "没有可用的音频输出设备"),
     }
-    shared.dev_rate.store(dev_rate, Ordering::Relaxed);
-    shared
-        .ring
-        .init(dev_rate as usize * RING_CAPACITY_SECS * dev_channels);
-    let target = ring_target(dev_rate, dev_channels);
-    let has_output = _stream.is_some();
+    Output {
+        stream,
+        rate,
+        channels,
+    }
+}
+
+/// 填充目标：设备格式算出的目标，但不超过容量的 2/3（换到更高采样率 /
+/// 更多声道的设备后容量不变，只是缓冲的秒数变少）。
+fn target_for(out: &Output, capacity: usize) -> usize {
+    ring_target(out.rate, out.channels)
+        .min(capacity * 2 / 3)
+        .max(1)
+}
+
+/// 设备事件之后要不要重建输出流、要不要暂停（纯决策，供测试）。
+fn device_plan(ev: DeviceEvent, playing: bool, pause_pref: bool) -> (bool, bool) {
+    let rebuild = matches!(ev, DeviceEvent::Invalidated | DeviceEvent::Lost);
+    // 设备丢了一定暂停；只是换设备时按设置决定。
+    let pause = playing && (pause_pref || ev == DeviceEvent::Lost);
+    (rebuild, pause)
+}
+
+/// 重建成功后恢复：设备格式推进共享状态；有曲目时按新格式重建重采样器、
+/// seek 回原位置并重置缓冲基线（`current_time` 要先按旧 `dev_rate` 读）。
+fn restore_after_rebuild(shared: &Arc<Shared>, out: &Output, loaded: &mut Option<Loaded>) {
+    let at = shared.current_time();
+    shared.dev_rate.store(out.rate, Ordering::Relaxed);
+    if let Some(l) = loaded.as_mut() {
+        l.resampler = if l.source.sample_rate != out.rate {
+            match ResamplerState::new(l.source.sample_rate, out.rate, out.channels) {
+                Ok(r) => Some(r),
+                Err(err) => {
+                    set_error(shared, &format!("重采样器创建失败: {err}"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        l.reset_buffers();
+        let actual = l.source.seek(at).unwrap_or(at);
+        reset_ring(shared, actual, out.rate);
+    } else {
+        reset_ring(shared, at, out.rate);
+    }
+}
+
+/// 处理设备事件：按决策暂停、需要时重建输出流（先 drop 旧流再开新的）。
+/// 返回 `Some` 表示设备仍不可用、记下下一次重开时刻。
+fn handle_device(
+    ev: DeviceEvent,
+    shared: &Arc<Shared>,
+    media: &MediaSession,
+    tx: &std::sync::mpsc::Sender<EngineCmd>,
+    out: &mut Output,
+    loaded: &mut Option<Loaded>,
+) -> Option<Instant> {
+    let (rebuild, pause) = device_plan(
+        ev,
+        shared.playing.load(Ordering::Relaxed),
+        shared.pause_on_device_change.load(Ordering::Relaxed),
+    );
+    if pause {
+        shared.playing.store(false, Ordering::Relaxed);
+        shared.gain.store(0f32.to_bits(), Ordering::Relaxed);
+        publish_media(shared, media, true);
+    }
+    if !rebuild {
+        return None;
+    }
+    drop(out.stream.take());
+    let fallback = (out.rate, out.channels);
+    *out = open_output(shared, tx, fallback);
+    if out.stream.is_some() {
+        restore_after_rebuild(shared, out, loaded);
+        None
+    } else {
+        Some(Instant::now() + Duration::from_secs(1))
+    }
+}
+
+fn run(
+    rx: std::sync::mpsc::Receiver<EngineCmd>,
+    tx: std::sync::mpsc::Sender<EngineCmd>,
+    shared: Arc<Shared>,
+    media: MediaSession,
+) {
+    let mut out = open_output(&shared, &tx, (48_000, 2));
+    shared.dev_rate.store(out.rate, Ordering::Relaxed);
+    // 容量只能分配一次：按 max(本次需要, 默认立体声 48k 的 3 秒) 给——之后
+    // 换到更高规格的设备容量不变，只是缓冲的秒数变少（target_for 钳住）。
+    shared.ring.init(
+        (out.rate as usize * RING_CAPACITY_SECS * out.channels)
+            .max(48_000 * RING_CAPACITY_SECS * 2),
+    );
+    let mut target = target_for(&out, shared.ring.capacity());
     raise_thread_priority();
 
     let mut loaded: Option<Loaded> = None;
@@ -471,8 +606,24 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
     let mut media_tick = Instant::now();
     // 上一轮等待时收到的命令（等待用 recv_timeout，有命令立即醒）。
     let mut waiting: Option<EngineCmd> = None;
+    // 设备断开后的重开时刻（`Some` 期间每秒试一次）。
+    let mut retry_at: Option<Instant> = None;
 
     loop {
+        // 0. 设备重试：设备回来了就重建输出、按原位置恢复。
+        if let Some(at) = retry_at
+            && Instant::now() >= at
+        {
+            let fallback = (out.rate, out.channels);
+            out = open_output(&shared, &tx, fallback);
+            retry_at = if out.stream.is_some() {
+                restore_after_rebuild(&shared, &out, &mut loaded);
+                None
+            } else {
+                Some(Instant::now() + Duration::from_secs(1))
+            };
+            target = target_for(&out, shared.ring.capacity());
+        }
         // 1. 命令
         while let Some(cmd) = waiting.take().or_else(|| rx.try_recv().ok()) {
             // 会打断声音的操作：先淡出到静音，操作完再淡入（暂停 / 停止则停在静音）。
@@ -491,17 +642,23 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
                 _ => false,
             };
             if interrupts {
-                fade_out(&shared, &mut loaded, target, dev_channels);
+                fade_out(&shared, &mut loaded, target, out.channels);
             }
-            handle_cmd(
-                &shared,
-                &media,
-                &mut loaded,
-                &mut base_queue,
-                cmd,
-                dev_rate,
-                dev_channels,
-            );
+            match cmd {
+                EngineCmd::Device(ev) => {
+                    retry_at = handle_device(ev, &shared, &media, &tx, &mut out, &mut loaded);
+                    target = target_for(&out, shared.ring.capacity());
+                }
+                cmd => handle_cmd(
+                    &shared,
+                    &media,
+                    &mut loaded,
+                    &mut base_queue,
+                    cmd,
+                    out.rate,
+                    out.channels,
+                ),
+            }
             if !shared.playing.load(Ordering::Relaxed) {
                 // 停着：下次开始从静音淡入。
                 shared.gain.store(0f32.to_bits(), Ordering::Relaxed);
@@ -518,7 +675,7 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
                     if shared.ring.len() >= target {
                         break;
                     }
-                    result = fill_ring(l, &shared, dev_channels);
+                    result = fill_ring(l, &shared, out.channels);
                     if !matches!(result, Ok(false)) {
                         break;
                     }
@@ -553,7 +710,9 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
                     drain.since = Instant::now();
                 }
                 track_done = playing
-                    && (len == 0 || !has_output || drain.since.elapsed() > Duration::from_secs(1));
+                    && (len == 0
+                        || out.stream.is_none()
+                        || drain.since.elapsed() > Duration::from_secs(1));
             }
         }
         if track_done {
@@ -572,8 +731,8 @@ fn run(rx: std::sync::mpsc::Receiver<EngineCmd>, shared: Arc<Shared>, media: Med
                     PathBuf::from(next_path),
                     queue,
                     next_index,
-                    dev_rate,
-                    dev_channels,
+                    out.rate,
+                    out.channels,
                 );
                 shared.playing.store(true, Ordering::Relaxed);
             } else {
@@ -816,6 +975,8 @@ fn handle_cmd(
             t.queue = queue;
             *slot = Arc::new(t);
         }
+        // 设备事件在主循环里先拦截（见 run），不会走到这里。
+        EngineCmd::Device(_) => {}
     }
 }
 
@@ -1203,6 +1364,7 @@ mod tests {
             gain: AtomicU32::new(0f32.to_bits()),
             loop_mode: AtomicU8::new(0),
             cover_gen: AtomicU64::new(0),
+            pause_on_device_change: AtomicBool::new(true),
         };
         // 100 ms 后到一半（smoothstep(0.5) = 0.5），200 ms 后满。
         let mut buf = vec![0.0_f32; 4800 * 2];
@@ -1317,5 +1479,49 @@ mod tests {
             .map(|w| (w[1] - w[0]).abs())
             .fold(0.0_f32, f32::max);
         assert!(worst < max_step, "跳变 {worst} ≥ {max_step}");
+    }
+
+    /// 设备事件决策：Rerouted 不重建；Lost 播放中一定暂停；Invalidated
+    /// 播放中按设置决定是否暂停、但总是重建。
+    #[test]
+    fn device_plan_decides_rebuild_and_pause() {
+        for ev in [
+            DeviceEvent::Rerouted,
+            DeviceEvent::Invalidated,
+            DeviceEvent::Lost,
+        ] {
+            for playing in [false, true] {
+                for pref in [false, true] {
+                    let (rebuild, pause) = device_plan(ev, playing, pref);
+                    assert_eq!(
+                        rebuild,
+                        ev != DeviceEvent::Rerouted,
+                        "{ev:?} playing={playing} pref={pref}"
+                    );
+                    let want_pause = playing && (pref || ev == DeviceEvent::Lost);
+                    assert_eq!(pause, want_pause, "{ev:?} playing={playing} pref={pref}");
+                }
+            }
+        }
+        // 关键断言单独点出来（上表已覆盖，这里是语义文档）。
+        assert_eq!(
+            device_plan(DeviceEvent::Invalidated, true, false),
+            (true, false)
+        );
+        assert_eq!(device_plan(DeviceEvent::Lost, true, false), (true, true));
+    }
+
+    /// 换到高规格设备后填充目标不超过容量的 2/3（容量只有一份）。
+    #[test]
+    fn device_target_never_exceeds_capacity() {
+        let out = Output {
+            stream: None,
+            rate: 192_000,
+            channels: 8,
+        };
+        let capacity = 48_000 * 3 * 2;
+        let target = target_for(&out, capacity);
+        assert!(target > 0);
+        assert!(target <= capacity * 2 / 3, "{target} > {}", capacity * 2 / 3);
     }
 }

@@ -226,6 +226,12 @@ const SECTIONS: &[Section] = &[
         build: playback::playback_section,
     },
     Section {
+        pane: Pane::Playback,
+        title: "输出设备",
+        keys: "输出 设备 耳机 拔出 暂停 默认设备 声卡 蓝牙",
+        build: playback::device_section,
+    },
+    Section {
         pane: Pane::Lyrics,
         title: "歌词对齐",
         keys: "歌词 全屏 左对齐 居中 右对齐 对齐方式",

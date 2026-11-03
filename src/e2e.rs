@@ -183,3 +183,60 @@ fn end_to_end_playback() {
     let count = library_store().scan();
     assert_eq!(count, 0);
 }
+
+/// 输出设备事件：Invalidated 重建流后按原位置继续；Rerouted + 「设备变化
+/// 时暂停」开着则只暂停、不重建。
+#[test]
+fn device_invalidated_rebuilds_and_resumes() {
+    let Some(root) = corpus() else {
+        eprintln!("跳过：没有 .nsh/tmp/zeo-player-test-music 测试语料");
+        return;
+    };
+    let player = Player::new();
+    player.set_volume(0.0);
+    let flac = root.join("sine.flac");
+    player.open(
+        flac.to_string_lossy().into_owned(),
+        vec![flac.to_string_lossy().into_owned()],
+    );
+    assert!(
+        wait_for(3000, || player.state().is_ready
+            && player.state().is_playing),
+        "flac 播放中: {:?}",
+        player.state().track.error
+    );
+    assert!(
+        wait_for(2500, || player.state().current_time > 1.0),
+        "播过 1 秒，current_time={}",
+        player.state().current_time
+    );
+
+    // 不设「设备变化时暂停」：Invalidated 重建流，位置不回跳、播放继续。
+    player.set_pause_on_device_change(false);
+    let before = player.state().current_time;
+    player.simulate_device_event(crate::engine::audio::DeviceEvent::Invalidated);
+    std::thread::sleep(Duration::from_millis(1500));
+    let state = player.state();
+    assert!(
+        state.is_playing,
+        "重建后仍在播放: {:?}",
+        state.track.error
+    );
+    let after = state.current_time;
+    assert!(
+        after > before && after - before < 2.5,
+        "位置延续不跳变: {before} -> {after}"
+    );
+
+    // 打开「设备变化时暂停」：Rerouted 只暂停（macOS 已自动改道，不重建）。
+    player.set_pause_on_device_change(true);
+    player.simulate_device_event(crate::engine::audio::DeviceEvent::Rerouted);
+    assert!(
+        wait_for(300, || !player.state().is_playing),
+        "Rerouted 后应暂停"
+    );
+
+    player.pause();
+    player.set_pause_on_device_change(true);
+    player.stop();
+}
