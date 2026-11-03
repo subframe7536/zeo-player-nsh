@@ -11,7 +11,7 @@ use nsh_base::popover;
 
 use super::super::components::button::{RADIUS_MD, on_dark};
 use super::super::components::icons::{Icon, icon};
-use super::super::components::slider::slider;
+use super::super::components::slider::{SliderStyle, slider};
 use super::super::store::{
     format_time, menu_control, nudge_lyrics_offset, seek_to, set_lyrics_offset, store,
 };
@@ -185,7 +185,18 @@ fn offset_rail() -> AnyElement {
                                     })
                                 })),
                         )
-                        .child(slider(fraction, input(), fg(), fg(), apply, apply).w_full())
+                        .child(
+                            slider(
+                                SliderStyle::HORIZONTAL,
+                                fraction,
+                                input(),
+                                fg(),
+                                fg(),
+                                apply,
+                                apply,
+                            )
+                            .w_full(),
+                        )
                         .child(
                             view()
                                 .flex_row()

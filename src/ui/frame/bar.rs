@@ -9,7 +9,7 @@ use nsh_core::prelude::*;
 use super::super::components::button::{RADIUS_MD, Size, Variant, icon_button, shell, tipped};
 use super::super::components::cover::cover;
 use super::super::components::icons::{Icon, icon_dyn};
-use super::super::components::slider::{slider, vslider};
+use super::super::components::slider::{SliderStyle, slider};
 use super::super::store::{
     cover_for_always, format_time, player, progress_fraction, seek_to, set_volume, shown_time,
     store, toggle_mute,
@@ -192,6 +192,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         }))
         .child(
             slider(
+                SliderStyle::HORIZONTAL,
                 progress_fraction,
                 input(),
                 fg(),
@@ -254,7 +255,16 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                     "静音",
                 ))
                 .child(
-                    slider(volume, input(), muted_fg(), fg(), set_volume, set_volume).w(px(96.0)),
+                    slider(
+                        SliderStyle::HORIZONTAL,
+                        volume,
+                        input(),
+                        muted_fg(),
+                        fg(),
+                        set_volume,
+                        set_volume,
+                    )
+                    .w(px(96.0)),
                 )
         }))
         .child(when(
@@ -353,14 +363,18 @@ fn volume_popover(open: Signal<bool>) -> AnyElement {
                 .px(px(8.0))
                 .py(px(10.0))
                 .gap(px(8.0))
-                .child(vslider(
-                    volume,
-                    input(),
-                    muted_fg(),
-                    fg(),
-                    set_volume,
-                    set_volume,
-                ))
+                .child(
+                    slider(
+                        SliderStyle::VERTICAL,
+                        volume,
+                        input(),
+                        muted_fg(),
+                        fg(),
+                        set_volume,
+                        set_volume,
+                    )
+                    .h(px(112.0)),
+                )
                 .child(icon_button(glyph, 15.0, "静音", muted_fg, toggle_mute)),
         )
         .into_element()

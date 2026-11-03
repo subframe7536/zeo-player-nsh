@@ -725,17 +725,21 @@ pub fn set_replaygain(cfg: crate::engine::audio::ReplayGainConfig) {
 pub fn set_eq(cfg: crate::engine::eq::EqConfig) {
     update_config(|c| c.eq = cfg);
     player().set_eq(cfg);
-    // 内存快照立即更新（120ms 轮询不会把界面弹回旧档）；
-    // 代次计数防抖：只有最后一次改动在 400ms 后才落盘。
+    // 内存快照立即更新（120ms 轮询不会把界面弹回旧档）。
     library_store().set_eq(cfg);
+    // 落盘防抖：GEN>0 表示已有守候线程在等安静——拖动推子一秒能产生
+    // 上百次调用，不能每动一下都起一个线程。
     static GEN: AtomicU64 = AtomicU64::new(0);
-    let seq = GEN.fetch_add(1, Ordering::Relaxed) + 1;
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(400));
-        if GEN.load(Ordering::Relaxed) == seq {
-            library_store().save();
-        }
-    });
+    if GEN.fetch_add(1, Ordering::Relaxed) == 0 {
+        std::thread::spawn(|| loop {
+            std::thread::sleep(Duration::from_millis(400));
+            // 400ms 内没人再调（GEN 仍是 0）：落盘并收工。
+            if GEN.swap(0, Ordering::Relaxed) == 0 {
+                library_store().save();
+                return;
+            }
+        });
+    }
 }
 
 /// 「删除文件」确认弹窗的请求：记下路径与当前的删除方式（回收站 / 直接删）。

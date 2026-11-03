@@ -6,7 +6,7 @@ use nsh_core::prelude::*;
 
 use super::super::components::button::{on_dark, tipped};
 use super::super::components::icons::{Icon, icon, icon_dyn};
-use super::super::components::slider::{scrub, slider};
+use super::super::components::slider::{SliderStyle, scrub, slider};
 use super::super::store::{
     format_time, player, progress_fraction, seek_to, set_volume, shown_time, store, toggle_mute,
 };
@@ -444,6 +444,7 @@ fn waveform_seek() -> View {
                 .h(px(H))
                 .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
                 .child(canvas(painter).w_full().h(px(H))),
+            false,
             move |f| s.seek_preview.set(Some(f * duration())),
             move |f| seek_to(f * duration()),
         ))
@@ -499,6 +500,7 @@ fn volume_row() -> View {
         ))
         .child(
             slider(
+                SliderStyle::HORIZONTAL,
                 volume,
                 white_a(0.2),
                 white_a(0.9),

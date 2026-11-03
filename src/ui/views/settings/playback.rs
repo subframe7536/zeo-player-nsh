@@ -4,7 +4,7 @@ use nsh_core::prelude::*;
 
 use super::super::super::components::button::{Size, Variant, text_button};
 use super::super::super::components::form::{input_field, select};
-use super::super::super::components::slider::fader;
+use super::super::super::components::slider::{SliderStyle, slider};
 use super::super::super::store::store;
 use super::super::super::theme::*;
 use super::{pref_row, setting_section};
@@ -238,6 +238,17 @@ fn edit_eq(f: impl Fn(&mut crate::engine::eq::EqConfig)) {
     super::super::super::store::set_eq(next);
 }
 
+/// 拖推子时的均衡器写入：只跟引擎与内存侧（一把互斥 + 一次克隆，
+/// 每个 move 都很便宜），`s.library` 的整库广播留到抬起 `edit_eq`
+/// 一次——它有几十个订阅点，拖动中周期广播的突发开销会让滚动区
+/// 里的推子顿挫；抬起前 `library_store` 一直拿着最新值。
+fn apply_eq_live(f: impl Fn(&mut crate::engine::eq::EqConfig)) {
+    let mut next = crate::config::library_store().eq();
+    f(&mut next);
+    super::super::super::store::player().set_eq(next);
+    crate::config::library_store().set_eq(next);
+}
+
 /// 「启用均衡器」开关的回调（`pref_row` 要 `fn` 指针，不能捕获）。
 fn eq_enabled_set(on: bool) {
     edit_eq(|c| c.enabled = on);
@@ -261,28 +272,48 @@ fn eq_preset_name(bands: &[f32; 10]) -> String {
 const EQ_FADER_H: f32 = 148.0;
 const EQ_FADER_W: f32 = 48.0;
 
-/// 一条推子列：竖推子 + 标签 + 当前值（`+3.5 dB`）。
+/// 一条推子列：竖推子 + 标签 + 当前值（`+3.5 dB`）。拖动走
+/// `apply_eq_live`（只写引擎与内存），抬起走 `edit_eq`（全量收尾）。
 fn eq_fader(
     label: &'static str,
     a11y: &'static str,
     get: impl Fn() -> f32 + Copy + 'static,
-    apply: impl Fn(f64) + Copy + 'static,
+    set_db: impl Fn(&mut crate::engine::eq::EqConfig, f32) + Copy + 'static,
 ) -> View {
+    let db = move |f: f64| snap_db((f * 24.0 - 12.0) as f32);
+    // 吸附后 0.5 dB 一档，平滑拖动里大多数 move 算出的值不变——
+    // 值没变就不写引擎/内存（NaN 哨兵保证每次手势第一次必写）。
+    let last = std::rc::Rc::new(std::cell::Cell::new(f32::NAN));
+    let lm = last.clone();
+    // 拖动中标签显示已应用的吸附值（本地信号，s.library 拖动期不广播）。
+    let live_db = signal(None::<f32>);
     view()
         .flex_1()
         .min_w(px(0.0))
         .items_center()
         .gap(px(5.0))
         .child(
-            fader(
+            slider(
+                SliderStyle::FADER,
                 move || {
                     ((get() + crate::engine::eq::MAX_DB) / (2.0 * crate::engine::eq::MAX_DB)) as f64
                 },
                 input(),
                 muted_fg(),
                 fg(),
-                apply,
-                apply,
+                move |f| {
+                    let v = db(f);
+                    if v != lm.get() {
+                        lm.set(v);
+                        live_db.set(Some(v));
+                        apply_eq_live(|c| set_db(c, v));
+                    }
+                },
+                move |f| {
+                    edit_eq(|c| set_db(c, db(f)));
+                    last.set(f32::NAN); // 下一次手势的第一次 move 必写
+                    live_db.set(None);
+                },
             )
             .label(a11y)
             .w(px(EQ_FADER_W))
@@ -295,7 +326,7 @@ fn eq_fader(
                 .text_color(muted_fg()),
         )
         .child(
-            text(move || format!("{:+.1} dB", get()))
+            text(move || format!("{:+.1} dB", live_db.get().unwrap_or_else(get)))
                 .text_size(px(10.0))
                 .line_height(px(10.0))
                 .tabular_nums()
@@ -347,18 +378,14 @@ pub(super) fn eq_section() -> View {
             "前级",
             "均衡器 前级",
             move || s.library.with(|l| l.config.eq.preamp_db),
-            move |f| {
-                edit_eq(|c| c.preamp_db = snap_db((f * 24.0 - 12.0) as f32));
-            },
+            |c, db| c.preamp_db = db,
         ));
         for (i, label) in EQ_LABELS.iter().enumerate() {
             faders = faders.child(eq_fader(
                 label,
                 EQ_A11Y[i],
                 move || s.library.with(|l| l.config.eq.bands[i]),
-                move |f| {
-                    edit_eq(|c| c.bands[i] = snap_db((f * 24.0 - 12.0) as f32));
-                },
+                move |c, db| c.bands[i] = db,
             ));
         }
         let options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)> =
