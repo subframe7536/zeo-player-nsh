@@ -554,49 +554,55 @@ fn content_column(pane: Signal<Pane>, query: Signal<String>) -> View {
                     )
                     .into_element();
             };
-            view()
-                .flex_1()
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .h(px(52.0))
-                        .pl(px(24.0))
-                        .pr(px(14.0))
-                        .border_b_1()
-                        .border_b_color(border())
-                        .child(
-                            text(p.title())
-                                .text_size(px(15.0))
-                                .line_height(px(15.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(fg()),
-                        )
-                        .child(view().flex_1())
-                        .child(icon_button(
-                            || Icon::Close,
-                            14.0,
-                            "关闭设置",
-                            muted_fg,
-                            move || s.settings.set(false),
-                        )),
-                )
-                .child(
-                    scroll().flex_1().child(
+            // 节的构建放进 untracked：build 里有顺手读信号初始化草稿的
+            // （如 playback 的 fade_ms / replaygain 的 db_row），被 dynamic
+            // 记成依赖后任何 `s.library` 写都会整栏重建——拖动中的推子节点
+            // 被换掉、responder 随之丢失（均衡器推子曾因此在滚动区里拖不动）。
+            untracked(move || {
+                view()
+                    .flex_1()
+                    .child(
                         view()
-                            .px(px(24.0))
-                            .pt(px(20.0))
-                            .pb(px(28.0))
-                            .gap(px(36.0))
-                            .children(
-                                SECTIONS
-                                    .iter()
-                                    .filter(|sec| sec.pane == p && section_hits(&q, sec))
-                                    .map(|sec| (sec.build)()),
-                            ),
-                    ),
-                )
-                .into_element()
+                            .flex_row()
+                            .items_center()
+                            .h(px(52.0))
+                            .pl(px(24.0))
+                            .pr(px(14.0))
+                            .border_b_1()
+                            .border_b_color(border())
+                            .child(
+                                text(p.title())
+                                    .text_size(px(15.0))
+                                    .line_height(px(15.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(fg()),
+                            )
+                            .child(view().flex_1())
+                            .child(icon_button(
+                                || Icon::Close,
+                                14.0,
+                                "关闭设置",
+                                muted_fg,
+                                move || s.settings.set(false),
+                            )),
+                    )
+                    .child(
+                        scroll().flex_1().child(
+                            view()
+                                .px(px(24.0))
+                                .pt(px(20.0))
+                                .pb(px(28.0))
+                                .gap(px(36.0))
+                                .children(
+                                    SECTIONS
+                                        .iter()
+                                        .filter(|sec| sec.pane == p && section_hits(&q, sec))
+                                        .map(|sec| (sec.build)()),
+                                ),
+                        ),
+                    )
+                    .into_element()
+            })
         }))
 }
 

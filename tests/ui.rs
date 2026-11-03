@@ -328,11 +328,7 @@ fn lyrics_offset_nudges_and_resets() {
 
 /// 均衡器竖推子在设置滚动区里拖得动（responder 的 claim 要挡下滚动视图
 /// 抢拖）：上拖 1/4 行程（148pt）从 0 到 +6.0 dB。
-// TODO: 目前仍拖不动——`scrub`/`vscrub` 已补 `on_touch` 让节点进触摸路径，
-// 但 headless `drag` 按目标节点向上建链，claim 挂在子级 `area` 上不在链里；
-// 真机行为也未取证。待查清后恢复。
 #[test]
-#[ignore = "EQ 推子拖拽未修好，见 TODO"]
 fn eq_fader_drags_in_settings_scroll() {
     let _guard = play_lock();
     let mut app = start_inner(1200.0, 800.0);

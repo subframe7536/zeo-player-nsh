@@ -3,7 +3,6 @@
 
 use std::rc::Rc;
 
-use nsh_core::TouchEvent;
 use nsh_core::prelude::*;
 
 /// 横向拖动取比例（0..1）：按下/移动调 `on_move`，抬起调 `on_release`。
@@ -24,9 +23,6 @@ pub fn scrub(
     let on_move = Rc::new(on_move);
     let grant = on_move.clone();
     area.on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
-        // 进触摸路径的门票：claim 只协商已在路径上的节点，不挂 on_touch
-        // 的话 responder 永远不被问到（事件掩码里没有 Touch）。
-        .on_touch(|_: &TouchEvent| {})
         .claim_touches(TouchClaim::on_start())
         .keep_touches(true)
         .on_responder_grant(move |e: &ResponderEvent| grant(fraction(e.location.x.0)))
@@ -48,8 +44,6 @@ fn vscrub(area: View, on_move: impl Fn(f64) + 'static, on_release: impl Fn(f64) 
     let on_move = Rc::new(on_move);
     let grant = on_move.clone();
     area.on_layout(move |frame: &Bounds<Points>| height.set(frame.size.height.0))
-        // 同 [`scrub`]：先挂 on_touch 进路径，claim 才生效。
-        .on_touch(|_: &TouchEvent| {})
         .claim_touches(TouchClaim::on_start())
         .keep_touches(true)
         .on_responder_grant(move |e: &ResponderEvent| grant(fraction(e.location.y.0)))

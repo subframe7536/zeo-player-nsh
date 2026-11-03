@@ -64,11 +64,10 @@ pub(super) fn lyrics_timestamps_section() -> View {
 pub(super) fn lyrics_offset_section() -> View {
     let s = store();
     let draft = signal(s.library.with(|l| l.config.global_lyrics_offset_ms).to_string());
-    // 外部改了配置（另一个实例、测试）时同步草稿。
-    effect(move || {
-        let ms = s.library.with(|l| l.config.global_lyrics_offset_ms);
-        draft.set(ms.to_string());
-    });
+    // 外部改了配置（另一个实例、测试）时同步草稿；computed 只在值变了
+    // 才触发——无关的 s.library 写不能把输入中的草稿顶掉。
+    let lib_ms = computed(move || s.library.with(|l| l.config.global_lyrics_offset_ms));
+    effect(move || draft.set(lib_ms.get().to_string()));
     // 提交（回车 / 失焦）：解析失败回退为当前值，成功则钳到 ±30000 并规范化草稿。
     // 弹窗拆到一半输入框还会收一次失焦，那时 draft 已随 owner 销毁。
     let owner = Owner::current();

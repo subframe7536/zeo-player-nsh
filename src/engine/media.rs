@@ -27,12 +27,11 @@ impl MediaSession {
                     .track_id_prefix("/dev/subf/zeo_player/track");
                 // Windows 的系统媒体控件要挂在窗口上：等 window.rs 找到窗口。
                 #[cfg(target_os = "windows")]
-                {
+                let mut thumbnail = {
                     let mut waited = 0;
-                    loop {
+                    let hwnd = loop {
                         if let Some(hwnd) = crate::window::hwnd() {
-                            config = config.hwnd(hwnd).app_media_id("dev.subf.zeo-player");
-                            break;
+                            break hwnd;
                         }
                         if waited > 300 {
                             eprintln!("zeo-player: 没找到窗口，系统媒体控件不可用");
@@ -40,8 +39,10 @@ impl MediaSession {
                         }
                         std::thread::sleep(Duration::from_millis(100));
                         waited += 1;
-                    }
-                }
+                    };
+                    config = config.hwnd(hwnd).app_media_id("dev.subf.zeo-player");
+                    smtc_thumbnail::Thumbnail::new(hwnd)
+                };
                 let mut controls = match MediaControls::new(config, move |event: Event| {
                     // OS 回调线程：只做转发，不阻塞。
                     let cmd = match event {
@@ -69,6 +70,15 @@ impl MediaSession {
                 while let Ok(state) = rx.recv() {
                     if let Err(err) = controls.set_state(&state) {
                         eprintln!("zeo-player: 媒体状态发布失败: {err}");
+                    }
+                    #[cfg(target_os = "windows")]
+                    if let Some(thumbnail) = thumbnail.as_mut() {
+                        // 与 artwork_url 同源：现查缓存，升档 / 冷生成都能跟上。
+                        let path = state.track.as_ref().and_then(|t| {
+                            crate::metadata::covers::cached_list(std::path::Path::new(&t.id))
+                                .map(|(_, f)| f)
+                        });
+                        thumbnail.publish(path.as_deref());
                     }
                 }
             })
@@ -142,6 +152,72 @@ fn file_url(path: &str) -> String {
         }
     }
     out
+}
+
+/// Windows SMTC 缩略图：playwire 2.0 只走
+/// `RandomAccessStreamReference::CreateFromUri`，而 WinRT 只收
+/// http(s) / ms-appx / ms-appdata，`file://` 进去缩略图恒空——更糟的是
+/// 这会让 `apply_metadata` 在 `Update()` 之前抛错，标题 / 艺术家也不提交。
+/// 这里用 `GetForWindow(hwnd)` 拿到同一个 SMTC 单例的 DisplayUpdater，
+/// 改用 `StorageFile` + `CreateFromFile` 直投本地封面并替它 `Update()`。
+#[cfg(target_os = "windows")]
+mod smtc_thumbnail {
+    use std::path::{Path, PathBuf};
+
+    use windows::Media::{
+        SystemMediaTransportControls, SystemMediaTransportControlsDisplayUpdater,
+    };
+    use windows::Storage::StorageFile;
+    use windows::Storage::Streams::RandomAccessStreamReference;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::WinRT::ISystemMediaTransportControlsInterop;
+    use windows::core::{HSTRING, factory};
+
+    pub struct Thumbnail {
+        updater: SystemMediaTransportControlsDisplayUpdater,
+        /// 上次成功发布的封面文件（None = 无封面）：相同就跳过，免得每次
+        /// 进度发布都重开 StorageFile；失败不记，下次发布会重试。
+        last: Option<PathBuf>,
+    }
+
+    impl Thumbnail {
+        pub fn new(hwnd: u64) -> Option<Thumbnail> {
+            let interop = factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>()
+                .map_err(|err| eprintln!("zeo-player: SMTC interop: {err}"))
+                .ok()?;
+            let controls: SystemMediaTransportControls =
+                unsafe { interop.GetForWindow(HWND(hwnd as usize as *mut core::ffi::c_void)) }
+                    .map_err(|err| eprintln!("zeo-player: SMTC GetForWindow: {err}"))
+                    .ok()?;
+            let updater = controls
+                .DisplayUpdater()
+                .map_err(|err| eprintln!("zeo-player: SMTC DisplayUpdater: {err}"))
+                .ok()?;
+            Some(Thumbnail { updater, last: None })
+        }
+
+        /// `set_state` 之后调：封面文件变了才重投，None 则清空缩略图。
+        /// 投新封面顺带替 playwire 提交未落盘的 MusicProperties。
+        pub fn publish(&mut self, artwork: Option<&Path>) {
+            let new = artwork.map(Path::to_path_buf);
+            if new == self.last {
+                return;
+            }
+            let set = match &new {
+                Some(path) => StorageFile::GetFileFromPathAsync(&HSTRING::from(
+                    &*path.to_string_lossy(),
+                ))
+                .and_then(|op| op.join())
+                .and_then(|file| RandomAccessStreamReference::CreateFromFile(&file))
+                .and_then(|stream| self.updater.SetThumbnail(&stream)),
+                None => self.updater.SetThumbnail(None),
+            };
+            match set.and_then(|()| self.updater.Update()) {
+                Ok(()) => self.last = new,
+                Err(err) => eprintln!("zeo-player: SMTC 封面发布失败: {err}"),
+            }
+        }
+    }
 }
 
 #[cfg(test)]

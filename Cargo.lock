@@ -5975,6 +5975,7 @@ dependencies = [
  "trash",
  "tray-icon",
  "walkdir",
+ "windows",
  "windows-sys 0.61.2",
 ]
 

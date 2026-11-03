@@ -13,11 +13,10 @@ use super::{pref_row, setting_section};
 pub(super) fn playback_section() -> View {
     let s = store();
     let draft = signal(s.library.with(|l| l.config.fade_ms).to_string());
-    // 外部改了 fade_ms（另一个实例、测试）时同步草稿。
-    effect(move || {
-        let ms = s.library.with(|l| l.config.fade_ms);
-        draft.set(ms.to_string());
-    });
+    // 外部改了 fade_ms（另一个实例、测试）时同步草稿；computed 只在值
+    // 变了才触发——无关的 s.library 写（扫描进度等）不能把输入中的草稿顶掉。
+    let lib_ms = computed(move || s.library.with(|l| l.config.fade_ms));
+    effect(move || draft.set(lib_ms.get().to_string()));
     // 提交（回车 / 失焦）：解析失败回退为当前值，成功则钳到 5000 并规范化草稿。
     let commit = move || match draft.get().trim().parse::<u32>() {
         Ok(ms) => {
@@ -100,8 +99,10 @@ fn db_row(
     set: impl Fn(f32) + Copy + 'static,
 ) -> View {
     let draft = signal(format!("{}", get()));
-    // 外部改了配置（另一个实例、测试）时同步草稿。
-    effect(move || draft.set(format!("{}", get())));
+    // 外部改了配置（另一个实例、测试）时同步草稿；同 fade 输入——
+    // computed 拦掉无关的 s.library 写，不顶掉输入中的草稿。
+    let lib_db = computed(move || get());
+    effect(move || draft.set(format!("{}", lib_db.get())));
     let commit = move || match draft.get().trim().parse::<f32>() {
         Ok(db) => {
             let db = db.clamp(-15.0, 15.0);
