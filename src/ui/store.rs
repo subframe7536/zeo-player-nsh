@@ -65,7 +65,6 @@ pub struct NowPlaying {
     pub artist: String,
     pub album: String,
     pub artwork: Option<SharedString>,
-    pub backdrop: Option<SharedString>,
     /// 封面已生成（换歌后、生成前为 `false`）。
     pub covers_ready: bool,
     pub error: Option<String>,
@@ -919,7 +918,6 @@ fn now_playing(snap: &crate::engine::audio::Snapshot) -> NowPlaying {
         artist: t.artist.clone(),
         album: t.album.clone(),
         artwork: t.artwork.clone().map(SharedString::from),
-        backdrop: t.backdrop.clone().map(SharedString::from),
         covers_ready: t.covers_ready,
         error: t.error.clone(),
         index: t.queue_index,

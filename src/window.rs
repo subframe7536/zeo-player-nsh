@@ -20,6 +20,9 @@ use crate::config::CloseAction;
 /// 两个平台都在系统层设（macOS `contentMinSize`，Windows `WM_GETMINMAXINFO`）。
 pub const MIN_WIDTH: f32 = 720.0;
 
+/// 窗口的最小高度（点）：与最小宽度一致，窗口最小是 720×720 的方形。
+pub const MIN_HEIGHT: f32 = MIN_WIDTH;
+
 /// 当前关闭行为（界面设置写入）。
 static MODE: AtomicU8 = AtomicU8::new(0);
 /// 窗口里点了关闭、需要问用户。
@@ -489,9 +492,11 @@ mod platform {
                 }
                 return;
             };
-            // 最小宽度（见 `MIN_WIDTH`）：保留原来的最小高度。
+            // 最小尺寸（见 `MIN_WIDTH` / `MIN_HEIGHT`）：宽高都抬到应用
+            // 的下限，系统原来更大的保留。
             let mut min: NSSize = window.contentMinSize();
-            min.width = super::MIN_WIDTH as f64;
+            min.width = min.width.max(super::MIN_WIDTH as f64);
+            min.height = min.height.max(super::MIN_HEIGHT as f64);
             window.setContentMinSize(min);
             apply_frame(
                 &window,
@@ -712,8 +717,8 @@ mod platform {
             // 第二份实例「显示已有窗口」（`single_instance` 直接投递或广播）。
             m if crate::single_instance::handle_message(m) => return 0,
             WM_CLOSE if !super::on_close_clicked() => return 0,
-            // 最小宽度（见 `MIN_WIDTH`）：先让原窗口过程填默认值，再把
-            // ptMinTrackSize 抬到应用的下限（点 → 物理像素）。
+            // 最小尺寸（见 `MIN_WIDTH` / `MIN_HEIGHT`）：先让原窗口过程
+            // 填默认值，再把 ptMinTrackSize 抬到应用的下限（点 → 物理像素）。
             WM_GETMINMAXINFO => {
                 // SAFETY: 原窗口过程，在子类化时保存。
                 let result = unsafe {
@@ -725,8 +730,11 @@ mod platform {
                 let info = unsafe { &mut *(l as *mut MINMAXINFO) };
                 // SAFETY: 普通查询。
                 let dpi = unsafe { GetDpiForWindow(hwnd) } as f32;
-                let min_x = (super::MIN_WIDTH * dpi / 96.0).ceil() as i32;
+                let scale = dpi / 96.0;
+                let min_x = (super::MIN_WIDTH * scale).ceil() as i32;
+                let min_y = (super::MIN_HEIGHT * scale).ceil() as i32;
                 info.ptMinTrackSize.x = info.ptMinTrackSize.x.max(min_x);
+                info.ptMinTrackSize.y = info.ptMinTrackSize.y.max(min_y);
                 return result;
             }
             // 窗口激活：把键盘钩子挪回链首（后装先调，抢回媒体键）。

@@ -52,25 +52,27 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
     let swap = Swap::install();
     let lyrics_shown = lyrics_shown();
 
-    // 底：深灰，封面放大模糊，再压一层暗色，保证白字对比。背景图就是
-    // 列表封面的 96px 小文件（covers::list_cover_pub），拉伸铺满加滤镜
-    // 模糊：解码后只有十几 KB，也不单独落一张预模糊的盘。上下两层：
-    // `under` 是上一张，`top` 是当前这张（见 `Swap::backdrop`）。
+    // 底：深灰，封面放大模糊，再压一层暗色，保证白字对比。背景图复用
+    // 左列大封面的 data-URI（`t.artwork`，已在内存里——以前挂列表封面
+    // 的 96px 文件路径，升档 400px 后小文件被 prune，路径会悬空）。上下
+    // 两层：`under` 是上一张，`top` 是当前这张（见 `Swap::backdrop`）。
     let layer = |path: Signal<Option<SharedString>>, alpha: &AnimatedValue| {
         view()
             .absolute()
-            // 多出窗口一圈：滤镜模糊在图层边缘会淡出成透明，外扩后淡出
-            // 发生在屏幕外。
             .inset(px(-40.0))
             .bind_opacity(alpha)
-            .style_with(|st| st.blur(px(32.0)))
             .child(when(
                 move || path.with(Option::is_some),
                 move || {
                     image(move || path.get().unwrap_or_default())
                         .absolute()
+                        // 多出窗口一圈：模糊在图层边缘会淡出成透明，外扩后
+                        // 淡出发生在屏幕外。模糊要挂在 image 上：macOS 后
+                        // 端只把模糊烘进 image 元素的位图，普通 view 的
+                        // `filter: blur()` 不画（见 AGENTS.md 待上游）。
                         .inset(px(-40.0))
                         .resize_mode(ResizeMode::Cover)
+                        .blur_radius(px(32.0))
                         .opacity(0.9)
                 },
             ))
@@ -151,7 +153,7 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
 /// 背景的模糊封面慢一些交叉淡入。系统开了「减弱动态效果」时不动画。
 ///
 /// 背景不随换歌立即清掉：引擎在缓冲填起来之后才生成新封面，这段时间
-/// `backdrop` 为 `None`，直接跟着走会露出底色，整页一瞬间变黑。所以等
+/// `artwork` 为 `None`，直接跟着走会露出底色，整页一瞬间变黑。所以等
 /// `covers_ready` 了再换：新图放在上层（`top`）淡入，旧图留在下层
 /// （`under`）垫底；新歌没有封面时旧图淡出。
 #[derive(Clone, Copy)]
@@ -184,7 +186,7 @@ impl Swap {
             lyrics_shift: animated_value(0.0),
             backdrop: animated_value(1.0),
             under_alpha: animated_value(1.0),
-            top: signal(untracked(move || s.track.with(|t| t.backdrop.clone()))),
+            top: signal(untracked(move || s.track.with(|t| t.artwork.clone()))),
             under: signal(None),
         };
         let (content, shift, lyrics_shift) = (swap.content, swap.shift, swap.lyrics_shift);
@@ -193,7 +195,7 @@ impl Swap {
         effect(move || {
             let (ready, next) = s
                 .track
-                .with(|t| (t.covers_ready || t.error.is_some(), t.backdrop.clone()));
+                .with(|t| (t.covers_ready || t.error.is_some(), t.artwork.clone()));
             let current = top.get_untracked();
             if !ready || current == next {
                 return;

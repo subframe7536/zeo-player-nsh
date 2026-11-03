@@ -287,10 +287,9 @@ pub struct TrackPublic {
     pub album: String,
     /// 大封面 `data:` URI（`Arc` 共享：快照克隆只加引用计数——轮询
     /// 每 100ms 取一次快照，克隆 String 会是每秒几 MB 的堆流量）。
+    /// 全屏模糊背景也复用它（滤镜模糊，见 `ui::now_playing`）。
     pub artwork: Option<Arc<str>>,
-    /// 全屏背景（预先模糊的小图）。
-    pub backdrop: Option<Arc<str>>,
-    /// 这首的封面已生成（`artwork` / `backdrop` 为 `None` 时即确实没有封面）。
+    /// 这首的封面已生成（`artwork` 为 `None` 时即确实没有封面）。
     pub covers_ready: bool,
     pub duration: f64,
     pub queue: Arc<Vec<String>>,
@@ -1234,24 +1233,18 @@ fn load_track(
                     .map(|i| i as i64)
                     .unwrap_or(0)
             };
-            // 封面已在内存（队尾预载 / 播过的大图 URI；扫过 / 预热的列表
-            // 封面文件）就直接进快照：同一帧里曲目信息与封面一起换，界面
-            // 不会闪占位符；后台 `load_covers` 照旧跑（色调补算、媒体会话、
-            // 冷缓存生成）。
+            // 封面已在内存（队尾预载 / 播过的大图 URI）就直接进快照：
+            // 同一帧里曲目信息与封面一起换，界面不会闪占位符；后台
+            // `load_covers` 照旧跑（色调补算、媒体会话、冷缓存生成）。
             let artwork = crate::metadata::covers::cached_artwork(&path);
-            let backdrop = crate::metadata::covers::cached_list(&path);
-            // 大图是按需读元数据生成的 data URI，不落盘；背景复用
-            // 列表封面的 96px 文件。
+            // 大图是按需读元数据生成的 data URI，不落盘。
             *shared.track.lock().unwrap() = Arc::new(TrackPublic {
                 path: Some(path.to_string_lossy().into_owned()),
                 title: meta.title.clone(),
                 artist: meta.artist.clone(),
                 album: meta.album.clone(),
-                covers_ready: artwork.is_some() && backdrop.is_some(),
+                covers_ready: artwork.is_some(),
                 artwork,
-                backdrop: backdrop
-                    .as_ref()
-                    .map(|(_, f)| Arc::from(f.to_string_lossy().as_ref())),
                 duration: meta.duration,
                 queue,
                 queue_index: actual_index,
@@ -1268,10 +1261,10 @@ fn load_track(
 }
 
 /// 给当前曲目生成封面：720 px 的 JPEG `data:` URI（界面显示用，实时读
-/// 元数据不落盘）和全屏背景（复用列表封面的 96px 文件，顺手生成它）。
-/// 读标签 + 解码缩放在冷缓存时要几百毫秒：挪出引擎线程（不然饿死音频
-/// 回调、也排不进正在预热的缩略图池），线程随换曲自生自灭，`cover_gen`
-/// 让晚到的旧结果失效。
+/// 元数据不落盘；全屏模糊背景复用它）；列表封面文件也顺手生成一份，
+/// 系统媒体会话在 `publish` 里现查缓存拿它。读标签 + 解码缩放在冷缓存
+/// 时要几百毫秒：挪出引擎线程（不然饿死音频回调、也排不进正在预热的
+/// 缩略图池），线程随换曲自生自灭，`cover_gen` 让晚到的旧结果失效。
 fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
     let Some(path) = shared.track.lock().unwrap().path.clone() else {
         return;
@@ -1285,7 +1278,9 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
         }
         let file = std::path::Path::new(&path);
         let cover = crate::metadata::covers::artwork_uri(file);
-        let backdrop = crate::metadata::covers::list_cover_pub(file);
+        // 系统媒体会话的封面在 publish 里现查列表缓存：这里顺手把文件
+        // 生成出来（冷缓存 / 还没显示过的曲目才缺）。
+        let _ = crate::metadata::covers::list_cover_pub(file);
         {
             let mut slot = shared.track.lock().unwrap();
             if shared.cover_gen.load(Ordering::Relaxed) != gen_id
@@ -1295,7 +1290,6 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
             }
             let mut t = (**slot).clone();
             t.artwork = cover;
-            t.backdrop = backdrop.as_deref().map(Arc::from);
             t.covers_ready = true;
             *slot = Arc::new(t);
         }
