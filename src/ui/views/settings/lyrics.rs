@@ -2,7 +2,9 @@
 
 use nsh_core::prelude::*;
 
+use super::super::super::components::form::input_field;
 use super::super::super::store::store;
+use super::super::super::theme::*;
 use super::{pref_row, setting_section};
 
 /// 全屏歌词的对齐方式。
@@ -40,4 +42,72 @@ pub(super) fn lyrics_source_section() -> View {
         move || s.library.with(|l| l.config.prefer_local_lyrics),
         super::super::super::store::set_prefer_local_lyrics,
     ))
+}
+
+/// 全局歌词偏移：所有曲目统一提前 / 延后（毫秒；与每首曲目的手动偏移相加生效）。
+pub(super) fn lyrics_offset_section() -> View {
+    let s = store();
+    let draft = signal(s.library.with(|l| l.config.global_lyrics_offset_ms).to_string());
+    // 外部改了配置（另一个实例、测试）时同步草稿。
+    effect(move || {
+        let ms = s.library.with(|l| l.config.global_lyrics_offset_ms);
+        draft.set(ms.to_string());
+    });
+    // 提交（回车 / 失焦）：解析失败回退为当前值，成功则钳到 ±30000 并规范化草稿。
+    let commit = move || match draft.get().trim().trim_start_matches('+').parse::<i64>() {
+        Ok(ms) => {
+            let ms = ms.clamp(-30000, 30000);
+            super::super::super::store::set_global_lyrics_offset(ms);
+            draft.set(ms.to_string());
+        }
+        Err(_) => {
+            draft.set(s.library.with(|l| l.config.global_lyrics_offset_ms).to_string())
+        }
+    };
+    let field = input_field(true)
+        .w(px(88.0))
+        .label("全局歌词偏移")
+        .keyboard_type(KeyboardType::Number)
+        .value(move || draft.get())
+        .on_change(move |t: &str| draft.set(t.to_owned()))
+        .on_submit(move |_: &str| commit())
+        .on_blur(move || commit());
+    setting_section(
+        "全局歌词偏移",
+        "对所有曲目生效：蓝牙耳机等固定延迟用它补偿。正值提前显示，负值延后；与全屏歌词区里每首曲目的偏移相加生效。",
+        None,
+    )
+    .child(
+        view()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .gap(px(16.0))
+            .child(
+                view()
+                    .flex_1()
+                    .min_w(px(200.0))
+                    .gap(px(2.0))
+                    .child(
+                        text("全局歌词偏移")
+                            .text_size(px(14.0))
+                            .line_height(px(14.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(fg()),
+                    )
+                    .child(
+                        text("毫秒，±30000 内；正值让歌词提前。")
+                            .text_size(px(12.0))
+                            .line_height(px(12.0))
+                            .text_color(muted_fg()),
+                    ),
+            )
+            .child(field)
+            .child(
+                text("毫秒")
+                    .text_size(px(13.0))
+                    .line_height(px(13.0))
+                    .text_color(muted_fg()),
+            ),
+    )
 }

@@ -121,6 +121,8 @@ pub struct Store {
     pub tracks: Signal<Same<Vec<TrackEntry>>>,
     pub meta: Signal<Option<Same<MetaInfo>>>,
     pub lyrics: Signal<Option<Lyrics>>,
+    /// 当前曲目的手动歌词偏移（毫秒，正值 = 提前；换曲时从数据库读）。
+    pub lyrics_offset: Signal<i64>,
     pub waveform: Signal<Option<Same<Vec<f64>>>>,
     /// 拖动 seek 时的预览位置（秒），抬起后保留到真实进度追上。
     pub seek_preview: Signal<Option<f64>>,
@@ -211,10 +213,16 @@ pub fn install() -> Store {
     let library = signal(library_state());
     let tracks = signal(Same(lib.tracks()));
     let lyrics = signal(None::<Lyrics>);
+    let lyrics_offset = signal(0_i64);
     let active_line = computed(move || {
         let time = playback.with(|p| p.time);
+        // 生效偏移 = 每曲手动偏移 + 全局偏移（正值 = 提前）。
+        let offset =
+            lyrics_offset.get() + library.with(|l| l.config.global_lyrics_offset_ms);
         lyrics.with(|l| match l {
-            Some(l) if l.output.timed => active_index(&l.output, time),
+            Some(l) if l.output.timed => {
+                active_index(&l.output, time + offset as f64 / 1000.0)
+            }
             _ => -1,
         })
     });
@@ -225,6 +233,7 @@ pub fn install() -> Store {
         tracks,
         meta: signal(None),
         lyrics,
+        lyrics_offset,
         waveform: signal(None),
         seek_preview: signal(None),
         owner: Owner::current(),
@@ -389,6 +398,7 @@ pub fn install() -> Store {
         let current = path.get();
         s.meta.set(None);
         s.lyrics.set(None);
+        s.lyrics_offset.set(0);
         let Some(stamp) = current else {
             s.waveform.set(None);
             return;
@@ -423,6 +433,16 @@ pub fn install() -> Store {
                     output: Same(Arc::new(output)),
                     source,
                 }));
+            }
+            let offset = blocking({
+                let p = p.clone();
+                move || crate::db::lyrics_offset(&p)
+            })
+            .await;
+            if still(&p)
+                && let Ok(offset) = offset
+            {
+                s.lyrics_offset.set(offset);
             }
             let bars = blocking({
                 let p = p.clone();
@@ -537,6 +557,28 @@ pub fn font_family() -> SharedString {
 pub fn set_lyrics_align(align: crate::config::LyricsAlign) {
     update_config(|c| c.lyrics_align = align);
     std::thread::spawn(move || library_store().set_lyrics_align(align));
+}
+
+/// 当前曲目的歌词偏移加 `delta_ms`（钳到 ±30000）并保存；`None` 时清零。
+/// 没有正在播放的曲目时不做。
+pub fn nudge_lyrics_offset(delta_ms: Option<i64>) {
+    let Some(path) = player().state().track.path.clone() else {
+        return;
+    };
+    let s = store();
+    let v = match delta_ms {
+        Some(d) => (s.lyrics_offset.get() + d).clamp(-30000, 30000),
+        None => 0,
+    };
+    s.lyrics_offset.set(v);
+    crate::db::later(move || crate::db::set_lyrics_offset(&path, v));
+}
+
+/// 全局歌词偏移（立即生效并保存；钳到 ±30000 毫秒）。
+pub fn set_global_lyrics_offset(ms: i64) {
+    let ms = ms.clamp(-30000, 30000);
+    update_config(|c| c.global_lyrics_offset_ms = ms);
+    std::thread::spawn(move || library_store().set_global_lyrics_offset_ms(ms));
 }
 
 /// 持久化的外观 → NSH 的 `Appearance`（`set_color_scheme` 的参数）。

@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use nsh_core::prelude::*;
 
-use super::super::store::{format_time, seek_to, store};
+use super::super::components::button::on_dark;
+use super::super::components::icons::{Icon, icon};
+use super::super::store::{format_time, nudge_lyrics_offset, seek_to, store};
 use super::super::theme::*;
 use super::{Reveal, Swap};
 use crate::config::LyricsAlign;
@@ -41,12 +43,103 @@ pub(super) fn lyrics_shown() -> Signal<bool> {
     shown
 }
 
+/// `+0.5s` / `−0.5s`（一位小数、带符号；负号用 `−` U+2212）。
+fn fmt_offset(ms: i64) -> String {
+    let sign = if ms < 0 { "−" } else { "+" };
+    format!("{sign}{:.1}s", ms.unsigned_abs() as f64 / 1000.0)
+}
+
+/// 右上角的偏移控件：[−] 每曲偏移 [+]（非 0 时带「重置」）；只显示与调
+/// 节每曲那份，全局偏移在其下小字提示。默认半透明不抢歌词。
+fn offset_controls() -> AnyElement {
+    let s = store();
+    view()
+        .absolute()
+        .top(px(12.0))
+        .right(px(12.0))
+        .items_center()
+        .gap(px(2.0))
+        .opacity(0.5)
+        .hover(|st| st.opacity(1.0))
+        .transition_opacity()
+        .duration(150.0)
+        .child(
+            on_dark(28.0)
+                .accessibility_label("歌词延后")
+                .on_press(|_: &()| nudge_lyrics_offset(Some(-500)))
+                .child(icon(Icon::Minus, 14.0, || white_a(0.85))),
+        )
+        .child(
+            view()
+                .items_center()
+                .child(
+                    text(move || {
+                        let v = s.lyrics_offset.get();
+                        if v == 0 {
+                            "偏移 0s".to_owned()
+                        } else {
+                            fmt_offset(v)
+                        }
+                    })
+                    .text_size(px(12.0))
+                    .line_height(px(12.0))
+                    .tabular_nums()
+                    .text_color(white_a(0.8)),
+                )
+                .child(dynamic(move || {
+                    let g = s.library.with(|l| l.config.global_lyrics_offset_ms);
+                    (g != 0).then(|| {
+                        text(format!("全局 {}", fmt_offset(g)))
+                            .text_size(px(11.0))
+                            .line_height(px(11.0))
+                            .text_color(white_a(0.4))
+                            .into_element()
+                    })
+                })),
+        )
+        .child(
+            on_dark(28.0)
+                .accessibility_label("歌词提前")
+                .on_press(|_: &()| nudge_lyrics_offset(Some(500)))
+                .child(icon(Icon::Plus, 14.0, || white_a(0.85))),
+        )
+        .child(dynamic(move || {
+            (s.lyrics_offset.get() != 0).then(|| {
+                nsh_base::button()
+                    .h(px(28.0))
+                    .px(px(8.0))
+                    .flex_shrink_0()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(8.0))
+                    .transition_colors()
+                    .duration(150.0)
+                    .hover(|st| st.bg(white_a(0.08)))
+                    .active(|st| st.opacity(0.6))
+                    .accessibility_label("重置歌词偏移")
+                    .on_press(|_: &()| nudge_lyrics_offset(None))
+                    .child(
+                        text("重置")
+                            .text_size(px(11.0))
+                            .line_height(px(11.0))
+                            .text_color(white_a(0.7)),
+                    )
+                    .into_element()
+            })
+        }))
+        .into_element()
+}
+
 /// 右半区：有歌词时滚动列表，载入中一行提示。
 pub(super) fn lyrics_column(swap: &Swap) -> View {
     let s = store();
     let has_lines = move || {
         s.lyrics
             .with(|l| l.as_ref().is_some_and(|l| !l.output.lines.is_empty()))
+    };
+    let timed = move || {
+        s.lyrics
+            .with(|l| l.as_ref().is_some_and(|l| l.output.timed))
     };
     view()
         .w_full()
@@ -67,6 +160,7 @@ pub(super) fn lyrics_column(swap: &Swap) -> View {
                 .text_color(white_a(0.4)),
             )
         }))
+        .child(when(timed, offset_controls))
 }
 
 /// 行级歌词：跟随时间滚动（当前行停在 [`ANCHOR`] 处），用户滚动后 3 s
@@ -399,7 +493,12 @@ fn lyrics_scroller() -> View {
                             // 直接滚到点的这一行；跟随在高亮换过来之前不动。
                             *pending.borrow_mut() = Some((i, std::time::Instant::now()));
                             *last_followed.borrow_mut() = i;
-                            seek_to(time);
+                            // 按生效偏移（每曲 + 全局）跳：正值提前，行时间减去它。
+                            let offset = (s.lyrics_offset.get_untracked()
+                                + s.library.with(|l| l.config.global_lyrics_offset_ms))
+                                as f64
+                                / 1000.0;
+                            seek_to((time - offset).max(0.0));
                             scroll_to_line(i);
                             follow.set(true);
                         }

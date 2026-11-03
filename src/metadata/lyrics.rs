@@ -43,18 +43,34 @@ impl Default for LyricOptions {
     }
 }
 
+/// `[offset:+500]` / `[offset:-250]` / `[offset: 300 ]` → 毫秒；不是
+/// offset 行或解析失败为 `None`。
+fn parse_offset_tag(line: &str) -> Option<i64> {
+    let rest = line.strip_prefix('[')?;
+    let (key, value) = rest.split_once(':')?;
+    if !key.eq_ignore_ascii_case("offset") {
+        return None;
+    }
+    value.strip_suffix(']')?.trim().parse::<i64>().ok()
+}
+
 /// 解析 LRC 文本。
 pub fn parse_lyric(text: &str, options: LyricOptions) -> LyricsOutput {
     let mut timed_entries: Vec<(f64, String)> = Vec::new();
     let mut untimed: Vec<String> = Vec::new();
+    // `[offset:±毫秒]`：正值 = 歌词提前显示（每行时间减）。
+    let mut offset_ms = 0_i64;
 
     for line in text.lines() {
         let line = line.trim_end_matches(['\r', '\n']);
         let (times, content) = split_timestamps(line);
         if times.is_empty() {
-            // 纯元数据标签行（[ti:…] 等）整体丢弃，其余作为无时间文本保留。
+            // 纯元数据标签行（[ti:…] 等）整体丢弃，其余作为无时间文本保留；
+            // offset 标签本身也是元数据行，但要把值留下来应用到行时间上。
             if !is_meta_tag_line(line) {
                 untimed.push(clean_content(line).trim().to_owned());
+            } else if let Some(v) = parse_offset_tag(line) {
+                offset_ms = v;
             }
             continue;
         }
@@ -105,7 +121,8 @@ pub fn parse_lyric(text: &str, options: LyricOptions) -> LyricsOutput {
     let mut entries: Vec<Entry> = timed_entries
         .into_iter()
         .map(|(time, content)| Entry {
-            time,
+            // LRC offset：正值让每行提前（时间前移），负的时间钳到 0。
+            time: (time - offset_ms as f64 / 1000.0).max(0.0),
             content,
             trans: None,
             metadata: false,
@@ -337,6 +354,23 @@ mod tests {
     fn sorts_by_time() {
         let out = parse_lyric("[00:09.00]b\n[00:02.00]a", LyricOptions::default());
         assert_eq!(times(&out), vec![2.0, 9.0]);
+    }
+
+    #[test]
+    fn lyric_offset_tag_shifts_times() {
+        // 正值提前：每行时间减 offset，负向钳到 0。
+        let out = parse_lyric(
+            "[offset:+500]\n[00:02.00]a\n[00:05.00]b",
+            LyricOptions::default(),
+        );
+        assert_eq!(times(&out), vec![1.5, 4.5]);
+        let out = parse_lyric("[offset:-1000]\n[00:01.00]a", LyricOptions::default());
+        assert_eq!(times(&out), vec![2.0]);
+        let out = parse_lyric("[offset:+3000]\n[00:01.00]a", LyricOptions::default());
+        assert_eq!(times(&out), vec![0.0]);
+        // 非法值忽略，按没有 offset 处理。
+        let out = parse_lyric("[offset:abc]\n[00:01.00]a", LyricOptions::default());
+        assert_eq!(times(&out), vec![1.0]);
     }
 
     #[test]

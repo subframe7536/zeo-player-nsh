@@ -277,6 +277,95 @@ fn equalizer_preset_applies_and_persists() {
     assert!(saved(false), "结束时恢复关闭: {:?}", saved_eq());
 }
 
+/// 数据目录里 library.json 的 global_lyrics_offset_ms（保存在后台线程，
+/// 调用方轮询）。
+fn saved_global_offset() -> Option<i64> {
+    let file =
+        std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap()).join("library.json");
+    std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v["global_lyrics_offset_ms"].as_i64())
+}
+
+/// 全屏歌词区右上角的每曲偏移控件：±0.5s 步进、显示、重置清零。
+#[test]
+fn lyrics_offset_nudges_and_resets() {
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("zeo-player-test-music").unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+    double_press(&mut app, "role:button[测试歌曲]");
+    app.press("label:全屏播放").unwrap();
+    app.wait_for("label:歌词提前").unwrap();
+    app.press("label:歌词提前").unwrap();
+    app.press("label:歌词提前").unwrap();
+    app.wait_for("+1.0s").unwrap();
+    app.wait_for("label:重置歌词偏移").unwrap();
+    app.press("label:重置歌词偏移").unwrap();
+    app.wait_for("偏移 0s").unwrap();
+    // 共享播放器：别让它放着歌去影响别的用例。
+    zeo_player::engine::Player::global().pause();
+}
+
+/// 设置 →「歌词」分类的「全局歌词偏移」数字输入：正常值、钳到 ±30000、
+/// 非法回退；设好后全屏歌词区的小字提示出现（每曲那份不受影响）。
+#[test]
+fn lyrics_offset_global_saves() {
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[歌词]").unwrap();
+    app.wait_for("label:全局歌词偏移").unwrap();
+    let field = "label:全局歌词偏移";
+    let saved = |ms: i64| {
+        for _ in 0..40 {
+            if saved_global_offset() == Some(ms) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    };
+    app.clear(field).unwrap();
+    app.type_text(field, "300\n").unwrap();
+    assert!(saved(300), "应为 300: {:?}", saved_global_offset());
+    app.clear(field).unwrap();
+    app.type_text(field, "99999\n").unwrap();
+    assert!(saved(30000), "应钳到 30000: {:?}", saved_global_offset());
+    app.clear(field).unwrap();
+    app.type_text(field, "abc\n").unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(saved_global_offset(), Some(30000), "非法输入不应改值");
+    // 设回 300 后去全屏看小字提示。
+    app.clear(field).unwrap();
+    app.type_text(field, "300\n").unwrap();
+    assert!(saved(300), "改回 300: {:?}", saved_global_offset());
+    app.press("label:关闭设置").unwrap();
+    app.press("zeo-player-test-music").unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+    double_press(&mut app, "role:button[测试歌曲]");
+    app.press("label:全屏播放").unwrap();
+    app.wait_for("label:歌词提前").unwrap();
+    app.wait_for("全局 +0.3s").unwrap();
+    assert!(has(&app, "偏移 0s"), "每曲偏移不应受影响");
+    // 共享全局配置，用例结束前恢复 0。
+    app.press("label:收起").unwrap();
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[歌词]").unwrap();
+    app.wait_for("label:全局歌词偏移").unwrap();
+    app.clear(field).unwrap();
+    app.type_text(field, "0\n").unwrap();
+    assert!(saved(0), "结束时恢复 0: {:?}", saved_global_offset());
+    zeo_player::engine::Player::global().pause();
+}
+
 /// 设置弹窗 →「外观」分类 →「外观」下拉：选深色 / 浅色立即换色板
 /// （文字颜色即变），回到「系统」。
 #[test]

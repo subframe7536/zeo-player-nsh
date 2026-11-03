@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::metadata::{CacheEntry, MetaInfo};
 
 /// 当前表结构版本（`PRAGMA user_version`）。改表时加一，并在 [`migrate`] 里迁移。
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS tracks (
@@ -109,6 +109,16 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
              ALTER TABLE tracks ADD COLUMN rg_track_peak REAL;
              ALTER TABLE tracks ADD COLUMN rg_album_gain REAL;
              ALTER TABLE tracks ADD COLUMN rg_album_peak REAL;",
+        )?;
+    }
+    if version < 5 {
+        // 每首曲目的手动歌词偏移（毫秒，正值 = 提前）。跟随文件移动；
+        // 重建曲库不清。
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS lyrics_offsets (
+                path TEXT PRIMARY KEY,
+                offset_ms INTEGER NOT NULL
+            );",
         )?;
     }
     if version < SCHEMA_VERSION {
@@ -297,26 +307,54 @@ pub fn retain_meta(keep: &HashSet<String>) {
     });
 }
 
+fn remove_meta_on(conn: &Connection, path: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM tracks WHERE path = ?1", [path])?;
+    conn.execute("DELETE FROM lyrics_offsets WHERE path = ?1", [path])?;
+    Ok(())
+}
+
+fn remove_meta_under_on(conn: &Connection, path: &str) -> rusqlite::Result<()> {
+    let sep = std::path::MAIN_SEPARATOR;
+    let trimmed = path.trim_end_matches(sep);
+    let under = format!("{trimmed}{sep}");
+    conn.execute(
+        "DELETE FROM tracks WHERE path = ?1 OR substr(path, 1, ?2) = ?3",
+        params![trimmed, under.len() as i64, under],
+    )?;
+    conn.execute(
+        "DELETE FROM lyrics_offsets WHERE path = ?1 OR substr(path, 1, ?2) = ?3",
+        params![trimmed, under.len() as i64, under],
+    )?;
+    Ok(())
+}
+
 /// 删掉 `path` 的元数据行（界面「删除记录」）。
 pub fn remove_meta(path: &str) {
-    with("删除元数据", |conn| {
-        conn.execute("DELETE FROM tracks WHERE path = ?1", [path])
-            .map(|_| ())
-    });
+    with("删除元数据", |conn| remove_meta_on(conn, path));
 }
 
 /// 删掉 `path` 下（含自身）的元数据行（文件夹删除 / 根摘除）。
 pub fn remove_meta_under(path: &str) {
-    let sep = std::path::MAIN_SEPARATOR;
-    let trimmed = path.trim_end_matches(sep);
-    let under = format!("{trimmed}{sep}");
-    with("删除元数据", |conn| {
-        conn.execute(
-            "DELETE FROM tracks WHERE path = ?1 OR substr(path, 1, ?2) = ?3",
-            params![trimmed, under.len() as i64, under],
-        )
-        .map(|_| ())
-    });
+    with("删除元数据", |conn| remove_meta_under_on(conn, path));
+}
+
+fn move_meta_on(conn: &Connection, rows: &[(String, String, u64, u64)]) -> rusqlite::Result<()> {
+    {
+        let mut stmt = conn.prepare_cached(
+            "UPDATE tracks SET path = ?1, stamp = ?2, modified = ?3 WHERE path = ?4",
+        )?;
+        for (old, new, stamp, modified) in rows {
+            stmt.execute(params![new, *stamp as i64, *modified as i64, old])?;
+        }
+    }
+    {
+        // 每曲歌词偏移跟随文件移动 / 改名。
+        let mut stmt = conn.prepare_cached("UPDATE lyrics_offsets SET path = ?1 WHERE path = ?2")?;
+        for (old, new, ..) in rows {
+            stmt.execute(params![new, old])?;
+        }
+    }
+    Ok(())
 }
 
 /// `rows = (旧路径, 新路径, 新指纹, 新修改时间)`：文件 / 文件夹移动或改
@@ -327,14 +365,7 @@ pub fn move_meta(rows: &[(String, String, u64, u64)]) {
     }
     with("换元数据路径", |conn| {
         let tx = conn.transaction()?;
-        {
-            let mut stmt = tx.prepare_cached(
-                "UPDATE tracks SET path = ?1, stamp = ?2, modified = ?3 WHERE path = ?4",
-            )?;
-            for (old, new, stamp, modified) in rows {
-                stmt.execute(params![new, *stamp as i64, *modified as i64, old])?;
-            }
-        }
+        move_meta_on(&tx, rows)?;
         tx.commit()
     });
 }
@@ -343,6 +374,42 @@ pub fn move_meta(rows: &[(String, String, u64, u64)]) {
 pub fn clear_meta() {
     with("清空元数据", |conn| {
         conn.execute("DELETE FROM tracks", []).map(|_| ())
+    });
+}
+
+// --- 每曲歌词偏移 -------------------------------------------------------------
+
+fn lyrics_offset_on(conn: &Connection, path: &str) -> rusqlite::Result<i64> {
+    conn.query_row(
+        "SELECT offset_ms FROM lyrics_offsets WHERE path = ?1",
+        [path],
+        |r| r.get(0),
+    )
+    .optional()
+    .map(|v| v.unwrap_or(0))
+}
+
+fn set_lyrics_offset_on(conn: &Connection, path: &str, offset_ms: i64) -> rusqlite::Result<()> {
+    if offset_ms == 0 {
+        conn.execute("DELETE FROM lyrics_offsets WHERE path = ?1", [path])?;
+    } else {
+        conn.execute(
+            "INSERT OR REPLACE INTO lyrics_offsets (path, offset_ms) VALUES (?1, ?2)",
+            params![path, offset_ms],
+        )?;
+    }
+    Ok(())
+}
+
+/// `path` 的手动歌词偏移（毫秒）；没有为 0。
+pub fn lyrics_offset(path: &str) -> i64 {
+    with("读歌词偏移", |conn| lyrics_offset_on(conn, path)).unwrap_or(0)
+}
+
+/// 设置 `path` 的手动歌词偏移（毫秒，正值 = 提前）；0 删除该行。
+pub fn set_lyrics_offset(path: &str, offset_ms: i64) {
+    with("写歌词偏移", |conn| {
+        set_lyrics_offset_on(conn, path, offset_ms)
     });
 }
 
@@ -485,5 +552,88 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].0, "a.flac");
         assert_eq!(rows[0].1.value.replaygain, rg);
+    }
+
+    /// 每曲歌词偏移：写入读回；归零删行。
+    #[test]
+    fn lyric_offset_roundtrip() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        set_lyrics_offset_on(&conn, "/m/a.flac", 500).unwrap();
+        assert_eq!(lyrics_offset_on(&conn, "/m/a.flac").unwrap(), 500);
+        set_lyrics_offset_on(&conn, "/m/a.flac", 0).unwrap();
+        assert_eq!(lyrics_offset_on(&conn, "/m/a.flac").unwrap(), 0);
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM lyrics_offsets", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
+    /// 文件移动 / 改名把偏移换到新路径。
+    #[test]
+    fn lyric_offset_follows_move() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        set_lyrics_offset_on(&conn, "/m/a.flac", 500).unwrap();
+        move_meta_on(
+            &conn,
+            &[("/m/a.flac".to_owned(), "/n/a.flac".to_owned(), 1, 1)],
+        )
+        .unwrap();
+        assert_eq!(lyrics_offset_on(&conn, "/m/a.flac").unwrap(), 0);
+        assert_eq!(lyrics_offset_on(&conn, "/n/a.flac").unwrap(), 500);
+    }
+
+    /// 文件夹删除清掉下面的偏移，外面的不动。
+    #[test]
+    fn lyric_offset_removed_under_folder() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let dir = format!("{}m{}x", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR);
+        let inside = format!("{dir}{}a.flac", std::path::MAIN_SEPARATOR);
+        let outside = format!("{}m{}y.flac", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR);
+        set_lyrics_offset_on(&conn, &inside, 300).unwrap();
+        set_lyrics_offset_on(&conn, &outside, 400).unwrap();
+        remove_meta_under_on(&conn, &dir).unwrap();
+        assert_eq!(lyrics_offset_on(&conn, &inside).unwrap(), 0);
+        assert_eq!(lyrics_offset_on(&conn, &outside).unwrap(), 400);
+    }
+
+    /// v4 库迁到 v5：lyrics_offsets 表出现、老行还在。
+    #[test]
+    fn migrate_from_v4_keeps_tracks() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE tracks ADD COLUMN art_hue REAL;
+             ALTER TABLE tracks ADD COLUMN art_sat REAL;
+             UPDATE tracks SET lyrics = NULL;
+             ALTER TABLE tracks ADD COLUMN rg_track_gain REAL;
+             ALTER TABLE tracks ADD COLUMN rg_track_peak REAL;
+             ALTER TABLE tracks ADD COLUMN rg_album_gain REAL;
+             ALTER TABLE tracks ADD COLUMN rg_album_peak REAL;
+             PRAGMA user_version = 4;",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tracks (path, stamp, size, modified, title, artist, album, \
+             album_artist, duration, has_art, genres, album_artists, composers) \
+             VALUES ('a.flac', 1, 1, 1, 't', 'a', 'al', 'aa', 1.0, 0, '[]', '[]', '[]')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+        let version: i32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM tracks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        // 新表可写。
+        set_lyrics_offset_on(&conn, "a.flac", 100).unwrap();
+        assert_eq!(lyrics_offset_on(&conn, "a.flac").unwrap(), 100);
     }
 }

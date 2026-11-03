@@ -171,6 +171,9 @@ pub struct LibraryConfig {
     /// 本地同名 `.lrc` 优先于内嵌歌词。
     #[serde(default = "default_true")]
     pub prefer_local_lyrics: bool,
+    /// 全局歌词偏移（毫秒，正值 = 歌词提前显示；与每首曲目的手动偏移相加生效）。
+    #[serde(default)]
+    pub global_lyrics_offset_ms: i64,
     /// 本地同名图片（jpg / jpeg / png / webp）优先于内嵌封面。
     #[serde(default = "default_true")]
     pub prefer_local_covers: bool,
@@ -243,6 +246,7 @@ impl Default for LibraryConfig {
             min_duration_secs: default_min_duration_secs(),
             min_size_kb: default_min_size_kb(),
             prefer_local_lyrics: default_true(),
+            global_lyrics_offset_ms: 0,
             prefer_local_covers: default_true(),
             show_covers: default_true(),
             delete_permanently: false,
@@ -460,6 +464,11 @@ impl LibraryStore {
 
     pub fn set_prefer_local_lyrics(&self, on: bool) {
         self.update_config(|c| c.prefer_local_lyrics = on);
+    }
+
+    /// 设置全局歌词偏移（保存）。
+    pub fn set_global_lyrics_offset_ms(&self, ms: i64) {
+        self.update_config(|c| c.global_lyrics_offset_ms = ms);
     }
 
     /// 本地同名图片文件是否优先于内嵌封面。
