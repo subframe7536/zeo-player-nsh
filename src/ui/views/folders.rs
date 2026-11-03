@@ -620,7 +620,9 @@ fn stop_if_playing_under(path: &str) {
     let under = format!("{trimmed}{SEP}");
     if player()
         .state()
+        .track
         .path
+        .as_deref()
         .is_some_and(|p| p == trimmed || p.starts_with(&under))
     {
         player().stop();
@@ -984,7 +986,7 @@ pub fn Folders() -> impl IntoElement {
     // 根文件夹默认展开（构造时从配置同步拿到根目录）。
     let expanded = signal(
         s.library
-            .with_untracked(|l| l.roots.iter().cloned().collect::<BTreeSet<String>>()),
+            .with_untracked(|l| l.config.roots.iter().cloned().collect::<BTreeSet<String>>()),
     );
     let message = signal(String::new());
     let dropping = signal(false);
@@ -993,7 +995,7 @@ pub fn Folders() -> impl IntoElement {
     let extra = signal(BTreeSet::<String>::new());
     let op = signal(None::<FileOp>);
     let tree = computed(move || {
-        let roots = s.library.with(|l| l.roots.clone());
+        let roots = s.library.with(|l| l.config.roots.clone());
         let tracks = s.tracks.get();
         let extra: Vec<String> = extra
             .get()
@@ -1127,7 +1129,7 @@ pub fn Folders() -> impl IntoElement {
         .on_file_drag_leave(move || dropping.set(false))
         .on_file_drop(on_drop)
         .child(
-            when(move || s.library.with(|l| l.roots.is_empty()), no_library).otherwise(move || {
+            when(move || s.library.with(|l| l.config.roots.is_empty()), no_library).otherwise(move || {
                 let (select, toggle, ctx, ops) =
                     (select.clone(), toggle.clone(), ctx.clone(), ops.clone());
                 let cell_ctx = ctx.clone();
@@ -1339,7 +1341,7 @@ pub fn Folders() -> impl IntoElement {
 fn rescan_button() -> nsh_base::ButtonElement {
     let s = store();
     icon_button(|| Icon::Refresh, 16.0, "重新扫描", muted_fg, scan)
-        .disabled(move || s.library.with(|l| l.scanning))
+        .disabled(move || s.library.with(|l| l.progress.scanning))
 }
 
 /// 树里的一行：缩进 + 折叠箭头（叶子为占位）+ 文件夹图标 + 名字 + 曲目

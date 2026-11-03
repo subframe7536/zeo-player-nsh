@@ -298,7 +298,7 @@ fn bench(open_full: Rc<dyn Fn()>) {
         let step = |name: &str| eprintln!("ZEO_PLAYER_BENCH step {name}");
         let wait = |s: u64| timer(std::time::Duration::from_secs(s));
         // 等扫描结束。
-        while store::store().library.with_untracked(|l| l.scanning)
+        while store::store().library.with_untracked(|l| l.progress.scanning)
             || store::store().tracks.with_untracked(|t| t.is_empty())
         {
             wait(1).await;

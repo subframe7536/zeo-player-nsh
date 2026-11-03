@@ -98,7 +98,7 @@ fn lyrics_scroller() -> View {
         .expect("lyrics_scroller is shown with lyrics");
     let timed = lines.timed;
     let count = lines.lines.len();
-    let align = move || s.library.with(|l| l.lyrics_align);
+    let align = move || s.library.with(|l| l.config.lyrics_align);
 
     // 打开全屏（或歌词刚载入）时直接定位到高亮行，不带动画；定位好之前
     // 歌词隐藏，不会先显示开头再滚过去。

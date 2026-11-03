@@ -187,16 +187,20 @@ pub enum EngineCmd {
     SetLoopMode(LoopMode),
 }
 
-/// 曲目公开状态（跨线程读）。
-#[derive(Default)]
+/// 曲目公开状态（跨线程读）：冷字段——换曲 / 封面就绪 / 队列 / 出错
+/// 才变。`Shared::track` 用 `Mutex<Arc<..>>` 持有它：读侧克隆 `Arc`
+/// 只加引用计数，写侧整份换新 `Arc`（指针判变化——不能原地改）。
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrackPublic {
     pub path: Option<String>,
     pub title: String,
     pub artist: String,
     pub album: String,
-    pub artwork: Option<String>,
+    /// 大封面 `data:` URI（`Arc` 共享：快照克隆只加引用计数——轮询
+    /// 每 100ms 取一次快照，克隆 String 会是每秒几 MB 的堆流量）。
+    pub artwork: Option<Arc<str>>,
     /// 全屏背景（预先模糊的小图）。
-    pub backdrop: Option<String>,
+    pub backdrop: Option<Arc<str>>,
     /// 这首的封面已生成（`artwork` / `backdrop` 为 `None` 时即确实没有封面）。
     pub covers_ready: bool,
     pub duration: f64,
@@ -214,7 +218,8 @@ pub struct Shared {
     pub played: AtomicU64, // 输出帧计数（含 seek 基线）
     pub dev_rate: AtomicU32,
     pub ring: Ring,
-    pub track: Mutex<TrackPublic>,
+    /// 冷字段的共享快照（所有写路径换新 `Arc`，见 [`TrackPublic`]）。
+    pub track: Mutex<Arc<TrackPublic>>,
     /// 淡入淡出时长（毫秒；0 关闭）。
     pub fade_ms: AtomicU32,
     /// 淡变目标（f32 位，0 或 1；回调朝它推进 `gain`）。
@@ -241,51 +246,31 @@ impl Shared {
     }
 }
 
-/// 面向 TSX 的完整状态快照。
+/// 面向 TSX 的完整状态快照：热字段（进度、开关，约 10 Hz 变）拍平，
+/// 冷字段（曲目信息）只带一份共享 `Arc`——UI 轮询按 `Arc::ptr_eq`
+/// 判曲目是否变了，不用每次克隆十几份字段再逐个比较。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
     pub is_playing: bool,
     pub is_loading: bool,
     pub is_ready: bool,
     pub current_time: f64,
-    pub duration: f64,
     pub volume: f64,
-    pub path: Option<String>,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub artwork: Option<String>,
-    /// 全屏背景（预先模糊的小图）。
-    pub backdrop: Option<String>,
-    /// 这首的封面已生成。
-    pub covers_ready: bool,
-    pub queue: Arc<Vec<String>>,
-    pub queue_index: i64,
     pub loop_mode: LoopMode,
-    pub error: Option<String>,
+    /// 当前曲目状态（冷字段的共享快照）。
+    pub track: Arc<TrackPublic>,
 }
 
 impl Shared {
     pub fn snapshot(&self) -> Snapshot {
-        let track = self.track.lock().unwrap();
         Snapshot {
             is_playing: self.playing.load(Ordering::Relaxed),
             is_loading: self.loading.load(Ordering::Relaxed),
             is_ready: self.ready.load(Ordering::Relaxed),
             current_time: (self.current_time() * 100.0).round() / 100.0, // timeupdate 精度 0.01s
-            duration: track.duration,
             volume: self.volume(),
-            path: track.path.clone(),
-            title: track.title.clone(),
-            artist: track.artist.clone(),
-            album: track.album.clone(),
-            artwork: track.artwork.clone(),
-            backdrop: track.backdrop.clone(),
-            covers_ready: track.covers_ready,
-            queue: track.queue.clone(),
-            queue_index: track.queue_index,
             loop_mode: self.loop_mode(),
-            error: track.error.clone(),
+            track: self.track.lock().unwrap().clone(),
         }
     }
 }
@@ -311,7 +296,7 @@ impl EngineHandle {
             played: AtomicU64::new(0),
             dev_rate: AtomicU32::new(48_000),
             ring: Ring::new(),
-            track: Mutex::new(TrackPublic::default()),
+            track: Mutex::new(Arc::new(TrackPublic::default())),
             loop_mode: AtomicU8::new(0),
             cover_gen: AtomicU64::new(0),
         });
@@ -818,8 +803,9 @@ fn handle_cmd(
             shared.loop_mode.store(mode as u8, Ordering::Relaxed);
             // 队列按新模式重排：顺序 / 单曲是原序，随机洗牌；当前曲目
             // 跟着挪到它在新顺序里的位置。
-            let mut t = shared.track.lock().unwrap();
             let queue = ordered_queue(base_queue, mode);
+            let mut slot = shared.track.lock().unwrap();
+            let mut t = (**slot).clone();
             if let Some(path) = &t.path {
                 t.queue_index = queue
                     .iter()
@@ -828,6 +814,7 @@ fn handle_cmd(
                     .unwrap_or(t.queue_index.max(0));
             }
             t.queue = queue;
+            *slot = Arc::new(t);
         }
     }
 }
@@ -938,24 +925,23 @@ fn load_track(
             // 冷缓存生成）。
             let artwork = crate::metadata::covers::cached_artwork(&path);
             let backdrop = crate::metadata::covers::cached_list(&path);
-            {
-                let mut t = shared.track.lock().unwrap();
-                t.path = Some(path.to_string_lossy().into_owned());
-                t.title = meta.title.clone();
-                t.artist = meta.artist.clone();
-                t.album = meta.album.clone();
-                // 大图是按需读元数据生成的 data URI，不落盘；背景复用
-                // 列表封面的 96px 文件。
-                t.artwork = artwork;
-                t.backdrop = backdrop
+            // 大图是按需读元数据生成的 data URI，不落盘；背景复用
+            // 列表封面的 96px 文件。
+            *shared.track.lock().unwrap() = Arc::new(TrackPublic {
+                path: Some(path.to_string_lossy().into_owned()),
+                title: meta.title.clone(),
+                artist: meta.artist.clone(),
+                album: meta.album.clone(),
+                covers_ready: artwork.is_some() && backdrop.is_some(),
+                artwork,
+                backdrop: backdrop
                     .as_ref()
-                    .map(|(_, f)| f.to_string_lossy().into_owned());
-                t.covers_ready = t.artwork.is_some() && t.backdrop.is_some();
-                t.duration = meta.duration;
-                t.queue = queue;
-                t.queue_index = actual_index;
-                t.error = None;
-            }
+                    .map(|(_, f)| Arc::from(f.to_string_lossy().as_ref())),
+                duration: meta.duration,
+                queue,
+                queue_index: actual_index,
+                error: None,
+            });
             shared.ready.store(true, Ordering::Relaxed);
             // 封面由引擎循环在缓冲填起来之后生成（`load_covers`）。
             media.set_artwork_file(
@@ -988,15 +974,17 @@ fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
         let cover = crate::metadata::covers::artwork_uri(file);
         let backdrop = crate::metadata::covers::list_cover_pub(file);
         {
-            let mut t = shared.track.lock().unwrap();
+            let mut slot = shared.track.lock().unwrap();
             if shared.cover_gen.load(Ordering::Relaxed) != gen_id
-                || t.path.as_deref() != Some(path.as_str())
+                || slot.path.as_deref() != Some(path.as_str())
             {
                 return;
             }
+            let mut t = (**slot).clone();
             t.artwork = cover;
-            t.backdrop = backdrop.clone();
+            t.backdrop = backdrop.as_deref().map(Arc::from);
             t.covers_ready = true;
+            *slot = Arc::new(t);
         }
         media.set_artwork_file(backdrop.map(|c| file_url(&c)));
         publish_media(&shared, &media, true);
@@ -1024,7 +1012,14 @@ fn reset_ring(shared: &Arc<Shared>, seconds: f64, dev_rate: u32) {
 
 fn set_error(shared: &Arc<Shared>, message: &str) {
     eprintln!("zeo-player: {message}");
-    shared.track.lock().unwrap().error = Some(message.to_owned());
+    let mut slot = shared.track.lock().unwrap();
+    // 同一条错误不换快照（不然解码失败的循环每秒都刷一遍界面）。
+    if slot.error.as_deref() == Some(message) {
+        return;
+    }
+    let mut t = (**slot).clone();
+    t.error = Some(message.to_owned());
+    *slot = Arc::new(t);
 }
 
 /// 解码一块并写入环形缓冲；返回 Ok(true) 表示自然结束。缓冲放不下的部分
@@ -1202,7 +1197,7 @@ mod tests {
                 assert_eq!(ring.push(&vec![1.0_f32; 48_000 * 2], 2), 48_000 * 2);
                 ring
             },
-            track: Mutex::new(TrackPublic::default()),
+            track: Mutex::new(Arc::new(TrackPublic::default())),
             fade_ms: AtomicU32::new(200),
             fade_target: AtomicU32::new(1f32.to_bits()),
             gain: AtomicU32::new(0f32.to_bits()),

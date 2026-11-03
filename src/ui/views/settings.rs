@@ -76,7 +76,7 @@ fn folders_section() -> View {
     };
 
     let counts = computed(move || {
-        let roots = s.library.with(|l| l.roots.clone());
+        let roots = s.library.with(|l| l.config.roots.clone());
         let tracks = s.tracks.get();
         roots
             .iter()
@@ -91,7 +91,7 @@ fn folders_section() -> View {
     });
 
     let rows = dynamic(move || {
-        let roots = s.library.with(|l| l.roots.clone());
+        let roots = s.library.with(|l| l.config.roots.clone());
         if roots.is_empty() {
             return vec![
                 view()
@@ -241,7 +241,7 @@ fn folders_section() -> View {
 fn library_section() -> View {
     let s = store();
     let progress = move || s.library.with(|l| l.progress.clone());
-    let scanning = move || s.library.with(|l| l.scanning);
+    let scanning = move || s.library.with(|l| l.progress.scanning);
     let fraction = move || {
         let p = progress();
         if p.total > 0 {
@@ -376,7 +376,7 @@ fn delete_section() -> View {
     setting_section("删除文件", "曲目右键菜单「删除文件…」的行为。", None).child(pref_row(
         "直接删除文件",
         "开启后删除文件不经过回收站（不可恢复）；关闭时文件先移到回收站。",
-        move || s.library.with(|l| l.delete_permanently),
+        move || s.library.with(|l| l.config.delete_permanently),
         super::super::store::set_delete_permanently,
     ))
 }
@@ -392,13 +392,13 @@ fn covers_source_section() -> View {
     .child(pref_row(
         "本地图片优先",
         "使用同目录的同名图片（jpg / jpeg / png / webp）作为封面；关闭则优先内嵌封面。",
-        move || s.library.with(|l| l.prefer_local_covers),
+        move || s.library.with(|l| l.config.prefer_local_covers),
         super::super::store::set_prefer_local_covers,
     ))
     .child(pref_row(
         "在列表中显示封面",
         "关闭后曲目行、网格与队列只显示标题首字，不再解码封面，滚动大曲库更省内存。",
-        move || s.library.with(|l| l.show_covers),
+        move || s.library.with(|l| l.config.show_covers),
         super::super::store::set_show_covers,
     ))
 }
@@ -465,11 +465,11 @@ fn pref_row(
 /// 文件夹监视开关与状态。
 fn watch_row() -> View {
     let s = store();
-    let on = move || s.library.with(|l| l.watching);
+    let on = move || s.library.with(|l| l.config.watch);
     let status = move || {
         s.library.with(|l| {
-            let w = &l.watch;
-            if !l.watching {
+            let w = &l.watcher;
+            if !l.config.watch {
                 return "关闭时，文件夹里的变化要手动「扫描更新」才会出现。".to_owned();
             }
             if let Some(error) = &w.error {
@@ -538,7 +538,7 @@ fn watch_row() -> View {
                         .text_size(px(12.0))
                         .line_height(px(12.0))
                         .text_color(move || {
-                            if s.library.with(|l| l.watching && l.watch.error.is_some()) {
+                            if s.library.with(|l| l.config.watch && l.watcher.error.is_some()) {
                                 nsh_base::theme().destructive
                             } else {
                                 muted_fg()
@@ -589,7 +589,7 @@ fn separator_label(sep: &str) -> String {
 fn genres_section() -> View {
     let s = store();
     let draft = signal(String::new());
-    let separators = move || s.library.with(|l| l.separators.clone());
+    let separators = move || s.library.with(|l| l.config.genre_separators.clone());
     let toggle = move |sep: String| {
         let mut list = separators();
         if let Some(i) = list.iter().position(|x| *x == sep) {
@@ -829,7 +829,7 @@ fn filter_section() -> View {
     ];
     let row = |label: &'static str,
                options: &'static [(u32, &'static str)],
-               field: fn(&super::super::store::LibraryState) -> u32,
+               field: fn(&crate::config::LibraryConfig) -> u32,
                set: fn(u32)| {
         view()
             .flex_row()
@@ -849,7 +849,7 @@ fn filter_section() -> View {
                 super::super::components::radio::group_row().children(options.iter().map(
                     |&(value, name)| {
                         super::super::components::radio::item(
-                            move || s.library.with(|l| field(l) == value),
+                            move || s.library.with(|l| field(&l.config) == value),
                             name,
                             move || set(value),
                         )
@@ -866,13 +866,13 @@ fn filter_section() -> View {
     .child(row(
         "最小时长",
         DURATIONS,
-        |l| l.min_duration_secs,
+        |c| c.min_duration_secs,
         super::super::store::set_min_duration_secs,
     ))
     .child(row(
         "最小大小",
         SIZES,
-        |l| l.min_size_kb,
+        |c| c.min_size_kb,
         super::super::store::set_min_size_kb,
     ))
 }
@@ -899,7 +899,7 @@ fn appearance_select() -> AnyElement {
     let current_mode = move || {
         OPTIONS
             .iter()
-            .find(|(m, _, _)| *m == s.library.with(|l| l.appearance))
+            .find(|(m, _, _)| *m == s.library.with(|l| l.config.appearance))
             .copied()
     };
     let current = move || current_mode().map_or("系统", |(_, _, l)| l).to_owned();
@@ -962,7 +962,7 @@ fn accent_section() -> View {
 fn accent_swatch(mode: ThemeColor, label: &'static str) -> nsh_base::ButtonElement {
     use super::super::store::accent;
     let preset = preset_accent(mode);
-    let on = move || store().library.with(|l| l.theme_color) == mode;
+    let on = move || store().library.with(|l| l.config.theme_color) == mode;
     nsh_base::button()
         .size(px(24.0))
         .rounded_full()
@@ -1018,7 +1018,7 @@ fn font_select() -> AnyElement {
     use nsh_base::{PopoverEvent, popover};
     let s = store();
     let open = signal(false);
-    let current = move || s.library.with(|l| l.font.clone());
+    let current = move || s.library.with(|l| l.config.font.clone());
     // 触发器是普通 view（popover 接管按压）：select_trigger 的外壳 +
     // chevron，名字用所选字体渲染，所见即所得。
     let trigger = super::super::components::form::trigger_shell("字体", 200.0)
@@ -1104,7 +1104,7 @@ fn font_choice(
 fn font_panel(open: Signal<bool>) -> View {
     let s = store();
     let query = signal(String::new());
-    let current = move || s.library.with(|l| l.font.clone());
+    let current = move || s.library.with(|l| l.config.font.clone());
     // None：还在读取。任务属于这一块，块销毁时一起取消。
     let installed = signal(None::<Same<Vec<String>>>);
     spawn(async move {
@@ -1194,7 +1194,7 @@ fn playback_section() -> View {
         None,
     )
     .child(super::super::components::radio::group_row().children(STEPS.iter().map(|&(ms, label)| {
-        super::super::components::radio::item(move || s.library.with(|l| l.fade_ms == ms), label, move || super::super::store::set_fade_ms(ms))
+        super::super::components::radio::item(move || s.library.with(|l| l.config.fade_ms == ms), label, move || super::super::store::set_fade_ms(ms))
     })))
 }
 
@@ -1211,7 +1211,7 @@ fn lyrics_section() -> View {
         super::super::components::radio::group_row().children(OPTIONS.iter().map(
             |&(align, label)| {
                 super::super::components::radio::item(
-                    move || s.library.with(|l| l.lyrics_align == align),
+                    move || s.library.with(|l| l.config.lyrics_align == align),
                     label,
                     move || super::super::store::set_lyrics_align(align),
                 )
@@ -1231,7 +1231,7 @@ fn lyrics_source_section() -> View {
     .child(pref_row(
         "本地歌词优先",
         "使用同目录的同名 .lrc 文件作为歌词；关闭则优先内嵌歌词。",
-        move || s.library.with(|l| l.prefer_local_lyrics),
+        move || s.library.with(|l| l.config.prefer_local_lyrics),
         super::super::store::set_prefer_local_lyrics,
     ))
 }
@@ -1242,7 +1242,7 @@ fn window_section() -> View {
     let s = store();
     let option = move |action: CloseAction, label: &'static str, hint: &'static str| {
         super::super::components::radio::card(
-            move || s.library.with(|l| l.close_action == action),
+            move || s.library.with(|l| l.config.close_action == action),
             label,
             hint,
             move || super::super::store::set_close_action(action),
@@ -1267,7 +1267,7 @@ fn window_section() -> View {
     .child(pref_row(
         "记住窗口大小和位置",
         "重新打开时恢复上次的窗口大小与位置；关掉后已存的位置丢弃。",
-        move || s.library.with(|l| l.remember_frame),
+        move || s.library.with(|l| l.config.remember_frame),
         super::super::store::set_remember_frame,
     ))
 }

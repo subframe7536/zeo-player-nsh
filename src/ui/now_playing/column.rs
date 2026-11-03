@@ -138,7 +138,7 @@ pub(super) fn left_column(swap: &Swap) -> View {
 
     let tags = dynamic(move || {
         // 流派按设置里的分隔符拆开（和标签页一致），分隔符一改就跟着变。
-        let separators = s.library.with(|l| l.separators.clone());
+        let separators = s.library.with(|l| l.config.genre_separators.clone());
         let list: Vec<(String, bool)> = s.meta.with(|m| {
             let Some(m) = m else { return Vec::new() };
             let mut out = Vec::new();

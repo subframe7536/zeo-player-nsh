@@ -272,6 +272,6 @@ mod real_library {
             started.elapsed()
         );
         store.set_separators(&["/".into()]);
-        assert_eq!(store.separators(), vec!["/"]);
+        assert_eq!(store.config().genre_separators, vec!["/"]);
     }
 }

@@ -313,7 +313,7 @@ fn adaptive_body(search: SearchFocus, search_page: SearchFocus) -> View {
                         .child(
                             text(move || {
                                 s.library.with(|l| {
-                                    if l.scanning {
+                                    if l.progress.scanning {
                                         "正在扫描曲库…".to_owned()
                                     } else {
                                         format!("{} 首曲目", s.tracks.with(|t| t.len()))

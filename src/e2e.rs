@@ -127,7 +127,7 @@ fn end_to_end_playback() {
         wait_for(3000, || player.state().is_ready
             && player.state().is_playing),
         "mp3 装载并开始播放: {:?}",
-        player.state().error
+        player.state().track.error
     );
     assert!(
         wait_for(2500, || player.state().current_time > 0.25),
@@ -146,19 +146,19 @@ fn end_to_end_playback() {
 
     player.next();
     assert!(
-        wait_for(3000, || player.state().path.as_deref()
+        wait_for(3000, || player.state().track.path.as_deref()
             == Some(wav.to_str().unwrap())),
         "下一首切到 wav: {:?}",
-        player.state().path
+        player.state().track.path
     );
     assert!(player.state().is_playing, "切曲后自动播放");
 
     player.next(); // 到 flac（44.1k → 设备重采样路径）
     assert!(
-        wait_for(3000, || player.state().path.as_deref()
+        wait_for(3000, || player.state().track.path.as_deref()
             == Some(flac.path.as_str())),
         "下一首切到 flac: {:?}",
-        player.state().path
+        player.state().track.path
     );
     // flac 只有 ~2s：先暂停再操作，不然自然播完按顺序循环回绕到第一首。
     player.pause();
@@ -171,10 +171,10 @@ fn end_to_end_playback() {
     );
     player.previous();
     assert!(
-        wait_for(3000, || player.state().path.as_deref()
+        wait_for(3000, || player.state().track.path.as_deref()
             == Some(wav.to_str().unwrap())),
         "上一首回到 wav: {:?}",
-        player.state().path
+        player.state().track.path
     );
     player.stop();
 

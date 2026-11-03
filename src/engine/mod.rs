@@ -66,7 +66,7 @@ impl Player {
     /// 恢复上次播放的曲目（暂停在上次的位置）：还没有曲目、文件还在时才做。
     /// 返回是否恢复了。
     pub fn restore_last(&self) -> bool {
-        if self.state().path.is_some() {
+        if self.state().track.path.is_some() {
             return false;
         }
         let Some((last, mut queue)) = crate::db::last_played() else {
@@ -86,30 +86,30 @@ impl Player {
     /// 恢复。界面轮询时传入快照；换曲、播放 / 暂停、位置变了 2 秒以上或
     /// 队列变了才写（数据库写线程）。退出时不另外保存，最多丢 2 秒进度。
     pub fn remember(&self, snap: &Snapshot) {
-        let Some(path) = snap.path.clone() else {
+        let Some(path) = snap.track.path.as_deref() else {
             return;
         };
         if snap.is_loading {
             return;
         }
-        let last = LastPlayed {
-            path,
-            time: snap.current_time,
-        };
         let mut memory = self.memory.lock().unwrap();
         let moved = memory.playing != snap.is_playing
             || memory
                 .last
                 .as_ref()
-                .is_none_or(|old| old.path != last.path || (old.time - last.time).abs() >= 2.0);
+                .is_none_or(|old| old.path != path || (old.time - snap.current_time).abs() >= 2.0);
         let queue = (!memory
             .queue
             .as_ref()
-            .is_some_and(|q| Arc::ptr_eq(q, &snap.queue)))
-        .then(|| snap.queue.clone());
+            .is_some_and(|q| Arc::ptr_eq(q, &snap.track.queue)))
+        .then(|| snap.track.queue.clone());
         if !moved && queue.is_none() {
             return;
         }
+        let last = LastPlayed {
+            path: path.to_owned(),
+            time: snap.current_time,
+        };
         if moved {
             memory.last = Some(last.clone());
             memory.playing = snap.is_playing;

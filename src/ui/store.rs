@@ -39,6 +39,12 @@ impl<T> std::ops::Deref for Same<T> {
     }
 }
 
+impl<T: Default> Default for Same<T> {
+    fn default() -> Self {
+        Same(Arc::new(T::default()))
+    }
+}
+
 /// 播放进度与开关（≈10 Hz 变化）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Playback {
@@ -67,61 +73,35 @@ pub struct NowPlaying {
     pub index: i64,
 }
 
-/// 曲库概况。
+/// 曲库概况：冷字段是一份配置的共享快照（设置写入才换新 `Arc`，
+/// 轮询按指针判变化），热字段只剩扫描进度与监视器状态。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LibraryState {
-    pub scanning: bool,
-    pub roots: Vec<String>,
+    /// 曲库配置快照（根目录、外观、过滤阈值、各项偏好……）。
+    pub config: Same<crate::config::LibraryConfig>,
+    /// 扫描进度（扫描期间推进，平时不变）。
     pub progress: ScanProgress,
-    pub separators: Vec<String>,
-    pub watching: bool,
-    pub watch: crate::provider::local::watcher::WatchStatus,
-    /// 界面字体（`None`：系统字体）。
-    pub font: Option<String>,
-    pub close_action: crate::config::CloseAction,
-    pub fade_ms: u32,
-    pub lyrics_align: crate::config::LyricsAlign,
-    /// 界面外观（跟随系统 / 浅色 / 深色）。
-    pub appearance: crate::config::Appearance,
-    /// 过滤：短于此时长（秒）/ 小于此大小（KB）的音频不进曲库。
-    pub min_duration_secs: u32,
-    pub min_size_kb: u32,
-    /// 主题色（强调色）。
-    pub theme_color: crate::config::ThemeColor,
-    /// 本地同名 `.lrc` / 图片是否优先于内嵌歌词 / 封面。
-    pub prefer_local_lyrics: bool,
-    pub prefer_local_covers: bool,
-    /// 列表是否显示封面（关掉省解码内存）。
-    pub show_covers: bool,
-    /// 「删除文件」是否不经过回收站、直接删除。
-    pub delete_permanently: bool,
-    /// 重新打开时恢复上次的窗口大小与位置。
-    pub remember_frame: bool,
+    /// 文件夹监视器的运行状态（连接 / 报错；`config.watch` 是设置开关）。
+    pub watcher: crate::provider::local::watcher::WatchStatus,
+}
+
+impl LibraryState {
+    /// 改配置字段：克隆当前快照、应用修改、换新 `Arc`（指针变即通知）。
+    /// 磁盘写入与 `LibraryStore` 侧的正式换新由调用方负责；下轮轮询
+    /// 会把那边换好的 `Arc` 收进来。
+    fn set_config(&mut self, f: impl FnOnce(&mut crate::config::LibraryConfig)) {
+        let mut config = (*self.config).clone();
+        f(&mut config);
+        self.config = Same(Arc::new(config));
+    }
 }
 
 fn library_state() -> LibraryState {
     let lib = library_store();
-    let progress = lib.progress();
     LibraryState {
-        scanning: progress.scanning,
-        roots: lib.roots(),
-        progress,
-        separators: lib.separators(),
-        watching: lib.watching(),
-        watch: crate::provider::local::watcher::status(),
-        font: lib.font(),
-        close_action: lib.close_action(),
-        fade_ms: lib.fade_ms(),
-        lyrics_align: lib.lyrics_align(),
-        appearance: lib.appearance(),
-        min_duration_secs: lib.min_duration_secs(),
-        min_size_kb: lib.min_size_kb(),
-        theme_color: lib.theme_color(),
-        prefer_local_lyrics: lib.prefer_local_lyrics(),
-        prefer_local_covers: lib.prefer_local_covers(),
-        show_covers: lib.show_covers(),
-        delete_permanently: lib.delete_permanently(),
-        remember_frame: lib.remember_frame(),
+        config: Same(lib.config()),
+        progress: lib.progress(),
+        watcher: crate::provider::local::watcher::status(),
     }
 }
 
@@ -144,7 +124,8 @@ pub struct Store {
     pub waveform: Signal<Option<Same<Vec<f64>>>>,
     /// 拖动 seek 时的预览位置（秒），抬起后保留到真实进度追上。
     pub seek_preview: Signal<Option<f64>>,
-    /// 根组件的 owner（封面信号挂在它下面）。
+    /// 根组件的 owner（`later` 的任务挂在它下面；封面信号另有自己的
+    /// 可 dispose owner，见 `COVER_OWNER`）。
     owner: Owner,
     /// 静音前的音量。
     last_volume: Signal<f64>,
@@ -197,6 +178,10 @@ thread_local! {
     /// 每个曲目一份封面信号，带已请求过的最大尺寸（升档去重）。
     static COVERS: RefCell<HashMap<String, (u32, Signal<Option<SharedString>>)>> =
         RefCell::new(HashMap::new());
+    /// 封面信号的 owner：信号都建在它的独立 root 下，隐藏到托盘时
+    /// 整个 dispose——`COVERS` 清掉的只是 `Copy` 句柄，节点与它们存
+    /// 的值要靠 dispose 才真正释放。
+    static COVER_OWNER: RefCell<Option<Owner>> = const { RefCell::new(None) };
 }
 
 /// 界面状态（在 [`install`] 之后可用）。
@@ -218,7 +203,7 @@ pub fn install() -> Store {
         playing: snap.is_playing,
         loading: snap.is_loading,
         time: snap.current_time,
-        duration: snap.duration,
+        duration: snap.track.duration,
         volume: snap.volume,
         loop_mode: snap.loop_mode,
     });
@@ -245,7 +230,7 @@ pub fn install() -> Store {
         owner: Owner::current(),
         last_volume: signal(0.8),
         active_line,
-        queue: signal(Same(snap.queue.clone())),
+        queue: signal(Same(snap.track.queue.clone())),
         hidden: signal(false),
         close_prompt: signal(false),
         search: signal(String::new()),
@@ -271,6 +256,9 @@ pub fn install() -> Store {
     spawn(async move {
         // 跟随封面的强调色：上次请求主色调的曲目。
         let mut accent_track: Option<String> = None;
+        // 上次见到的曲目快照：引擎侧的冷字段整块换新 `Arc`，指针一样
+        // 就说明曲目 / 封面 / 队列 / 错误都没动，跳过整条冷路径。
+        let mut last_track = snap.track;
         loop {
             timer(Duration::from_millis(100)).await;
             let snap = player().state();
@@ -278,16 +266,19 @@ pub fn install() -> Store {
                 playing: snap.is_playing,
                 loading: snap.is_loading,
                 time: snap.current_time,
-                duration: snap.duration,
+                duration: snap.track.duration,
                 volume: snap.volume,
                 loop_mode: snap.loop_mode,
             });
-            s.track.set(now_playing(&snap));
-            s.queue.set(Same(snap.queue.clone()));
+            if !Arc::ptr_eq(&snap.track, &last_track) {
+                last_track = snap.track.clone();
+                s.track.set(now_playing(&snap));
+                s.queue.set(Same(snap.track.queue.clone()));
+            }
             player().remember(&snap);
-            if snap.path != accent_track {
-                accent_track = snap.path.clone();
-                request_accent(&s, snap.path.as_deref());
+            if snap.track.path != accent_track {
+                accent_track = snap.track.path.clone();
+                request_accent(&s, snap.track.path.as_deref());
             }
             drain_covers();
             drain_dominant();
@@ -303,10 +294,16 @@ pub fn install() -> Store {
             }
             let hidden = crate::window::is_hidden();
             if hidden && !s.hidden.get_untracked() {
-                // 刚进托盘：封面信号图可以拆掉（缩略图在磁盘缓存，显示时
-                // 重新请求）；延迟 1 秒等界面拆完，再把空闲堆页还给系统。
+                // 刚进托盘：封面信号的 owner 整个 dispose（缩略图在磁盘
+                // 缓存，显示时重新请求）；延迟 1 秒等界面拆完，再把空闲
+                // 堆页还给系统。
                 COVERS.with(|c| c.borrow_mut().clear());
                 COVER_STAMPS.with(|c| c.borrow_mut().clear());
+                COVER_OWNER.with(|o| {
+                    if let Some(owner) = o.borrow_mut().take() {
+                        owner.dispose();
+                    }
+                });
                 spawn(async {
                     timer(Duration::from_secs(1)).await;
                     crate::window::trim_memory();
@@ -325,25 +322,34 @@ pub fn install() -> Store {
         }
     });
 
-    // 托盘菜单跟着当前曲目与播放状态。
-    effect(move || {
-        let state = crate::window::TrayState {
-            title: s.track.with(|t| {
+    // 托盘菜单跟着当前曲目与播放状态（memo 拦掉进度刷新：订阅整个
+    // playback 信号会让 effect 每 100ms 都跑一次 format! + 通道 +
+    // SetMenuItemInfoW）。
+    let tray_key = computed(move || {
+        let (title, has_track) = s.track.with(|t| {
+            (
                 if t.artist.is_empty() {
                     t.title.clone()
                 } else {
                     format!("{} — {}", t.title, t.artist)
-                }
-            }),
-            playing: s.playback.with(|p| p.playing),
-            has_track: s.track.with(|t| t.path.is_some()),
-        };
-        crate::window::update_tray(state);
+                },
+                t.path.is_some(),
+            )
+        });
+        (title, s.playback.with(|p| p.playing), has_track)
+    });
+    effect(move || {
+        let (title, playing, has_track) = tray_key.get();
+        crate::window::update_tray(crate::window::TrayState {
+            title,
+            playing,
+            has_track,
+        });
     });
 
     // 曲库：扫盘状态、根目录与索引。主题色走全局配置——别处（多窗口 /
     // 其它实例）改了它时重取强调色，不然换曲才刷新的强调色会停在旧值。
-    let mut last_color = s.library.with(|l| l.theme_color);
+    let mut last_color = s.library.with(|l| l.config.theme_color);
     spawn(async move {
         loop {
             timer(Duration::from_millis(120)).await;
@@ -353,8 +359,8 @@ pub fn install() -> Store {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
             }
             let state = library_state();
-            let changed = state.theme_color != last_color;
-            last_color = state.theme_color;
+            let changed = state.config.theme_color != last_color;
+            last_color = state.config.theme_color;
             s.library.set(state);
             if changed {
                 apply_accent();
@@ -435,10 +441,17 @@ pub fn install() -> Store {
         path.get();
         s.queue.get();
         let snap = player().state();
-        let Ok(index) = usize::try_from(snap.queue_index) else {
+        let Ok(index) = usize::try_from(snap.track.queue_index) else {
             return;
         };
-        let next: Vec<String> = snap.queue.iter().skip(index + 1).take(3).cloned().collect();
+        let next: Vec<String> = snap
+            .track
+            .queue
+            .iter()
+            .skip(index + 1)
+            .take(3)
+            .cloned()
+            .collect();
         if next.is_empty() {
             return;
         }
@@ -492,9 +505,16 @@ pub fn install() -> Store {
     s
 }
 
+/// 曲库配置的界面侧更新：克隆当前快照、应用修改、换新 `Arc`（界面
+/// 立即看到新值；磁盘与 `LibraryStore` 侧的正式写入由调用方负责，
+/// 下轮轮询把那边换好的 `Arc` 收进来）。
+fn update_config(f: impl FnOnce(&mut crate::config::LibraryConfig)) {
+    store().library.update(|l| l.set_config(f));
+}
+
 /// 界面字体（`None`：系统字体）。立即生效并保存。
 pub fn set_font(font: Option<String>) {
-    store().library.update(|l| l.font = font.clone());
+    update_config(|c| c.font = font.clone());
     std::thread::spawn(move || library_store().set_font(font));
 }
 
@@ -502,13 +522,13 @@ pub fn set_font(font: Option<String>) {
 pub fn font_family() -> SharedString {
     store()
         .library
-        .with(|l| l.font.clone())
+        .with(|l| l.config.font.clone())
         .map_or_else(|| SharedString::from("system-ui"), SharedString::from)
 }
 
 /// 全屏歌词的对齐方式（立即生效并保存）。
 pub fn set_lyrics_align(align: crate::config::LyricsAlign) {
-    store().library.update(|l| l.lyrics_align = align);
+    update_config(|c| c.lyrics_align = align);
     std::thread::spawn(move || library_store().set_lyrics_align(align));
 }
 
@@ -523,7 +543,7 @@ fn color_scheme(mode: crate::config::Appearance) -> Appearance {
 
 /// 界面外观（立即生效并保存）。
 pub fn set_appearance(mode: crate::config::Appearance) {
-    store().library.update(|l| l.appearance = mode);
+    update_config(|c| c.appearance = mode);
     set_color_scheme(color_scheme(mode));
     std::thread::spawn(move || library_store().set_appearance(mode));
 }
@@ -540,7 +560,7 @@ pub fn tint() -> Option<(f32, f32)> {
 
 /// 主题色：预设强调色或跟随当前曲目封面（立即生效并保存）。
 pub fn set_theme_color(color: crate::config::ThemeColor) {
-    store().library.update(|l| l.theme_color = color);
+    update_config(|c| c.theme_color = color);
     apply_accent();
     std::thread::spawn(move || library_store().set_theme_color(color));
 }
@@ -550,7 +570,7 @@ pub fn set_theme_color(color: crate::config::ThemeColor) {
 /// 信号（`set_theme_color` 先更新它，落盘在线程里，内存配置有延迟）。
 fn apply_accent() {
     let s = store();
-    match s.library.with(|l| l.theme_color) {
+    match s.library.with(|l| l.config.theme_color) {
         crate::config::ThemeColor::Cover => {
             let path = s.track.with(|t| t.path.clone());
             request_accent(&s, path.as_deref())
@@ -566,7 +586,7 @@ fn apply_accent() {
 /// 库里没有（老库 / 还没扫到）就让 covers 工作线程补算，结果经
 /// [`drain_dominant`] 写回。没有曲目时回主题色。
 fn request_accent(s: &Store, path: Option<&str>) {
-    if s.library.with(|l| l.theme_color) != crate::config::ThemeColor::Cover {
+    if s.library.with(|l| l.config.theme_color) != crate::config::ThemeColor::Cover {
         return;
     }
     let Some(path) = path else {
@@ -591,7 +611,7 @@ fn request_accent(s: &Store, path: Option<&str>) {
 fn drain_dominant() {
     for (path, hue) in crate::metadata::covers::take_dominant() {
         let s = store();
-        if s.library.with(|l| l.theme_color) == crate::config::ThemeColor::Cover
+        if s.library.with(|l| l.config.theme_color) == crate::config::ThemeColor::Cover
             && s.track.with(|t| t.path.as_deref() == Some(path.as_str()))
         {
             s.accent
@@ -603,7 +623,7 @@ fn drain_dominant() {
 
 /// 淡入淡出时长（立即生效并保存）。
 pub fn set_fade_ms(ms: u32) {
-    store().library.update(|l| l.fade_ms = ms);
+    update_config(|c| c.fade_ms = ms);
     player().set_fade_ms(ms);
     std::thread::spawn(move || library_store().set_fade_ms(ms));
 }
@@ -617,13 +637,13 @@ pub fn cycle_loop_mode() {
 
 /// 本地歌词优先（保存）。歌词缓存键带开关位，下次读取自动换来源。
 pub fn set_prefer_local_lyrics(on: bool) {
-    store().library.update(|l| l.prefer_local_lyrics = on);
+    update_config(|c| c.prefer_local_lyrics = on);
     std::thread::spawn(move || library_store().set_prefer_local_lyrics(on));
 }
 
 /// 「删除文件」不经过回收站（保存）。
 pub fn set_delete_permanently(on: bool) {
-    store().library.update(|l| l.delete_permanently = on);
+    update_config(|c| c.delete_permanently = on);
     std::thread::spawn(move || library_store().set_delete_permanently(on));
 }
 
@@ -718,7 +738,7 @@ pub fn confirm_delete_file() {
     let ui = poster();
     std::thread::spawn(move || {
         // 工作线程拿不到 store()（线程局部），用播放器快照看当前曲。
-        if player().state().path.as_deref() == Some(ask.path.as_str()) {
+        if player().state().track.path.as_deref() == Some(ask.path.as_str()) {
             player().stop();
         }
         let path = Path::new(&ask.path);
@@ -744,7 +764,7 @@ pub fn confirm_delete_file() {
 /// 本地封面优先（保存）：封面缓存键含开关位，重算已显示的封面
 /// （已生成文件保留，翻回来直接命中）。
 pub fn set_prefer_local_covers(on: bool) {
-    store().library.update(|l| l.prefer_local_covers = on);
+    update_config(|c| c.prefer_local_covers = on);
     std::thread::spawn(move || {
         library_store().set_prefer_local_covers(on);
         // 先写配置再请求：缓存键按新开关算，已显示的信号拿到新来源的图。
@@ -763,19 +783,19 @@ pub fn set_prefer_local_covers(on: bool) {
 /// 列表是否显示封面（保存）：关掉后行 / 网格 / 队列只画占位图，
 /// 省掉所有列表封面的解码内存；打开即恢复（信号还在，值现成）。
 pub fn set_show_covers(on: bool) {
-    store().library.update(|l| l.show_covers = on);
+    update_config(|c| c.show_covers = on);
     std::thread::spawn(move || library_store().set_show_covers(on));
 }
 
 /// 关闭窗口时的行为（保存）。
 pub fn set_close_action(action: crate::config::CloseAction) {
-    store().library.update(|l| l.close_action = action);
+    update_config(|c| c.close_action = action);
     std::thread::spawn(move || library_store().set_close_action(action));
 }
 
 /// 「记住窗口大小和位置」（立即生效并保存；关掉后已存的位置丢弃）。
 pub fn set_remember_frame(on: bool) {
-    store().library.update(|l| l.remember_frame = on);
+    update_config(|c| c.remember_frame = on);
     std::thread::spawn(move || library_store().set_remember_frame(on));
 }
 
@@ -792,21 +812,22 @@ pub fn answer_close(action: crate::config::CloseAction) {
 
 /// 打开/关闭文件夹监视。
 pub fn set_watch(on: bool) {
-    store().library.update(|l| l.watching = on);
+    update_config(|c| c.watch = on);
     std::thread::spawn(move || library_store().set_watch(on));
 }
 
 fn now_playing(snap: &crate::engine::audio::Snapshot) -> NowPlaying {
+    let t = &snap.track;
     NowPlaying {
-        path: snap.path.clone(),
-        title: snap.title.clone(),
-        artist: snap.artist.clone(),
-        album: snap.album.clone(),
-        artwork: snap.artwork.clone().map(SharedString::from),
-        backdrop: snap.backdrop.clone().map(SharedString::from),
-        covers_ready: snap.covers_ready,
-        error: snap.error.clone(),
-        index: snap.queue_index,
+        path: t.path.clone(),
+        title: t.title.clone(),
+        artist: t.artist.clone(),
+        album: t.album.clone(),
+        artwork: t.artwork.clone().map(SharedString::from),
+        backdrop: t.backdrop.clone().map(SharedString::from),
+        covers_ready: t.covers_ready,
+        error: t.error.clone(),
+        index: t.queue_index,
     }
 }
 
@@ -1260,12 +1281,13 @@ pub async fn pick_folders() -> Option<String> {
 /// chips）给 96px 小图，更大的（网格 ~184pt、详情页 hero）升档到
 /// 400px——每个音频文件最多一份缓存封面，升档后小文件删掉。首次读取
 /// 时交给后台线程池生成；每个曲目一个信号，生成后只有读它的绑定再
-/// 运行。信号属于根组件，列表单元格复用或销毁都不会丢掉进行中的请求。
+/// 运行。信号属于专用的 `COVER_OWNER`，列表单元格复用或销毁都不会
+/// 丢掉进行中的请求，隐藏到托盘时才整个拆掉。
 /// 「列表显示封面」开关只管列表，关掉时这里返回 `None`——不建信号、
 /// 不发请求，列表完全不解码封面；读库信号让调用处的闭包订阅它，切换
 /// 即重渲。
 pub fn cover_for(path: &str, pt: f32) -> Option<SharedString> {
-    if !store().library.with(|l| l.show_covers) {
+    if !store().library.with(|l| l.config.show_covers) {
         return None;
     }
     cover_for_always(path, pt)
@@ -1293,8 +1315,15 @@ pub fn cover_for_always(path: &str, pt: f32) -> Option<SharedString> {
             cover
         }
         None => {
-            let owner = store().owner;
-            let cover = owner.run(|| signal(None::<SharedString>));
+            // 挂在专用 owner 下：根 owner 永不 dispose，信号建在它下面
+            // 的话隐藏时清句柄也放不掉节点。
+            let cover = COVER_OWNER.with(|o| {
+                let mut o = o.borrow_mut();
+                if o.as_ref().is_none_or(|owner| !owner.is_live()) {
+                    *o = Some(nsh_core::element::create_root(|| {}).0);
+                }
+                o.unwrap().run(|| signal(None::<SharedString>))
+            });
             let mut have = side;
             // 封面已在磁盘缓存（扫描预热 / 队尾预载 / 播过）就先填上，
             // 免得闪一次占位符；请求照旧入队（色调补算 / 指纹变更重算）。

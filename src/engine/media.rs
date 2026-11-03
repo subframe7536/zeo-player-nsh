@@ -108,24 +108,25 @@ impl MediaSession {
 
     /// 发布快照到系统媒体面。
     pub fn publish(&self, snapshot: &Snapshot) {
-        let Some(path) = snapshot.path.as_ref() else {
+        let track = &snapshot.track;
+        let Some(path) = track.path.as_ref() else {
             return;
         };
         // 循环模式都在端点回绕（单曲是重播自己）：有多于一首就能切。
-        let can_switch = snapshot.queue.len() > 1;
+        let can_switch = track.queue.len() > 1;
         let state = PlaybackState {
             track: Some(Track {
                 id: path.clone(),
-                title: snapshot.title.clone(),
-                artists: vec![snapshot.artist.clone()],
-                album: snapshot.album.clone(),
+                title: track.title.clone(),
+                artists: vec![track.artist.clone()],
+                album: track.album.clone(),
                 artwork_url: String::new(),
                 url: String::new(),
             }),
             playing: snapshot.is_playing,
             position: Duration::from_secs_f64(snapshot.current_time.max(0.0)),
-            duration: if snapshot.duration > 0.0 {
-                Some(Duration::from_secs_f64(snapshot.duration))
+            duration: if track.duration > 0.0 {
+                Some(Duration::from_secs_f64(track.duration))
             } else {
                 None
             },

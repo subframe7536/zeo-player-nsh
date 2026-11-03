@@ -293,7 +293,9 @@ pub struct ScanProgress {
 /// 全局库存储：配置 + 索引。锁粒度粗但只在扫描/读取列表时短暂持有。
 pub struct LibraryStore {
     dir: PathBuf,
-    config: std::sync::Mutex<LibraryConfig>,
+    /// `Arc` 共享快照：界面轮询按指针判变化——所有写路径都必须经
+    /// `update_config` 整份换新 `Arc`（原地改会让读侧漏掉变化）。
+    config: std::sync::Mutex<Arc<LibraryConfig>>,
     // 索引与扫描进度由提供方（`crate::provider`）写；按惯例只经方法访问。
     pub(crate) tracks: std::sync::RwLock<Arc<Vec<TrackEntry>>>,
     pub(crate) scanning: std::sync::atomic::AtomicBool,
@@ -328,7 +330,7 @@ pub fn library_store() -> &'static LibraryStore {
         let tracks = crate::provider::initial_index(&config);
         LibraryStore {
             dir,
-            config: std::sync::Mutex::new(config),
+            config: std::sync::Mutex::new(Arc::new(config)),
             tracks: std::sync::RwLock::new(Arc::new(tracks)),
             scanning: std::sync::atomic::AtomicBool::new(false),
             done: std::sync::atomic::AtomicUsize::new(0),
@@ -351,12 +353,24 @@ fn load_config(dir: &Path) -> LibraryConfig {
 }
 
 impl LibraryStore {
-    pub fn config(&self) -> LibraryConfig {
+    /// 配置的共享快照（`Arc` 克隆只加引用计数；设置写入才换新）。
+    pub fn config(&self) -> Arc<LibraryConfig> {
         self.config.lock().unwrap().clone()
     }
 
     pub fn roots(&self) -> Vec<String> {
-        self.config().roots
+        self.config().roots.clone()
+    }
+
+    /// 克隆当前配置、用 `f` 改、写盘并换新 `Arc`（返回新快照）。
+    fn update_config(&self, f: impl FnOnce(&mut LibraryConfig)) -> Arc<LibraryConfig> {
+        let mut guard = self.config.lock().unwrap();
+        let mut config = (**guard).clone();
+        f(&mut config);
+        self.save_config(&config);
+        let config = Arc::new(config);
+        *guard = config.clone();
+        config
     }
 
     fn save_config(&self, config: &LibraryConfig) {
@@ -377,37 +391,25 @@ impl LibraryStore {
             return Err(format!("{path} 不是目录"));
         }
         let as_string = canonical.to_string_lossy().into_owned();
-        let mut config = self.config.lock().unwrap();
-        if !config.roots.iter().any(|r| r == &as_string) {
-            config.roots.push(as_string);
-        }
-        let roots = config.roots.clone();
-        self.save_config(&config);
-        drop(config);
+        let config = self.update_config(|c| {
+            if !c.roots.iter().any(|r| r == &as_string) {
+                c.roots.push(as_string.clone());
+            }
+        });
         crate::provider::local::watcher::sync();
-        Ok(roots)
+        Ok(config.roots.clone())
     }
 
     /// 移除音乐根目录。
     pub fn remove_root(&self, path: &str) -> Vec<String> {
-        let mut config = self.config.lock().unwrap();
-        config.roots.retain(|r| r != path);
-        let roots = config.roots.clone();
-        self.save_config(&config);
-        drop(config);
+        let config = self.update_config(|c| c.roots.retain(|r| r != path));
         crate::provider::local::watcher::sync();
-        roots
-    }
-
-    pub fn font(&self) -> Option<String> {
-        self.config().font
+        config.roots.clone()
     }
 
     /// 设置界面字体（`None`：系统字体），保存。
     pub fn set_font(&self, font: Option<String>) {
-        let mut config = self.config.lock().unwrap();
-        config.font = font.filter(|f| !f.trim().is_empty());
-        self.save_config(&config);
+        self.update_config(|c| c.font = font.filter(|f| !f.trim().is_empty()));
     }
 
     pub fn fade_ms(&self) -> u32 {
@@ -415,19 +417,11 @@ impl LibraryStore {
     }
 
     pub fn set_fade_ms(&self, ms: u32) {
-        let mut config = self.config.lock().unwrap();
-        config.fade_ms = ms;
-        self.save_config(&config);
-    }
-
-    pub fn lyrics_align(&self) -> LyricsAlign {
-        self.config().lyrics_align
+        self.update_config(|c| c.fade_ms = ms);
     }
 
     pub fn set_lyrics_align(&self, align: LyricsAlign) {
-        let mut config = self.config.lock().unwrap();
-        config.lyrics_align = align;
-        self.save_config(&config);
+        self.update_config(|c| c.lyrics_align = align);
     }
 
     pub fn appearance(&self) -> Appearance {
@@ -436,9 +430,7 @@ impl LibraryStore {
 
     /// 设置界面外观（保存）。
     pub fn set_appearance(&self, appearance: Appearance) {
-        let mut config = self.config.lock().unwrap();
-        config.appearance = appearance;
-        self.save_config(&config);
+        self.update_config(|c| c.appearance = appearance);
     }
 
     pub fn loop_mode(&self) -> crate::engine::audio::LoopMode {
@@ -446,9 +438,7 @@ impl LibraryStore {
     }
 
     pub fn set_loop_mode(&self, mode: crate::engine::audio::LoopMode) {
-        let mut config = self.config.lock().unwrap();
-        config.loop_mode = mode;
-        self.save_config(&config);
+        self.update_config(|c| c.loop_mode = mode);
     }
 
     /// 本地同名歌词文件是否优先于内嵌歌词。
@@ -457,9 +447,7 @@ impl LibraryStore {
     }
 
     pub fn set_prefer_local_lyrics(&self, on: bool) {
-        let mut config = self.config.lock().unwrap();
-        config.prefer_local_lyrics = on;
-        self.save_config(&config);
+        self.update_config(|c| c.prefer_local_lyrics = on);
     }
 
     /// 本地同名图片文件是否优先于内嵌封面。
@@ -468,20 +456,12 @@ impl LibraryStore {
     }
 
     pub fn set_prefer_local_covers(&self, on: bool) {
-        let mut config = self.config.lock().unwrap();
-        config.prefer_local_covers = on;
-        self.save_config(&config);
+        self.update_config(|c| c.prefer_local_covers = on);
     }
 
-    /// 列表是否显示封面（关闭后行 / 网格 / 队列只画占位图）。
-    pub fn show_covers(&self) -> bool {
-        self.config().show_covers
-    }
-
+    /// 设置列表是否显示封面（关闭后行 / 网格 / 队列只画占位图）。
     pub fn set_show_covers(&self, on: bool) {
-        let mut config = self.config.lock().unwrap();
-        config.show_covers = on;
-        self.save_config(&config);
+        self.update_config(|c| c.show_covers = on);
     }
 
     /// 「删除文件」是否不经过回收站、直接删除。
@@ -490,9 +470,7 @@ impl LibraryStore {
     }
 
     pub fn set_delete_permanently(&self, on: bool) {
-        let mut config = self.config.lock().unwrap();
-        config.delete_permanently = on;
-        self.save_config(&config);
+        self.update_config(|c| c.delete_permanently = on);
     }
 
     pub fn close_action(&self) -> CloseAction {
@@ -500,10 +478,7 @@ impl LibraryStore {
     }
 
     pub fn set_close_action(&self, action: CloseAction) {
-        let mut config = self.config.lock().unwrap();
-        config.close_action = action;
-        self.save_config(&config);
-        drop(config);
+        self.update_config(|c| c.close_action = action);
         crate::window::set_close_action(action);
     }
 
@@ -513,13 +488,12 @@ impl LibraryStore {
     }
 
     pub fn set_remember_frame(&self, on: bool) {
-        let mut config = self.config.lock().unwrap();
-        config.remember_frame = on;
-        if !on {
-            config.window_frame = None;
-        }
-        self.save_config(&config);
-        drop(config);
+        self.update_config(|c| {
+            c.remember_frame = on;
+            if !on {
+                c.window_frame = None;
+            }
+        });
         crate::window::set_remember_frame(on);
     }
 
@@ -532,61 +506,38 @@ impl LibraryStore {
     /// 记录当前窗口位置（Windows 的 `WM_EXITSIZEMOVE` / 退出时调用）。
     #[cfg(target_os = "windows")]
     pub fn set_window_frame(&self, frame: SavedFrame) {
-        let mut config = self.config.lock().unwrap();
-        if !config.remember_frame {
+        let mut guard = self.config.lock().unwrap();
+        if !guard.remember_frame {
             return;
         }
+        let mut config = (**guard).clone();
         config.window_frame = Some(frame);
         self.save_config(&config);
+        *guard = Arc::new(config);
     }
 
     pub fn watching(&self) -> bool {
         self.config().watch
     }
 
-    /// 主题色（强调色）。
-    pub fn theme_color(&self) -> ThemeColor {
-        self.config().theme_color
-    }
-
     /// 设置主题色（保存）。
     pub fn set_theme_color(&self, color: ThemeColor) {
-        let mut config = self.config.lock().unwrap();
-        config.theme_color = color;
-        self.save_config(&config);
-    }
-
-    /// 过滤：短于此时长（秒）的音频不进索引。
-    pub fn min_duration_secs(&self) -> u32 {
-        self.config().min_duration_secs
+        self.update_config(|c| c.theme_color = color);
     }
 
     /// 设置时长过滤阈值（保存；0 为不过滤）。
     pub fn set_min_duration_secs(&self, secs: u32) {
-        let mut config = self.config.lock().unwrap();
-        config.min_duration_secs = secs;
-        self.save_config(&config);
-    }
-
-    /// 过滤：小于此大小（KB）的音频不进索引。
-    pub fn min_size_kb(&self) -> u32 {
-        self.config().min_size_kb
+        self.update_config(|c| c.min_duration_secs = secs);
     }
 
     /// 设置大小过滤阈值（保存；0 为不过滤）。
     pub fn set_min_size_kb(&self, kb: u32) {
-        let mut config = self.config.lock().unwrap();
-        config.min_size_kb = kb;
-        self.save_config(&config);
+        self.update_config(|c| c.min_size_kb = kb);
     }
 
     /// 打开/关闭文件夹监视（保存设置）。
     pub fn set_watch(&self, on: bool) {
-        {
-            let mut config = self.config.lock().unwrap();
-            config.watch = on;
-            self.save_config(&config);
-        }
+        self.update_config(|c| c.watch = on);
         crate::provider::local::watcher::sync();
     }
 
@@ -644,7 +595,8 @@ impl LibraryStore {
         // 曲库根本身（或装着根的上级目录）被移走：根配置换前缀、
         // 保存并让监视器重新对齐。
         let moved_root = {
-            let mut config = self.config.lock().unwrap();
+            let mut guard = self.config.lock().unwrap();
+            let mut config = (**guard).clone();
             let mut touched = false;
             for root in config.roots.iter_mut() {
                 let trimmed = root.trim_end_matches(sep).to_owned();
@@ -658,6 +610,7 @@ impl LibraryStore {
             }
             if touched {
                 self.save_config(&config);
+                *guard = Arc::new(config);
             }
             touched
         };
@@ -732,18 +685,10 @@ impl LibraryStore {
         }
     }
 
-    pub fn separators(&self) -> Vec<String> {
-        self.config().genre_separators
-    }
-
     /// 改流派分隔符：保存，并用已缓存的标签重新拆分（不重读文件）。
     pub fn set_separators(&self, separators: &[String]) -> Vec<String> {
         let clean = clean_separators(separators);
-        {
-            let mut config = self.config.lock().unwrap();
-            config.genre_separators = clean.clone();
-            self.save_config(&config);
-        }
+        self.update_config(|c| c.genre_separators = clean.clone());
         let current = self.tracks();
         let updated: Vec<TrackEntry> = current
             .iter()
@@ -822,10 +767,10 @@ mod tests {
     fn test_store(dir: PathBuf, roots: Vec<String>, tracks: Vec<TrackEntry>) -> LibraryStore {
         LibraryStore {
             dir,
-            config: Mutex::new(LibraryConfig {
+            config: Mutex::new(Arc::new(LibraryConfig {
                 roots,
                 ..Default::default()
-            }),
+            })),
             tracks: RwLock::new(Arc::new(tracks)),
             scanning: AtomicBool::new(false),
             done: AtomicUsize::new(0),
