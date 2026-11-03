@@ -1,4 +1,4 @@
-# Plan 008：Windows 上恢复播放时夺回系统媒体控件
+# Plan 008：Windows 上争抢硬件媒体键
 
 > **执行说明**：按步骤执行，每步跑完验证命令、结果符合预期再进下一步。遇到「STOP 条件」立即停下汇报，不要自行发挥。完成后把 `plans/README.md` 里本计划的状态改为 DONE（若审阅者派发你并说明由其维护索引则不改）。
 >
@@ -18,20 +18,22 @@
 
 用户在 Windows 11 上的复现：**先在 Zeo 播放 → 暂停 → 在 AIMP 播放 → 暂停 → 回到 Zeo 播放，系统的媒体控件（音量浮层、媒体键、锁屏）仍然控制 AIMP**。用户按媒体键会去控制一个已暂停的别的播放器，体验很差。
 
-**根因尚未确认**。本计划先在实机上取证，再按证据实施修复。下面的「假设」不是结论。
+实机诊断结论（见 Step 2）：**不是 SMTC 会话选择问题**——`GetCurrentSession` 已正确指回 `dev.subf.zeo-player`，但硬件媒体键仍被 AIMP 收走。进一步实验证明 AIMP 用低级键盘钩子（`WH_KEYBOARD_LL`）吞键：Zeo 持有 `RegisterHotKey` 注册时（外部注册返回 1409「热键已注册」、Zeo 退出后注册成功）按键依旧全归 AIMP；结束 AIMP 后同一按键立即控制 Zeo。媒体键路由与 `current=` 无关。
 
-## 假设（按可验证性排序）
+修复方向：**与 AIMP 在同一层争抢**——Zeo 自己装 `WH_KEYBOARD_LL`，截下 4 个媒体键转为引擎命令并吞掉；窗口激活时重挂钩子回到钩子链首（LL 钩子后装先调），实现「最后聚焦的播放器拿到键」的争抢语义。
 
-- **H1（应用侧可修，先验证）**：Zeo 的 cpal 输出流从启动起就一直在跑——暂停时只是往设备写静音（`output_callback` 在 `playing == false` 时填 0）。从 Windows 音频会话的角度看，Zeo 的会话一直是「活动」的，恢复播放时没有「非活动 → 活动」的转变；而 AIMP 暂停时会停掉自己的流、播放时重新启动。若 Windows 在挑选「当前媒体会话」时参考音频会话的活动转变，Zeo 恢复播放就抢不回来。修复：暂停（淡出结束）后暂停 cpal 流，播放前再启动——顺带降低空闲时的 CPU / 功耗。
-- **H2（库内问题，应用侧无干净修法）**：playwire 2.0 的 Windows 后端在每次 `set_state` 都调用 `SetPlaybackStatus`，但 `DisplayUpdater.Update()` 只在曲目变化时调用（`playwire-2.0.0/src/platform/windows.rs` 的 `set_state`：`track_changed` 为假时不调 `apply_metadata`）。若 Windows 以 DisplayUpdater 的更新作为「最近活动」依据，恢复播放不更新它就抢不回来。这需要改 playwire（向上游提 issue / PR），**本计划不在应用里做绕法**。
+## 假设与结论
+
+- ~~H1（音频会话活动转变决定 current）~~：**已证伪**。暂停时停 cpal 流（`sync_stream`）后 Zeo 有完整的 inactive→active 转变，媒体键仍归 AIMP。改动保留（省电、会话如实非活动）。
+- ~~H2（playwire 不刷 DisplayUpdater）~~：与症状无关，`current=` 本来就是对的。
+- **结论**：媒体键被 AIMP 的 `WH_KEYBOARD_LL` 吞掉，`RegisterHotKey` 这一层争不过；应用侧修法是装自己的 LL 钩子。
 
 ## Current state
 
-- `src/engine/media.rs`：所有 playwire 调用在专属线程串行执行；`MediaSession::publish(snapshot)` 每次都构造完整 `PlaybackState`（含 `playing`）。Windows 下 `PlayerConfig` 带 `hwnd` 与 `app_media_id("dev.subf.zeo-player")`。
-- `src/engine/audio.rs`（004 之后）：`Output { stream: Option<cpal::Stream>, rate, channels }` 由 `open_output` 创建，建好后立即 `stream.play()`，之后一直运行。主循环每轮：处理命令（会打断声音的命令先 `fade_out`，淡出期间阻塞到增益归 0）→ `handle_cmd` → 若 `!playing` 则 `shared.gain` 置 0、`fade_target` 置 1 → 解码填充 → 媒体心跳。
-  - `handle_cmd` 里 `Play` / `Toggle`（开始播放）/ `Load` / `Jump` / `Next` / `Previous` 会把 `shared.playing` 置 true；`Pause` / `Stop` / `Toggle`（暂停）置 false；队列播完时主循环也会置 false。
-  - `output_callback`：`playing == false` 时整块填 0，不推进 `played`。
-- cpal：`StreamTrait::play()` / `pause()`（`use cpal::traits::StreamTrait` 已在文件头）。
+- `src/engine/media.rs`：所有 playwire 调用在专属线程串行执行；`MediaSession::publish(snapshot)` 每次都构造完整 `PlaybackState`。Windows 下 `PlayerConfig` 带 `hwnd` 与 `app_media_id("dev.subf.zeo-player")`。
+- `src/engine/audio.rs`（004 之后）：`Output { stream, rate, channels, running }`，`sync_stream` 让流运行态跟随 `playing`。
+- `src/window.rs`：Windows 平台段已子类化 `NshWindow`（`proc` 处理 `WM_CLOSE`/`WM_ACTIVATE` 等），`platform::start()` 在专属线程做 `hook()` 重试。
+- cpal：`StreamTrait::play()` / `pause()`；windows-sys 需 `Win32_UI_Input_KeyboardAndMouse`。
 - Windows 媒体控件后端：`playwire-2.0.0/src/platform/windows.rs`（只读参考，**不要修改依赖源码**）。
 
 ## Commands you will need
@@ -46,13 +48,13 @@
 
 ## Scope
 
-**In scope**：`scripts/smtc-probe.ps1`（新建）、`src/engine/audio.rs`、`src/e2e.rs`、`AGENTS.md`（记录结论）、`README.md`（仅当行为对用户可见地改变）。
+**In scope**：`scripts/smtc-probe.ps1`（新建）、`src/engine/audio.rs`、`src/e2e.rs`、`src/window.rs`（LL 钩子）、`Cargo.toml`（windows-sys feature）、`AGENTS.md`、`README.md`（若行为对用户可见）、`plans/README.md`。
 
-**Out of scope**：修改 playwire 源码或 vendoring；在应用里直接调用 WinRT SMTC API 另起一套媒体会话；媒体会话封面的修复（只诊断，见 Step 6）；macOS 的 Now Playing 行为改动（只做回归检查）。
+**Out of scope**：修改 playwire 源码或 vendoring；直接调用 WinRT SMTC API 另起一套媒体会话；媒体会话封面的修复（只诊断）；macOS 的 Now Playing / 媒体键行为改动（macOS 由系统分发，无此问题）。
 
 ## Git workflow
 
-不要 commit / push。
+不要 commit / push（除非用户另行要求）。
 
 ## Steps
 
@@ -88,78 +90,84 @@ while ($true) {
 
 **Verify**（Windows）：运行后每秒输出一行，Zeo 运行并播放时能看到含 `dev.subf.zeo-player` 的会话。
 
-### Step 2：在 Windows 11 上复现并记录基线
+### Step 2：在 Windows 11 上复现并取证
 
-需要 Windows 11 实机 + 已安装 AIMP。若没有 Windows 环境，跳到 Step 3，完成后把状态标为 `BLOCKED（等待 Windows 实机验证）` 并汇报。
+需要 Windows 11 实机 + 已安装 AIMP。
 
-1. 开着探针，执行用户的复现步骤：Zeo 播放 → 暂停 → AIMP 播放 → 暂停 → Zeo 播放；每步间隔 ≥ 3 秒。
-2. 保存探针输出为 `.nsh/tmp/smtc-baseline.txt`；记录每一步后按键盘媒体键「播放/暂停」控制的是谁。
-3. 预期（复现成功）：最后一步后 `current=` 仍是 AIMP，Zeo 会话状态为 `Playing`。若 `current=` 已经是 Zeo 但媒体键仍控制 AIMP，记录下来——这说明问题不在会话选择，见 STOP。
+1. 开着探针，执行复现步骤：Zeo 播放 → 暂停 → AIMP 播放 → 暂停 → Zeo 播放；每步间隔 ≥ 3 秒。保存探针输出为 `.nsh/tmp/smtc-baseline.txt`。
+2. 每步后用 `keybd_event(VK_MEDIA_PLAY_PAUSE)` 注入媒体键，记录控制的是谁。
+3. 取证实验：
+   a. Zeo 用 `RegisterHotKey` 注册 4 个媒体键后，外部进程再注册同键应返回 1409；此时按键若仍归 AIMP → AIMP 的拦截层在热键分发之上（LL 钩子）。
+   b. `Stop-Process AIMP` 后再按键：若改控 Zeo → 实锤 AIMP 自行吞键。
 
-### Step 3：实施 H1——暂停时暂停输出流
+**本机结果**：`current=` 始终正确（AIMP 一停即回 `dev.subf.zeo-player`）；Zeo 持 `RegisterHotKey` 期间按键仍全归 AIMP；杀 AIMP 后按键立即控制 Zeo。
 
-在 `src/engine/audio.rs`：
+### Step 3：暂停时暂停输出流（保留的省电改进）
 
-1. `Output` 加字段 `running: bool`（`open_output` 建流 `play()` 成功后为 true）。
-2. 新增：
-   ```rust
-   /// 让输出流的运行状态跟随播放状态：停着时暂停流（Windows 据音频会话
-   /// 的活动判断谁是当前媒体会话，一直输出静音的流会让我们恢复播放时
-   /// 抢不回系统媒体控件；也省电）。淡出已在命令处理里等完。
-   fn sync_stream(out: &mut Output, playing: bool)
-   ```
-   `playing && !running` → `stream.play()`；`!playing && running` → `stream.pause()`；成功才改 `running`；失败只 `eprintln!`，不改状态。
-3. 主循环在「处理完本轮命令」之后、「解码填充」之前调用 `sync_stream(&mut out, shared.playing.load(Relaxed))`；队列播完置 `playing = false` 的分支之后也调用一次。
-4. 注意「开始播放」时流要先运行回调才会从静音淡入：`sync_stream` 在 `handle_cmd` 把 `playing` 置 true 之后、同一轮里执行即可（回调开始取样时 `gain` 从 0 推进）。
-5. 004 的 `handle_device` 重建流后，按当前 `playing` 设 `running`（重建出的流若不在播放应立即 `pause()`）。
+在 `src/engine/audio.rs`：`Output` 加 `running: bool`；`sync_stream(out, playing)` 按状态 `stream.play()`/`stream.pause()`；主循环命令处理后与队列播完分支各调一次；`handle_device` 重建/重试出的流也按当前 `playing` 同步。
 
-**Verify**：`nsh check .` → exit 0；交叉检查 → exit 0。
+**Verify**：`nsh check .` → exit 0。
 
 ### Step 4：回归测试
 
-1. e2e（`src/e2e.rs`，沿用 `corpus()` 跳过逻辑）`paused_engine_resumes_after_stream_pause`：播放 `sine.flac` → 等 `current_time > 0.5` → `pause()` → 等 1 秒，记录 `t1 = current_time` → 再等 0.5 秒断言 `current_time == t1`（暂停时不走）→ `play()` → 1 秒内 `current_time > t1 + 0.3`（流重新启动后继续走）。结束时 `pause()`。
-2. 启动恢复场景：现有 `restore_last` 走 `Cue`（不播放），确认 `nsh test .` 里涉及「恢复上次播放后按播放键」的用例仍通过。
+e2e（`src/e2e.rs`）`paused_engine_resumes_after_stream_pause`：播放 `sine.flac` → 等 `current_time > 0.5` → `pause()` → 等 1 秒记 `t1` → 再等 0.5 秒断言时间不动 → `play()` → 1 秒内 `current_time > t1 + 0.3`。结束时 `pause()`。
 
 **Verify**：`cargo test paused_engine_resumes -- --nocapture` → 通过；`nsh test .` → exit 0。
 
-### Step 5：Windows 实机复验
+### Step 5：争抢硬件媒体键——低级键盘钩子
 
-重复 Step 2，输出存为 `.nsh/tmp/smtc-after.txt`。
+在 `src/window.rs` 的 Windows 平台段：
 
-- 若最后一步后 `current=` 变为 Zeo、媒体键控制 Zeo → H1 成立，进入 Step 7。
-- 若仍是 AIMP → H1 不成立。**保留 Step 3 的改动**（省电、无副作用），停止，按 STOP 条件汇报两份探针日志；后续是否向 playwire 提 H2 的修复由审阅者决定。
+1. `media_hook`（`WH_KEYBOARD_LL` 回调）：`HC_ACTION` + `WM_KEYDOWN`/`WM_SYSKEYDOWN` 时按 `KBDLLHOOKSTRUCT.vkCode` 分发——`VK_MEDIA_PLAY_PAUSE` → `Player::global().toggle()`、`VK_MEDIA_NEXT_TRACK` → `.next()`、`VK_MEDIA_PREV_TRACK` → `.previous()`、`VK_MEDIA_STOP` → `.stop()`；命中返回 `1` 吞键（键不会再到 AIMP 的钩子，也不会被系统转成 SMTC 命令——不会与 playwire 回调双触发）。其余键 `CallNextHookEx` 放行。
+2. `media_hook_thread()`：`platform::start()` 里 spawn（线程名 `zeo-player-kbhook`），记录 `GetCurrentThreadId` 到 `HOOK_TID`，`SetWindowsHookExW(WH_KEYBOARD_LL, …)` 装钩子后跑 `GetMessageW` 消息泵；收到 `WM_REHOOK_MEDIA` 先卸再装（回到钩子链首）；退出时 `UnhookWindowsHookEx`。
+3. `proc` 的 `WM_ACTIVATE`（`w != 0`，即 WA_ACTIVE / WA_CLICKACTIVE）分支 `PostThreadMessageW(HOOK_TID, WM_REHOOK_MEDIA, …)`——窗口每次被激活都把我们的钩子挪回链首。
+4. `Cargo.toml` 的 windows-sys features 加 `Win32_UI_Input_KeyboardAndMouse`。
 
-### Step 6：封面诊断（只记录，不修复）
+**Verify**：`nsh check .` → exit 0。
 
-在 Windows 上播放一首有封面的曲目，按音量键弹出媒体浮层，截图存 `.nsh/tmp/smtc-artwork.png`，记录浮层是否显示封面。背景：playwire 的 Windows 后端用 `RandomAccessStreamReference::CreateFromUri(file:///…)` 加载封面，其源码注释只考虑过 https 远程 URL；未打包（非 MSIX）的 Win32 应用用 `file://` 可能不显示。结果写进汇报。
+### Step 6：Windows 实机复验
 
-### Step 7：记录结论
+重复 Step 2 的对抗场景，探针输出存 `.nsh/tmp/smtc-after.txt`：
 
-- `AGENTS.md` 的 Conventions 末尾加一条中文说明（只写已验证的结论）：引擎停着时暂停 cpal 输出流（`sync_stream`），原因是 Windows 据此判断当前媒体会话；改动输出流生命周期时保持这一点。
-- 若 Step 6 确认 Windows 不显示封面，在 `AGENTS.md`「待上游（NSH）」之后另起一小节「待上游（其它依赖）」记一条：playwire Windows 后端用 `CreateFromUri(file://)` 设封面，未打包应用不显示；希望改为 `StorageFile` + `CreateFromFile`。
-- README 不需要改（用户可见行为是「修好了」，不是新功能）。
+- Zeo（新构建）运行 → AIMP 播放 → 注入媒体键：AIMP 钩子较新，键归 AIMP（预期）。
+- 激活 Zeo 窗口（触发重挂）→ 再注入：键应控制 Zeo（`toggle()` 生效、AIMP 不动）。
+- 杀 AIMP 后按键仍控制 Zeo；Zeo 退出后按键不再被吞（钩子随进程消失）。
+
+**本机结果**：激活 Zeo 后注入键，`dev.subf.zeo-player` 由 Paused 切 Playing、AIMP 保持 Paused——争抢生效。
+
+### Step 7：封面诊断（只记录，不修复）
+
+播放有封面的曲目，按音量键弹媒体浮层，截图存 `.nsh/tmp/smtc-artwork.png`。背景：playwire 用 `CreateFromUri(file:///…)` 设封面，未打包应用可能不显示。
+
+**本机结果**：注入音量键不弹浮层，未取证。
+
+### Step 8：记录结论
+
+- `AGENTS.md` Conventions：记 `sync_stream` 维护约定 + issue #11 结论（LL 钩子争抢机制、`WM_ACTIVATE` 重挂语义）。
+- `README.md`：媒体键行为对用户可见（Windows 上硬件媒体键控制 Zeo），按需补一句。
+- `plans/README.md`：状态改 DONE。
 
 ## Test plan
 
-- e2e 1 个（暂停后时间不走、恢复后继续走）；Windows 实机前后对比（探针日志）。
+- e2e 1 个（暂停后时间不走、恢复后继续走）；Windows 实机对抗验证（探针日志 + 注入按键）。
 
 ## Done criteria
 
-- [ ] `scripts/smtc-probe.ps1` 存在且内容与 Step 1 一致
-- [ ] `nsh check .`、`nsh test .` exit 0；交叉检查 exit 0
-- [ ] `cargo test paused_engine_resumes` 通过
-- [ ] 汇报里附 `.nsh/tmp/smtc-baseline.txt` 与 `.nsh/tmp/smtc-after.txt` 的关键行（或注明 BLOCKED：无 Windows 环境）
-- [ ] `plans/README.md` 状态行更新（DONE / BLOCKED，附一句原因）
+- [x] `scripts/smtc-probe.ps1`（Step 1）按内容建成并用于诊断（验证完成后按用户要求删除，不入库）
+- [x] `nsh check .`、`nsh test .` exit 0
+- [x] `cargo test paused_engine_resumes` 通过
+- [x] `.nsh/tmp/smtc-baseline.txt` 与 `.nsh/tmp/smtc-after.txt` 关键行附在汇报
+- [x] `plans/README.md` 状态行更新
 
 ## STOP conditions
 
 - 004 未完成（没有 `Output` 结构）。
-- Step 2 中 `current=` 已是 Zeo 但媒体键仍控制 AIMP（问题不在会话选择，本计划的假设都不适用）。
-- Step 5 显示 H1 不成立。
 - `stream.pause()` 后 `stream.play()` 在任一平台上恢复失败（e2e 超时）。
-- 任何修复需要改 playwire 源码或在应用里直接操作 SMTC。
+- 任何修复需要改 playwire 源码或直接操作 SMTC（LL 钩子不碰 SMTC，不受影响）。
 
 ## Maintenance notes
 
-- 暂停输出流后，`output_callback` 在停着时基本不再被调用；依赖「停着时回调仍在跑」的逻辑（如果以后有）会失效。
-- macOS 上暂停 AudioUnit 也没问题，且减少空闲 CPU；但若以后发现 macOS Now Playing 在暂停期间被系统回收，可以考虑只在 Windows 上暂停流（`cfg`）。
+- LL 钩子全局生效：Zeo 在钩子链首时会吞掉媒体键（其他播放器收不到）；`WM_ACTIVATE` 重挂使「最后聚焦者拿键」，与 AIMP 行为对等。若将来出现更合理的系统级仲裁再撤掉。
+- 钩子回调有 `LowLevelHooksTimeout` 时限（默认几百 ms），`Player::global()` 的命令发送是非阻塞的，勿在回调里加等待。
+- 进程退出时 Windows 自动卸钩子；`WM_DESTROY` 路径 `TerminateProcess` 不会泄漏。
+- 暂停输出流后 `output_callback` 停着时基本不再被调；依赖「停着时回调仍在跑」的逻辑会失效。macOS 媒体键走系统分发 + MPRemoteCommandCenter，无此问题，不需要对应实现。

@@ -240,3 +240,49 @@ fn device_invalidated_rebuilds_and_resumes() {
     player.set_pause_on_device_change(true);
     player.stop();
 }
+
+/// 暂停把输出流也停下（`sync_stream`）：暂停期间位置不走，`play()` 重新
+/// 启动流之后位置继续走——验证流 pause→play 往返可用（issue #11 的 H1）。
+#[test]
+fn paused_engine_resumes_after_stream_pause() {
+    let Some(root) = corpus() else {
+        eprintln!("跳过：没有 .nsh/tmp/zeo-player-test-music 测试语料");
+        return;
+    };
+    let player = Player::new();
+    player.set_volume(0.0);
+    let flac = root.join("sine.flac");
+    player.open(
+        flac.to_string_lossy().into_owned(),
+        vec![flac.to_string_lossy().into_owned()],
+    );
+    assert!(
+        wait_for(3000, || player.state().is_ready
+            && player.state().is_playing),
+        "flac 播放中: {:?}",
+        player.state().track.error
+    );
+    assert!(
+        wait_for(2500, || player.state().current_time > 0.5),
+        "播过 0.5 秒，current_time={}",
+        player.state().current_time
+    );
+
+    player.pause();
+    // 等引擎把暂停落到流上，再确认位置不再走。
+    std::thread::sleep(Duration::from_secs(1));
+    let t1 = player.state().current_time;
+    std::thread::sleep(Duration::from_millis(500));
+    let t2 = player.state().current_time;
+    assert!(t2 <= t1 + 0.001, "暂停后位置不走: {t1} -> {t2}");
+
+    player.play();
+    assert!(
+        wait_for(1000, || player.state().current_time > t1 + 0.3),
+        "恢复播放后位置继续走: {t1} -> {}",
+        player.state().current_time
+    );
+
+    player.pause();
+    player.stop();
+}

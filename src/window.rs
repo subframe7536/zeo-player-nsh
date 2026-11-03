@@ -603,7 +603,7 @@ mod platform {
 
 #[cfg(target_os = "windows")]
 mod platform {
-    use std::sync::atomic::{AtomicIsize, Ordering};
+    use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
     use std::sync::mpsc::{Sender, channel};
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
@@ -619,17 +619,21 @@ mod platform {
         SetProcessWorkingSetSize, TerminateProcess,
     };
     use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        BringWindowToTop, CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GW_OWNER,
-        GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect, GetForegroundWindow, GetWindow,
-        GetWindowLongPtrW, GetWindowPlacement, GetWindowThreadProcessId, HTTOP, HTTOPLEFT,
-        HTTOPRIGHT, IsIconic, IsWindowVisible, IsZoomed, MINMAXINFO, MSG,
-        NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW, PostMessageW,
-        SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME, SW_HIDE, SW_RESTORE,
-        SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SetForegroundWindow, SetWindowLongPtrW,
-        SetWindowPlacement, ShowWindowAsync, TranslateMessage, WINDOWPLACEMENT, WM_CLOSE, WM_DESTROY,
-        WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW,
-        WM_SYSCOMMAND, WNDPROC, WS_CAPTION, WS_THICKFRAME,
+        BringWindowToTop, CallNextHookEx, CallWindowProcW, DefWindowProcW, DispatchMessageW,
+        EnumWindows, GW_OWNER, GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect,
+        GetForegroundWindow, GetMessageW, GetWindow, GetWindowLongPtrW, GetWindowPlacement,
+        GetWindowThreadProcessId, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsIconic, IsWindowVisible, IsZoomed,
+        KBDLLHOOKSTRUCT, MINMAXINFO, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW, PostMessageW,
+        PostThreadMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME,
+        SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SetForegroundWindow,
+        SetWindowLongPtrW, SetWindowPlacement, SetWindowsHookExW, ShowWindowAsync, TranslateMessage,
+        UnhookWindowsHookEx, WH_KEYBOARD_LL, WINDOWPLACEMENT, WM_ACTIVATE, WM_CLOSE, WM_DESTROY,
+        WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_KEYDOWN, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST,
+        WM_SHOWWINDOW, WM_SYSCOMMAND, WM_SYSKEYDOWN, WNDPROC, WS_CAPTION, WS_THICKFRAME,
     };
 
     use super::TrayState;
@@ -638,8 +642,68 @@ mod platform {
     static OLD_PROC: AtomicIsize = AtomicIsize::new(0);
     static TRAY_TX: OnceLock<Mutex<Sender<TrayMsg>>> = OnceLock::new();
 
+    /// 让钩子线程重挂低级键盘钩子（钩子链后装先调：窗口每次激活都
+    /// 把我们的钩子挪回链首，跟 AIMP 这类自己拦媒体键的播放器争抢）。
+    const WM_REHOOK_MEDIA: u32 = 0x8000 + 0x5A; // WM_APP + 0x5A
+    /// 键盘钩子线程的线程 id（PostThreadMessage 重挂用）。
+    static HOOK_TID: AtomicU32 = AtomicU32::new(0);
+
     fn hwnd() -> Option<HWND> {
         HWND_VALUE.get().map(|h| *h as usize as HWND)
+    }
+
+    /// 低级键盘钩子：截下 4 个媒体键转成引擎命令并吞掉（issue #11 的
+    /// 成因是别的播放器用同类钩子抢走了按键；RegisterHotKey 争不过吞
+    /// 键钩子，只能在同一层抢）。只在装钩子的线程的消息循环里被调。
+    unsafe extern "system" fn media_hook(code: i32, w: WPARAM, l: LPARAM) -> LRESULT {
+        // HC_ACTION == 0
+        if code == 0 && (w as u32 == WM_KEYDOWN || w as u32 == WM_SYSKEYDOWN) {
+            // SAFETY: l 指向 KBDLLHOOKSTRUCT。
+            let vk = unsafe { (*(l as *const KBDLLHOOKSTRUCT)).vkCode } as u16;
+            // 先判 vk 再取 player：每次击键都会过钩子，别在热路径上取全局。
+            let player = match vk {
+                VK_MEDIA_PLAY_PAUSE | VK_MEDIA_NEXT_TRACK | VK_MEDIA_PREV_TRACK
+                | VK_MEDIA_STOP => crate::engine::Player::global(),
+                // SAFETY: 放行其余输入。
+                _ => return unsafe { CallNextHookEx(std::ptr::null_mut(), code, w, l) },
+            };
+            match vk {
+                VK_MEDIA_PLAY_PAUSE => player.toggle(),
+                VK_MEDIA_NEXT_TRACK => player.next(),
+                VK_MEDIA_PREV_TRACK => player.previous(),
+                _ => player.stop(),
+            }
+            return 1;
+        }
+        // SAFETY: 放行其余输入。
+        unsafe { CallNextHookEx(std::ptr::null_mut(), code, w, l) }
+    }
+
+    /// 键盘钩子线程：装 `WH_KEYBOARD_LL` + 消息泵；`WM_REHOOK_MEDIA`
+    /// 触发重挂（先卸再装，回到钩子链首）。
+    fn media_hook_thread() {
+        let tid = unsafe { GetCurrentThreadId() };
+        HOOK_TID.store(tid, Ordering::Relaxed);
+        // SAFETY: 全局低级键盘钩子；回调在本线程消息循环里执行。
+        let mut hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(media_hook), std::ptr::null_mut(), 0) };
+        let mut msg = MSG::default();
+        // SAFETY: 标准消息循环；钩子句柄由本线程持有。
+        unsafe {
+            while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+                if msg.message == WM_REHOOK_MEDIA {
+                    if !hook.is_null() {
+                        UnhookWindowsHookEx(hook);
+                    }
+                    hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(media_hook), std::ptr::null_mut(), 0);
+                    continue;
+                }
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            if !hook.is_null() {
+                UnhookWindowsHookEx(hook);
+            }
+        }
     }
 
     unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
@@ -664,6 +728,14 @@ mod platform {
                 let min_x = (super::MIN_WIDTH * dpi / 96.0).ceil() as i32;
                 info.ptMinTrackSize.x = info.ptMinTrackSize.x.max(min_x);
                 return result;
+            }
+            // 窗口激活：把键盘钩子挪回链首（后装先调，抢回媒体键）。
+            WM_ACTIVATE if w != 0 => {
+                let tid = HOOK_TID.load(Ordering::Relaxed);
+                if tid != 0 {
+                    // SAFETY: 给本进程钩子线程投私有消息。
+                    unsafe { PostThreadMessageW(tid, WM_REHOOK_MEDIA, 0, 0) };
+                }
             }
             // 隐藏后被重新显示（任务栏、Alt+Tab、`show`）。
             WM_SHOWWINDOW if w != 0 => super::shown_by_system(),
@@ -950,6 +1022,12 @@ mod platform {
     }
 
     pub fn start() {
+        // 全局媒体键：低级键盘钩子线程（与 AIMP 等播放器在同一层争抢，
+        // issue #11）。
+        std::thread::Builder::new()
+            .name("zeo-player-kbhook".into())
+            .spawn(media_hook_thread)
+            .ok();
         std::thread::Builder::new()
             .name("zeo-player-window".into())
             .spawn(|| {

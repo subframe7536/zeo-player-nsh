@@ -31,7 +31,7 @@
 | 005 | [ReplayGain（值入 tracks 表）](005-replaygain.md) | #7 | P2 | M | 001, 004（真实文件测试样本依赖 003） | DONE |
 | 006 | [10 段均衡器](006-equalizer.md) | #7 | P2 | M | 001, 004, 005 | DONE |
 | 007 | [歌词提前 / 延后（每曲 + 全局）](007-lyrics-offset.md) | #3 | P2 | S–M | 001（设置节落点）, 005（仅 db 版本顺序） | DONE |
-| 008 | [Windows 系统媒体会话抢占](008-media-session-preempt.md) | #11 | P1 | M | 004 | TODO |
+| 008 | [Windows 争抢硬件媒体键](008-media-session-preempt.md) | #11 | P1 | M | 004 | DONE（实机验证：LL 键盘钩子争抢生效，激活窗口后媒体键归 Zeo） |
 | 009 | [托盘实时播放状态](009-tray-live-status.md) | #4 | P3 | S | 001 | TODO |
 | 010 | [播放统计 + 首页](010-home-and-play-stats.md) | #1 | P2 | L | 001, 005, 007（db 版本顺序） | TODO |
 | 011 | [标签写回核心 + 单曲编辑弹窗](011-tag-write-and-edit-dialog.md) | #8 | P2 | M–L | 003 | TODO |

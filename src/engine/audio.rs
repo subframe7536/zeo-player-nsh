@@ -538,6 +538,9 @@ struct Output {
     stream: Option<cpal::Stream>,
     rate: u32,
     channels: usize,
+    /// 流是否在跑（`play()`/`pause()` 的成功态）。停着时暂停流：省空闲
+    /// CPU，也让 Windows 音频会话如实呈非活动态。
+    running: bool,
 }
 
 /// 在系统默认设备上打开输出流（失败时 `stream: None`，格式沿用 `fallback`）。
@@ -549,6 +552,7 @@ fn open_output(
     let mut rate = fallback.0;
     let mut channels = fallback.1;
     let mut stream = None;
+    let mut running = false;
     match cpal::default_host().default_output_device() {
         Some(device) => match device.default_output_config() {
             Ok(config) => {
@@ -590,7 +594,7 @@ fn open_output(
                 );
                 match build {
                     Ok(s) => {
-                        s.play().ok();
+                        running = s.play().is_ok();
                         stream = Some(s);
                     }
                     Err(err) => set_error(shared, &format!("音频输出打开失败: {err}")),
@@ -604,6 +608,28 @@ fn open_output(
         stream,
         rate,
         channels,
+        running,
+    }
+}
+
+/// 让输出流的运行状态跟随播放状态：停着时暂停流（省空闲 CPU，也让
+/// Windows 音频会话如实呈非活动态——最初为 issue #11 加的，实机证明
+/// 与症状无关，但行为本身无害保留）。淡出已在命令处理里等完。
+fn sync_stream(out: &mut Output, playing: bool) {
+    if playing == out.running {
+        return;
+    }
+    let Some(stream) = out.stream.as_ref() else {
+        return;
+    };
+    let ok = if playing {
+        stream.play().map_err(|e| e.to_string())
+    } else {
+        stream.pause().map_err(|e| e.to_string())
+    };
+    match ok {
+        Ok(()) => out.running = playing,
+        Err(err) => eprintln!("zeo-player cpal: {err}"),
     }
 }
 
@@ -675,6 +701,8 @@ fn handle_device(
     let fallback = (out.rate, out.channels);
     *out = open_output(shared, tx, fallback);
     if out.stream.is_some() {
+        // 重建出的流是 running 的；停着时立刻暂停，保持会话非活动。
+        sync_stream(out, shared.playing.load(Ordering::Relaxed));
         restore_after_rebuild(shared, out, loaded);
         None
     } else {
@@ -717,6 +745,7 @@ fn run(
             let fallback = (out.rate, out.channels);
             out = open_output(&shared, &tx, fallback);
             retry_at = if out.stream.is_some() {
+                sync_stream(&mut out, shared.playing.load(Ordering::Relaxed));
                 restore_after_rebuild(&shared, &out, &mut loaded);
                 None
             } else {
@@ -765,6 +794,9 @@ fn run(
             }
             shared.fade_target.store(1f32.to_bits(), Ordering::Relaxed);
         }
+        // 播放状态本轮可能变了：让流跟上（停着暂停流，开始播放则先启动
+        // 流——回调恢复取样后 gain 才从 0 淡入）。
+        sync_stream(&mut out, shared.playing.load(Ordering::Relaxed));
         // 2. 解码填充
         let playing = shared.playing.load(Ordering::Relaxed);
         let mut track_done = false;
@@ -840,6 +872,7 @@ fn run(
                 loaded = None;
                 shared.ready.store(false, Ordering::Relaxed);
                 publish_media(&shared, &media, true);
+                sync_stream(&mut out, false);
             }
             continue;
         }
@@ -1654,6 +1687,7 @@ mod tests {
             stream: None,
             rate: 192_000,
             channels: 8,
+            running: false,
         };
         let capacity = 48_000 * 3 * 2;
         let target = target_for(&out, capacity);
