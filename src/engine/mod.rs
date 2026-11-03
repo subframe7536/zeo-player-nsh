@@ -4,6 +4,7 @@
 
 pub(crate) mod audio;
 pub(crate) mod codec;
+pub(crate) mod eq;
 mod media;
 
 use std::path::{Path, PathBuf};
@@ -209,6 +210,20 @@ impl Player {
     /// ReplayGain 设置（立即生效；对正在播放的曲目重算增益）。
     pub fn set_replaygain(&self, cfg: crate::engine::audio::ReplayGainConfig) {
         self.engine.send(EngineCmd::SetReplayGain(cfg));
+    }
+
+    /// 均衡器设置（立即生效：写配置 + 加代次，回调下一块读取）。
+    pub fn set_eq(&self, cfg: crate::engine::eq::EqConfig) {
+        *self
+            .engine
+            .shared
+            .eq_config
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = cfg;
+        self.engine
+            .shared
+            .eq_gen
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
     }
 
     /// 测试用：注入一个输出设备事件。

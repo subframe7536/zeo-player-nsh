@@ -12,7 +12,8 @@ use super::super::components::button::{
     Size, Variant, icon_button, outline_button, pill_button, text_button,
 };
 use super::super::components::form::{
-    dialog_content, dialog_footer, dialog_header, input_field, modal, select_trigger, tab_list,
+    SELECT_POPUP_H, dialog_content, dialog_footer, dialog_header, input_field, menu_heading,
+    modal, select, select_trigger, tab_list,
     tab_trigger,
 };
 use super::super::components::icons::{Icon, icon};
@@ -25,19 +26,6 @@ use crate::config::{TrackEntry, unix_now};
 use crate::playlists::{Condition, Field, FieldType, Op, Playlist, Rule, Sort};
 
 // --- 菜单部件 -----------------------------------------------------------------
-
-/// 菜单里的分组小标题（不可选）。
-fn menu_heading(label: &'static str) -> AnyElement {
-    text(label)
-        .text_size(px(11.0))
-        .line_height(px(11.0))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(faint())
-        .px(px(10.0))
-        .pt(px(6.0))
-        .pb(px(2.0))
-        .into_element()
-}
 
 /// 「添加到歌单」子菜单：新建歌单…，再列出全部手动歌单。`paths` 在选中时取。
 pub fn add_to_submenu(paths: impl Fn() -> Vec<String> + Clone + 'static) -> AnyElement {
@@ -800,41 +788,6 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
                 })
             },
         ))
-}
-
-/// 下拉弹层的最大高度：比右键菜单矮，弹窗里的下拉在常见窗口高度下
-/// 上方或下方放得下（放不下下方时翻到上方）。
-const SELECT_POPUP_H: f32 = 300.0;
-
-/// 下拉选择：按钮显示当前值，菜单列出选项（可带分组小标题）。
-#[allow(clippy::type_complexity)]
-fn select(
-    current: impl Fn() -> String + Copy + 'static,
-    label: &'static str,
-    options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)>,
-    width: f32,
-) -> AnyElement {
-    let trigger = select_trigger(current, || None, label, width, "");
-    let gate = store::menu_control();
-    let menu = menu()
-        .offset(px(4.0))
-        .margin(px(8.0))
-        .trigger(trigger)
-        .open(gate.open())
-        .on_open_change(gate.menu_change());
-    // 选项多（字段有十几个）时在弹层里滚动：弹层的 max_h 只限制它自己，
-    // 不限制直接放进去的子项。
-    let mut items = view();
-    for (heading, option, pick) in options {
-        if let Some(h) = heading {
-            items = items.child(menu_heading(h));
-        }
-        items = items.child(item(option, None, pick));
-    }
-    popup!(menu, width.max(140.0), SELECT_POPUP_H)
-        // 减去弹层的上下内边距与边框。
-        .child(scroll().max_h(px(SELECT_POPUP_H - 10.0)).child(items))
-        .into_element()
 }
 
 /// 标签条件的值：从曲库现有标签里选（按小写名排序，忽略大小写去重）。

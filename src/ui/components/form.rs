@@ -2,11 +2,13 @@
 //! 分段。行为来自 nsh-core 的 `input` 与 nsh-base 的 `tabs` / `tab` /
 //! `dialog`；尺寸、间距、圆角同 shadcn，颜色取自主题（浅色 / 深色）。
 
-use nsh_base::{TabElement, TabsElement, tab, tabs};
+use nsh_base::{TabElement, TabsElement, menu, tab, tabs};
 use nsh_core::element::{Input, input};
 use nsh_core::prelude::*;
 
+use super::super::store;
 use super::super::theme::*;
+use super::super::views::{item, popup};
 use super::button::RADIUS_MD;
 use super::icons::{Icon, icon};
 
@@ -215,4 +217,52 @@ pub fn tab_trigger(
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(move || if on() { fg() } else { muted_fg() }),
         )
+}
+
+/// 菜单里的分组小标题（不可选）。
+pub(crate) fn menu_heading(label: &'static str) -> AnyElement {
+    text(label)
+        .text_size(px(11.0))
+        .line_height(px(11.0))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(faint())
+        .px(px(10.0))
+        .pt(px(6.0))
+        .pb(px(2.0))
+        .into_element()
+}
+
+/// 下拉弹层的最大高度：比右键菜单矮，弹窗里的下拉在常见窗口高度下
+/// 上方或下方放得下（放不下下方时翻到上方）。
+pub(crate) const SELECT_POPUP_H: f32 = 300.0;
+
+/// 下拉选择：按钮显示当前值，菜单列出选项（可带分组小标题）。
+#[allow(clippy::type_complexity)]
+pub fn select(
+    current: impl Fn() -> String + Copy + 'static,
+    label: &'static str,
+    options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)>,
+    width: f32,
+) -> AnyElement {
+    let trigger = select_trigger(current, || None, label, width, "");
+    let gate = store::menu_control();
+    let menu = menu()
+        .offset(px(4.0))
+        .margin(px(8.0))
+        .trigger(trigger)
+        .open(gate.open())
+        .on_open_change(gate.menu_change());
+    // 选项多时在弹层里滚动：弹层的 max_h 只限制它自己，不限制直接
+    // 放进去的子项。
+    let mut items = view();
+    for (heading, option, pick) in options {
+        if let Some(h) = heading {
+            items = items.child(menu_heading(h));
+        }
+        items = items.child(item(option, None, pick));
+    }
+    popup!(menu, width.max(140.0), SELECT_POPUP_H)
+        // 减去弹层的上下内边距与边框。
+        .child(scroll().max_h(px(SELECT_POPUP_H - 10.0)).child(items))
+        .into_element()
 }

@@ -186,6 +186,9 @@ pub struct LibraryConfig {
     /// ReplayGain 音量标准化（模式 / 预放大 / 无标签增益 / 防削波）。
     #[serde(default)]
     pub replaygain: crate::engine::audio::ReplayGainConfig,
+    /// 均衡器（开关 / 前级 / 10 段增益）。
+    #[serde(default)]
+    pub eq: crate::engine::eq::EqConfig,
     /// 重新打开时恢复上次的窗口大小与位置。
     #[serde(default = "default_true")]
     pub remember_frame: bool,
@@ -245,6 +248,7 @@ impl Default for LibraryConfig {
             delete_permanently: false,
             pause_on_device_change: true,
             replaygain: crate::engine::audio::ReplayGainConfig::default(),
+            eq: crate::engine::eq::EqConfig::default(),
             remember_frame: true,
             window_frame: None,
         }
@@ -497,6 +501,26 @@ impl LibraryStore {
 
     pub fn set_replaygain(&self, cfg: crate::engine::audio::ReplayGainConfig) {
         self.update_config(|c| c.replaygain = cfg);
+    }
+
+    /// 均衡器设置。
+    pub fn eq(&self) -> crate::engine::eq::EqConfig {
+        self.config().eq
+    }
+
+    /// 只更新内存里的配置快照、不落盘：`library.json` 的写盘由调用方
+    /// （`ui::store::set_eq`，400ms 防抖）调 [`LibraryStore::save`] 收尾。
+    /// 内存立即更新是为了不让 120ms 轮询在防抖窗口内把界面值弹回旧档。
+    pub fn set_eq(&self, cfg: crate::engine::eq::EqConfig) {
+        let mut guard = self.config.lock().unwrap();
+        let mut config = (**guard).clone();
+        config.eq = cfg;
+        *guard = Arc::new(config);
+    }
+
+    /// 把当前内存配置写回 `library.json`（防抖写盘的收尾用）。
+    pub fn save(&self) {
+        self.save_config(&self.config());
     }
 
     pub fn close_action(&self) -> CloseAction {

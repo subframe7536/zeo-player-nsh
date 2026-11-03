@@ -238,6 +238,12 @@ const SECTIONS: &[Section] = &[
         build: playback::replaygain_section,
     },
     Section {
+        pane: Pane::Playback,
+        title: "均衡器",
+        keys: "均衡器 eq equalizer 频段 低音 高音 预设 流行 摇滚 爵士 古典 人声",
+        build: playback::eq_section,
+    },
+    Section {
         pane: Pane::Lyrics,
         title: "歌词对齐",
         keys: "歌词 全屏 左对齐 居中 右对齐 对齐方式",

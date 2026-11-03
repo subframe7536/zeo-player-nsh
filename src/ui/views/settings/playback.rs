@@ -2,7 +2,9 @@
 
 use nsh_core::prelude::*;
 
-use super::super::super::components::form::input_field;
+use super::super::super::components::button::{Size, Variant, text_button};
+use super::super::super::components::form::{input_field, select};
+use super::super::super::components::slider::slider;
 use super::super::super::store::store;
 use super::super::super::theme::*;
 use super::{pref_row, setting_section};
@@ -206,5 +208,168 @@ pub(super) fn replaygain_section() -> View {
                 move || s.library.with(|l| l.config.replaygain.clip_protect),
                 move |on| edit_replaygain(|c| c.clip_protect = on),
             ))
+    }))
+}
+
+// --- 均衡器 -----------------------------------------------------------------
+
+/// 段名（与 `engine::eq::BANDS` 顺序一致）。
+const EQ_LABELS: [&str; 10] =
+    ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
+/// 各段滑块的无障碍标签（与 `EQ_LABELS` 同序）。
+const EQ_A11Y: [&str; 10] = [
+    "均衡器 31",
+    "均衡器 62",
+    "均衡器 125",
+    "均衡器 250",
+    "均衡器 500",
+    "均衡器 1k",
+    "均衡器 2k",
+    "均衡器 4k",
+    "均衡器 8k",
+    "均衡器 16k",
+];
+
+/// 改均衡器配置：读当前值、应用修改、立即生效（持久化在 store 里防抖）。
+fn edit_eq(f: impl Fn(&mut crate::engine::eq::EqConfig)) {
+    let mut next = store().library.with(|l| l.config.eq);
+    f(&mut next);
+    super::super::super::store::set_eq(next);
+}
+
+/// 「启用均衡器」开关的回调（`pref_row` 要 `fn` 指针，不能捕获）。
+fn eq_enabled_set(on: bool) {
+    edit_eq(|c| c.enabled = on);
+}
+
+/// 吸附到 0.5 dB。
+fn snap_db(db: f32) -> f32 {
+    (db * 2.0).round() / 2.0
+}
+
+/// 当前各段值匹配的预设名；都不匹配时是「自定义」。
+fn eq_preset_name(bands: &[f32; 10]) -> String {
+    crate::engine::eq::PRESETS
+        .iter()
+        .find(|(_, b)| b == bands)
+        .map(|(name, _)| (*name).to_owned())
+        .unwrap_or_else(|| "自定义".to_owned())
+}
+
+/// 一条 EQ 滑块：标签 | slider | 当前值（`+3.5 dB`）。
+fn eq_row(
+    label: &'static str,
+    a11y: &'static str,
+    get: impl Fn() -> f32 + Copy + 'static,
+    apply: impl Fn(f64) + Copy + 'static,
+) -> View {
+    view()
+        .flex_row()
+        .items_center()
+        .gap(px(10.0))
+        .child(
+            text(label)
+                .w(px(36.0))
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .text_color(muted_fg()),
+        )
+        .child(
+            slider(
+                move || ((get() + crate::engine::eq::MAX_DB) / (2.0 * crate::engine::eq::MAX_DB))
+                    as f64,
+                input(),
+                muted_fg(),
+                fg(),
+                apply,
+                apply,
+            )
+            .label(a11y)
+            .flex_1(),
+        )
+        .child(
+            text(move || format!("{:+.1} dB", get()))
+                .w(px(60.0))
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .tabular_nums()
+                .text_color(fg()),
+        )
+}
+
+/// 均衡器：10 段 peaking + 前级（±12 dB），拖动立即生效。
+pub(super) fn eq_section() -> View {
+    let s = store();
+    let cfg = move || s.library.with(|l| l.config.eq);
+    let on = move || cfg().enabled;
+    setting_section(
+        "均衡器",
+        "按频段提升或衰减音量。拖动立即生效。",
+        None,
+    )
+    .child(pref_row(
+        "启用均衡器",
+        "对正在播放的音频实时应用下面的频段增益。",
+        move || s.library.with(|l| l.config.eq.enabled),
+        eq_enabled_set,
+    ))
+    .child(when(on, move || {
+        let mut rows = view().gap(px(6.0)).child(eq_row(
+            "前级",
+            "均衡器 前级",
+            move || s.library.with(|l| l.config.eq.preamp_db),
+            move |f| {
+                let db = snap_db((f * 24.0 - 12.0) as f32);
+                edit_eq(|c| c.preamp_db = db);
+            },
+        ));
+        for (i, label) in EQ_LABELS.iter().enumerate() {
+            rows = rows.child(eq_row(
+                label,
+                EQ_A11Y[i],
+                move || s.library.with(|l| l.config.eq.bands[i]),
+                move |f| {
+                    let db = snap_db((f * 24.0 - 12.0) as f32);
+                    edit_eq(|c| c.bands[i] = db);
+                },
+            ));
+        }
+        let options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)> =
+            crate::engine::eq::PRESETS
+                .iter()
+                .map(|&(name, bands)| {
+                    (
+                        None,
+                        name,
+                        Box::new(move || edit_eq(|c| c.bands = bands)) as Box<dyn Fn()>,
+                    )
+                })
+                .collect();
+        view()
+            .gap(px(16.0))
+            .child(
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(select(
+                        move || eq_preset_name(&s.library.with(|l| l.config.eq.bands)),
+                        "预设",
+                        options,
+                        160.0,
+                    ))
+                    .child(view().flex_1())
+                    .child(text_button(
+                        Variant::Ghost,
+                        Size::Sm,
+                        None,
+                        "重置",
+                        || edit_eq(|c| {
+                            c.preamp_db = 0.0;
+                            c.bands = [0.0; 10];
+                        }),
+                    )),
+            )
+            .child(rows)
     }))
 }

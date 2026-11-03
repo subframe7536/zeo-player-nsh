@@ -501,6 +501,7 @@ pub fn install() -> Store {
     player().set_fade_ms(library_store().fade_ms());
     player().set_pause_on_device_change(library_store().pause_on_device_change());
     player().set_replaygain(library_store().replaygain());
+    player().set_eq(library_store().eq());
     player().set_loop_mode(library_store().loop_mode());
     // 在设好循环模式之后：随机模式下恢复的队列按它重新洗牌。
     player().restore_last();
@@ -666,6 +667,23 @@ pub fn set_replaygain(cfg: crate::engine::audio::ReplayGainConfig) {
     update_config(|c| c.replaygain = cfg);
     player().set_replaygain(cfg);
     std::thread::spawn(move || library_store().set_replaygain(cfg));
+}
+
+/// 均衡器设置（立即生效；持久化防抖 400ms——拖滑块不每动一下都写盘）。
+pub fn set_eq(cfg: crate::engine::eq::EqConfig) {
+    update_config(|c| c.eq = cfg);
+    player().set_eq(cfg);
+    // 内存快照立即更新（120ms 轮询不会把界面弹回旧档）；
+    // 代次计数防抖：只有最后一次改动在 400ms 后才落盘。
+    library_store().set_eq(cfg);
+    static GEN: AtomicU64 = AtomicU64::new(0);
+    let seq = GEN.fetch_add(1, Ordering::Relaxed) + 1;
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(400));
+        if GEN.load(Ordering::Relaxed) == seq {
+            library_store().save();
+        }
+    });
 }
 
 /// 「删除文件」确认弹窗的请求：记下路径与当前的删除方式（回收站 / 直接删）。

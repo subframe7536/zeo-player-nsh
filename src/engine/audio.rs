@@ -327,6 +327,11 @@ pub struct Shared {
     /// ReplayGain 设置（引擎线程与 `SetReplayGain` 的发送方用；
     /// 输出回调不碰——它只读 `rg_factor`，避免在回调里取锁）。
     pub rg_config: Mutex<ReplayGainConfig>,
+    /// EQ 配置代次：回调每块比较，变了才 `try_lock` 取新配置重算系数
+    /// （拿不到就下一块再试，回调永不阻塞）。
+    pub eq_gen: AtomicU64,
+    /// 均衡器设置（`set_eq` 的调用方写；回调只在 `try_lock` 成功时读）。
+    pub eq_config: Mutex<crate::engine::eq::EqConfig>,
 }
 
 impl Shared {
@@ -399,6 +404,8 @@ impl EngineHandle {
             pause_on_device_change: AtomicBool::new(true),
             rg_factor: AtomicU32::new(1f32.to_bits()),
             rg_config: Mutex::new(ReplayGainConfig::default()),
+            eq_gen: AtomicU64::new(0),
+            eq_config: Mutex::new(crate::engine::eq::EqConfig::default()),
         });
         let media = MediaSession::start(tx.clone());
         std::thread::Builder::new()
@@ -552,7 +559,19 @@ fn open_output(
                     stream_config,
                     {
                         let shared = shared.clone();
-                        move |data: &mut [f32], _| output_callback(&shared, data, channels)
+                        let mut eq = crate::engine::eq::Equalizer::new();
+                        // 代次哨兵：强制首块读取配置（真代次不可能到 MAX）。
+                        let mut eq_seen = u64::MAX;
+                        move |data: &mut [f32], _| {
+                            let g = shared.eq_gen.load(Ordering::Acquire);
+                            if g != eq_seen
+                                && let Ok(cfg) = shared.eq_config.try_lock()
+                            {
+                                eq.configure(&cfg, rate);
+                                eq_seen = g;
+                            }
+                            output_callback(&shared, &mut eq, data, channels)
+                        }
                     },
                     {
                         let tx = tx.clone();
@@ -1387,7 +1406,12 @@ fn fade_step(ms: u32, rate: u32) -> f32 {
     }
 }
 
-fn output_callback(shared: &Shared, data: &mut [f32], channels: usize) {
+fn output_callback(
+    shared: &Shared,
+    eq: &mut crate::engine::eq::Equalizer,
+    data: &mut [f32],
+    channels: usize,
+) {
     let volume = f32::from_bits(shared.volume.load(Ordering::Relaxed));
     let rg = f32::from_bits(shared.rg_factor.load(Ordering::Relaxed));
     let playing = shared.playing.load(Ordering::Relaxed);
@@ -1400,7 +1424,11 @@ fn output_callback(shared: &Shared, data: &mut [f32], channels: usize) {
         );
         let mut gain = f32::from_bits(shared.gain.load(Ordering::Relaxed));
         let ch = channels.max(1);
-        let take = shared.ring.pop(data.len(), |i, sample| {
+        // 取样 → EQ → rg × 音量 × 淡变 → 钳到 ±1。
+        let take = shared.ring.pop(data.len(), |i, sample| data[i] = sample);
+        eq.process(&mut data[..take], ch);
+        for slot in data[..take].iter_mut().enumerate() {
+            let (i, x) = slot;
             // 每帧（而不是每个样本）推进一次增益，各声道一致。
             if i % ch == 0 && gain != target {
                 gain = if gain < target {
@@ -1409,9 +1437,8 @@ fn output_callback(shared: &Shared, data: &mut [f32], channels: usize) {
                     (gain - step).max(target)
                 };
             }
-            // 取样 → rg × 音量 × 淡变 → 钳到 ±1（EQ 挂在取样与增益之间）。
-            data[i] = (sample * rg * volume * fade_curve(gain)).clamp(-1.0, 1.0);
-        });
+            *x = (*x * rg * volume * fade_curve(gain)).clamp(-1.0, 1.0);
+        }
         // 缓冲空了（还没解出来）也照样推进淡出，不让引擎干等。
         if take == 0 && target < gain {
             gain = (gain - step * (data.len() / ch) as f32).max(target);
@@ -1471,22 +1498,25 @@ mod tests {
             pause_on_device_change: AtomicBool::new(true),
             rg_factor: AtomicU32::new(1f32.to_bits()),
             rg_config: Mutex::new(ReplayGainConfig::default()),
+            eq_gen: AtomicU64::new(0),
+            eq_config: Mutex::new(crate::engine::eq::EqConfig::default()),
         };
         // 100 ms 后到一半（smoothstep(0.5) = 0.5），200 ms 后满。
+        let mut eq = crate::engine::eq::Equalizer::new();
         let mut buf = vec![0.0_f32; 4800 * 2];
-        output_callback(&shared, &mut buf, 2);
+        output_callback(&shared, &mut eq, &mut buf, 2);
         assert!(
             (buf[buf.len() - 1] - 0.5).abs() < 0.01,
             "{}",
             buf[buf.len() - 1]
         );
         assert!(buf.windows(2).all(|w| w[1] >= w[0] - 1e-6), "淡入单调");
-        output_callback(&shared, &mut buf, 2);
+        output_callback(&shared, &mut eq, &mut buf, 2);
         assert!((buf[buf.len() - 1] - 1.0).abs() < 1e-3);
         // 淡出：目标 0，200 ms 后静音。
         shared.fade_target.store(0f32.to_bits(), Ordering::Relaxed);
         let mut long = vec![0.0_f32; 9600 * 2];
-        output_callback(&shared, &mut long, 2);
+        output_callback(&shared, &mut eq, &mut long, 2);
         assert!(
             long[long.len() - 1].abs() < 1e-6
                 && f32::from_bits(shared.gain.load(Ordering::Relaxed)) == 0.0

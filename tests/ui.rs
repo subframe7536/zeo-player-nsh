@@ -217,6 +217,66 @@ fn fade_duration_input_saves_clamped_value() {
     assert!(saved(200), "结束时恢复默认 200: {:?}", saved_fade_ms());
 }
 
+/// 数据目录里 library.json 的 eq 段（防抖 400ms 后在后台线程写盘，
+/// 调用方轮询）。
+fn saved_eq() -> Option<serde_json::Value> {
+    let file =
+        std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap()).join("library.json");
+    std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("eq").cloned())
+}
+
+/// 设置弹窗 →「播放」分类 →「均衡器」：开开关、选「低音增强」预设，
+/// 频段值立即显示并落盘；结束时关掉开关恢复默认。
+#[test]
+fn equalizer_preset_applies_and_persists() {
+    let mut app = start(1200.0, 800.0);
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[播放]").unwrap();
+    app.wait_for("label:启用均衡器").unwrap();
+    app.press("label:启用均衡器").unwrap();
+    // 开关打开后各段滑块出现（前级显示 +0.0 dB）。
+    app.wait_for("+0.0 dB").unwrap();
+    // 触发器按压偶发打不开弹层（抬起触摸落在刚挂上的弹层上算作外部
+    // 按压又把它关掉）：按到菜单出现为止。
+    let mut opened = false;
+    for _ in 0..10 {
+        app.press("label:预设").unwrap();
+        if app
+            .wait_for_within("role:menuitem[低音增强]", Duration::from_millis(500))
+            .is_ok()
+        {
+            opened = true;
+            break;
+        }
+    }
+    assert!(opened, "预设菜单应打开");
+    app.press("role:menuitem[低音增强]").unwrap();
+    // 低音增强的第一段是 +6.0 dB，立即显示。
+    app.wait_for("+6.0 dB").unwrap();
+    let saved = |want: bool| {
+        for _ in 0..40 {
+            match saved_eq() {
+                Some(eq)
+                    if eq["enabled"].as_bool() == Some(want)
+                        && eq["bands"][0].as_f64() == Some(if want { 6.0 } else { 0.0 }) =>
+                {
+                    return true
+                }
+                _ => std::thread::sleep(Duration::from_millis(50)),
+            }
+        }
+        false
+    };
+    assert!(saved(true), "eq 应落盘为 enabled+低音增强: {:?}", saved_eq());
+    // 共享全局配置，用例结束前恢复：回平直、关开关。
+    app.press("label:重置").unwrap();
+    app.press("label:启用均衡器").unwrap();
+    assert!(saved(false), "结束时恢复关闭: {:?}", saved_eq());
+}
+
 /// 设置弹窗 →「外观」分类 →「外观」下拉：选深色 / 浅色立即换色板
 /// （文字颜色即变），回到「系统」。
 #[test]
