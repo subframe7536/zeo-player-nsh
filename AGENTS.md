@@ -60,7 +60,7 @@ nsh package . --target windows --icon resources/icon-windows.png  # Windows inst
 - Cross-check Windows from a Mac when touching platform code:
   `brew install llvm lld && cargo install --locked cargo-xwin`, then
   `PATH="/opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:$PATH" cargo xwin check --target x86_64-pc-windows-msvc`.
-- Memory benchmark: `ZEO_PLAYER_BENCH=1 nsh run .` and sample with `footprint <pid>`.
+- Memory benchmark: `ZEO_PLAYER_BENCH=1 nsh run .` (also `scroll`/`hidden`/`close` modes; `hidden` self-reports `priv`/`ws` to stderr every 30s). Bench code compiles only under `cfg(any(debug_assertions, test))` — release builds exclude it entirely and the env vars are inert. Sample externally with `footprint <pid>` on macOS or Task Manager "Commit size" on Windows.
 
 CI (`.github/workflows/ci.yml`) runs `nsh check` and `nsh test` on macOS and Windows for every push and PR.
 

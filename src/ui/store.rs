@@ -295,8 +295,9 @@ pub fn install() -> Store {
             let hidden = crate::window::is_hidden();
             if hidden && !s.hidden.get_untracked() {
                 // 刚进托盘：封面信号的 owner 整个 dispose（缩略图在磁盘
-                // 缓存，显示时重新请求）；延迟 1 秒等界面拆完，再把空闲
-                // 堆页还给系统。
+                // 缓存，显示时重新请求）；大图 LRU、歌词缓存与 SQLite 页
+                // 缓存一并放掉（当前曲目的大图 Arc 由 NowPlaying 持着，
+                // 不受影响）；延迟 1 秒等界面拆完，再把空闲堆页还给系统。
                 COVERS.with(|c| c.borrow_mut().clear());
                 COVER_STAMPS.with(|c| c.borrow_mut().clear());
                 COVER_OWNER.with(|o| {
@@ -304,6 +305,9 @@ pub fn install() -> Store {
                         owner.dispose();
                     }
                 });
+                crate::metadata::covers::clear_artwork();
+                crate::engine::Meta::clear_lyrics();
+                crate::db::shrink_memory();
                 spawn(async {
                     timer(Duration::from_secs(1)).await;
                     crate::window::trim_memory();
@@ -1296,7 +1300,9 @@ pub fn cover_for(path: &str, pt: f32) -> Option<SharedString> {
 /// 与 [`cover_for`] 相同但不受「列表显示封面」开关影响：播放条的当前
 /// 曲目封面一直显示（开关只管列表渲染）。
 pub fn cover_for_always(path: &str, pt: f32) -> Option<SharedString> {
-    if std::env::var_os("ZEO_PLAYER_BENCH_NO_COVERS").is_some() {
+    if cfg!(any(debug_assertions, test))
+        && std::env::var_os("ZEO_PLAYER_BENCH_NO_COVERS").is_some()
+    {
         return None;
     }
     let side = if pt <= 48.0 {

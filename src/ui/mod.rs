@@ -84,6 +84,7 @@ pub fn App() -> impl IntoElement {
         }) as Rc<dyn Fn()>
     };
     let _ = s;
+    #[cfg(any(debug_assertions, test))]
     bench(open.clone());
 
     let nav = global::<Nav>();
@@ -276,6 +277,8 @@ fn delete_prompt() -> AnyElement {
     components::form::modal(content, cancel)
 }
 
+// 专辑网格（测量脚本滚动它）。生产构建里没有测量脚本，整项剔除。
+#[cfg(any(debug_assertions, test))]
 thread_local! {
     /// 专辑网格（测量脚本滚动它）。
     pub(crate) static BENCH_GRID: std::cell::Cell<Option<nsh_core::element::ElementRef>> = const { std::cell::Cell::new(None) };
@@ -283,13 +286,48 @@ thread_local! {
 
 /// 内存测量用的脚本（`ZEO_PLAYER_BENCH=1` 启动时运行，平时不做任何事）：依次打开
 /// 各视图、在专辑页停留、播放并打开全屏、连续切 20 首，每步之间留时间测量。
-/// 进度写到标准错误：`ZEO_PLAYER_BENCH step <名称>`。
+/// 进度写到标准错误：`ZEO_PLAYER_BENCH step <名称>`。只在 debug / 测试构建里
+/// 编译——生产 release 里环境变量无效、代码不存在。
+#[cfg(any(debug_assertions, test))]
 fn bench(open_full: Rc<dyn Fn()>) {
     if std::env::var_os("ZEO_PLAYER_BENCH").is_none() {
         return;
     }
     if std::env::var("ZEO_PLAYER_BENCH").as_deref() == Ok("close") {
         return bench_close();
+    }
+    // `hidden`：放歌后隐藏窗口（后台播放），每 30 秒打一次播放状态
+    // 与进程内存到 stderr——泄漏 / 内存增长的观察台。
+    if std::env::var("ZEO_PLAYER_BENCH").as_deref() == Ok("hidden") {
+        spawn(async move {
+            let wait = |s: u64| timer(std::time::Duration::from_secs(s));
+            while store::store().library.with_untracked(|l| l.progress.scanning)
+                || store::store().tracks.with_untracked(|t| t.is_empty())
+            {
+                wait(1).await;
+            }
+            let tracks = store::store().tracks.get_untracked();
+            store::play_list(&tracks, 0);
+            wait(2).await;
+            crate::window::hide();
+            eprintln!("ZEO_PLAYER_BENCH step hidden");
+            let mem = || {
+                let (priv_bytes, ws) = crate::window::memory_usage();
+                format!("priv={:.1}MB ws={:.1}MB", priv_bytes as f64 / 1048576.0, ws as f64 / 1048576.0)
+            };
+            loop {
+                wait(30).await;
+                let st = store::player().state();
+                eprintln!(
+                    "ZEO_PLAYER_BENCH hidden playing={} time={:.1} {} track={:?}",
+                    st.is_playing,
+                    st.current_time,
+                    mem(),
+                    st.track.path
+                );
+            }
+        });
+        return;
     }
     // `scroll`：只跑浏览 + 滚网格，不放歌不开全屏（测列表滚动内存）。
     let scroll_only = std::env::var("ZEO_PLAYER_BENCH").as_deref() == Ok("scroll");
@@ -351,6 +389,7 @@ fn bench(open_full: Rc<dyn Fn()>) {
 }
 
 /// `ZEO_PLAYER_BENCH=close`：点关闭 → 询问 → 最小化到托盘 → 从托盘显示 → 退出。
+#[cfg(any(debug_assertions, test))]
 fn bench_close() {
     use crate::config::CloseAction;
     spawn(async move {

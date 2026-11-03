@@ -140,6 +140,16 @@ pub fn later(f: impl FnOnce() + Send + 'static) {
         .send(Box::new(f));
 }
 
+/// 收缩 SQLite 的页缓存与预分配（隐藏到托盘时调）：还掉连接持有的
+/// 空闲页，真降提交内存。在写线程上做，不阻塞界面。
+pub fn shrink_memory() {
+    later(|| {
+        with("收缩内存", |conn| {
+            conn.execute_batch("PRAGMA shrink_memory")
+        });
+    });
+}
+
 fn list(raw: String) -> Vec<String> {
     serde_json::from_str(&raw).unwrap_or_default()
 }

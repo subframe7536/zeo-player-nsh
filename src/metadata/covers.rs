@@ -348,6 +348,12 @@ fn art_cache() -> &'static ArtCache {
     CACHE.get_or_init(|| Mutex::new(Vec::new()))
 }
 
+/// 清空大图 LRU（隐藏到托盘时调）：当前曲目的大图 `Arc` 还被
+/// `NowPlaying` 信号持着不受影响，只放掉队尾预载；显示后按需重建。
+pub fn clear_artwork() {
+    art_cache().lock().unwrap().clear();
+}
+
 /// 读封面源 → 缩到 [`LARGE`] → JPEG data URI（解不开的格式按原始字节
 /// 直接进 URI，交给系统解码，同 `cover_file` 的 Raw 分支）。
 fn art_data_uri(path: &Path) -> Option<String> {

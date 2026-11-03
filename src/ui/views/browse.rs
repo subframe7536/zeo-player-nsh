@@ -369,6 +369,7 @@ pub fn Albums() -> impl IntoElement {
                 .content_padding_bottom(px(BAR_SPACE))
                 .flex_1();
                 let grid_ref = element_ref();
+                #[cfg(any(debug_assertions, test))]
                 super::super::BENCH_GRID.with(|g| g.set(Some(grid_ref)));
                 let grid = grid.element_ref(&grid_ref);
                 view()

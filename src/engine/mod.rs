@@ -297,6 +297,11 @@ impl Meta {
         find_external_lrc(Path::new(&path)).map(|p| p.to_string_lossy().into_owned())
     }
 
+    /// 清空歌词缓存（隐藏到托盘时调）：歌词文本大，显示后按需重读。
+    pub fn clear_lyrics() {
+        lyrics_cache().lock().unwrap().clear();
+    }
+
     /// 曲目封面的主色调（色相 0..360、饱和度 0..1），还没算出来为
     /// `None`：扫描 / 封面生成时写进全局元数据缓存——这里同步读，不
     /// 触发计算。

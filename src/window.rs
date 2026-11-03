@@ -132,6 +132,7 @@ pub fn take_tray_actions() -> Vec<TrayAction> {
 
 /// 测量脚本用：像点了窗口的关闭按钮（主线程上，不经 NSH 的 `performClose`：
 /// 那会在 NSH 应用界面变更的途中跑嵌套的事件循环）。
+#[cfg(any(debug_assertions, test))]
 pub fn simulate_close() {
     #[cfg(target_os = "macos")]
     dispatch2::DispatchQueue::main().exec_async(|| {
@@ -147,6 +148,7 @@ pub fn simulate_close() {
 
 /// 测量脚本用：像托盘菜单那样发出一个操作（macOS 在主线程上，与菜单
 /// 回调相同）。
+#[cfg(any(debug_assertions, test))]
 pub fn simulate_tray(action: TrayAction) {
     #[cfg(target_os = "macos")]
     dispatch2::DispatchQueue::main().exec_async(move || push_tray(action));
@@ -235,6 +237,13 @@ pub fn trim_memory() {
 #[cfg(target_os = "windows")]
 pub fn hwnd() -> Option<u64> {
     platform::HWND_VALUE.get().copied()
+}
+
+/// 进程内存采样（私有字节, 工作集），测量脚本用；macOS / 其它平台
+/// 未实现，返回 (0, 0)（bench 只在 Windows 上跑）。
+#[cfg(any(debug_assertions, test))]
+pub fn memory_usage() -> (u64, u64) {
+    platform::memory_usage()
 }
 
 /// Windows 的窗口按钮由应用画（`ui::caption`），这里是它们的操作与状态。
@@ -582,6 +591,12 @@ mod platform {
         // SAFETY: zone 传 NULL 表示默认分区；goal 0 表示尽量释放空闲页。
         unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
     }
+
+    /// 未实现（bench 的采样只在 Windows 上跑）。
+    #[cfg(any(debug_assertions, test))]
+    pub fn memory_usage() -> (u64, u64) {
+        (0, 0)
+    }
 }
 
 // --- Windows -------------------------------------------------------------------
@@ -598,6 +613,7 @@ mod platform {
         DWMWA_VISIBLE_FRAME_BORDER_THICKNESS, DwmGetWindowAttribute,
     };
     use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+    use windows_sys::Win32::System::Memory::{GetProcessHeap, HeapCompact};
     use windows_sys::Win32::System::Threading::{
         AttachThreadInput, GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId,
         SetProcessWorkingSetSize, TerminateProcess,
@@ -1044,9 +1060,33 @@ mod platform {
     }
 
     pub fn trim_memory() {
-        // SAFETY: 伪句柄加两个 usize::MAX 等价于 EmptyWorkingSet：系统只
-        // 在最小化窗口时自动裁剪，SW_HIDE 不会，所以这里手动做。
-        unsafe { SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX) };
+        // SAFETY: 先让进程堆压缩（相邻空闲块合并、大块空闲 decommit——
+        // Rust 的默认分配器走的就是这个堆），再把工作集裁空：伪句柄加
+        // 两个 usize::MAX 等价于 EmptyWorkingSet（系统只在最小化窗口时
+        // 自动裁剪，SW_HIDE 不会，所以手动做）。
+        unsafe {
+            HeapCompact(GetProcessHeap(), 0);
+            SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX)
+        };
+    }
+
+    /// 进程内存（私有字节, 工作集）：`PrivateUsage` 是本进程独占的提交
+    /// 内存，泄漏看它最准；`WorkingSetSize` 是任务管理器显示的驻留集。
+    #[cfg(any(debug_assertions, test))]
+    pub fn memory_usage() -> (u64, u64) {
+        use windows_sys::Win32::System::ProcessStatus::{
+            K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+        };
+        let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+        counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        // SAFETY: 伪句柄 + 已按 cb 填好大小的本进程结构体。
+        let ok = unsafe {
+            K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb)
+        };
+        if ok == 0 {
+            return (0, 0);
+        }
+        (counters.PagefileUsage as u64, counters.WorkingSetSize as u64)
     }
 }
 
@@ -1065,4 +1105,8 @@ mod platform {
     pub fn remember(_on: bool) {}
     pub fn update(_state: TrayState) {}
     pub fn trim_memory() {}
+    #[cfg(any(debug_assertions, test))]
+    pub fn memory_usage() -> (u64, u64) {
+        (0, 0)
+    }
 }
