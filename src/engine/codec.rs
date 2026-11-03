@@ -1,5 +1,5 @@
 //! symphonia 解码封装：打开文件、逐块解码为交错 f32、精确 seek。
-//! 基线 MP3 / FLAC / WAV（opus/ogg 暂缓，恢复时在此处接线）。
+//! 支持 MP3 / FLAC / WAV / AIFF / AAC / ALAC（M4A）/ OGG Vorbis。
 
 use std::fs::File;
 use std::path::Path;
@@ -132,5 +132,61 @@ impl Source {
             return Ok(tb.calc_time_saturating(seeked.actual_ts).as_secs_f64());
         }
         Ok(clamped)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Source;
+    use std::path::Path;
+
+    /// 每种新格式一个 2 秒样本（scripts/make-test-music.sh 的
+    /// zeo-player-test-formats）：能打开、总帧数够、seek(1.0) 落点准确、
+    /// 标题与 quality 对、波形生成成功。
+    #[test]
+    fn decodes_every_supported_format() {
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(".nsh/tmp/zeo-player-test-formats");
+        if !dir.is_dir() {
+            eprintln!("跳过：没有 {} 测试语料", dir.display());
+            return;
+        }
+        // （文件名, 期望标题, 期望 quality）
+        let cases = [
+            ("aac.m4a", "格式 aac", "Lossy"),
+            ("alac.m4a", "格式 alac", "Lossless"),
+            ("raw.aac", "raw", "Lossy"),
+            ("vorbis.ogg", "格式 vorbis", "Lossy"),
+            ("pcm.aiff", "格式 pcm", "Lossless"),
+        ];
+        for (name, title, quality) in cases {
+            let path = dir.join(name);
+            let mut src =
+                Source::open(&path).unwrap_or_else(|e| panic!("{name}: Source::open: {e}"));
+            let channels = src.channels;
+            let mut frames = 0usize;
+            while let Some(block) =
+                src.next_block().unwrap_or_else(|e| panic!("{name}: next_block: {e}"))
+            {
+                frames += block.len() / channels;
+            }
+            assert!(
+                frames as f64 >= src.sample_rate as f64 * 1.5,
+                "{name}: 解码帧数 {frames} 不足（sample_rate {}）",
+                src.sample_rate
+            );
+            match src.seek(1.0) {
+                Ok(at) => assert!((0.9..=1.05).contains(&at), "{name}: seek(1.0) 落点 {at}"),
+                // ADTS 裸流没有索引，symphonia 对它不做精确 seek——只有它允许跳过断言。
+                Err(_) if name == "raw.aac" => {}
+                Err(e) => panic!("{name}: seek(1.0): {e}"),
+            }
+            let meta =
+                crate::metadata::read_meta(&path).unwrap_or_else(|e| panic!("{name}: read_meta: {e}"));
+            assert_eq!(meta.title, title, "{name}: 标题不符");
+            assert_eq!(meta.quality.as_deref(), Some(quality), "{name}: quality 不符");
+            crate::metadata::waveform::waveform(&path)
+                .unwrap_or_else(|e| panic!("{name}: waveform: {e}"));
+        }
     }
 }

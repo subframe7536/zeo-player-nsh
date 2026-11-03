@@ -1,7 +1,9 @@
 #!/bin/sh
-# Builds the corpus src/e2e.rs and tests/ui.rs play:
-# .nsh/tmp/zeo-player-test-music in the repo (needs ffmpeg).
-# 6 files (mp3 / flac / wav, one in a subfolder), tagged, with an external .lrc.
+# Builds the corpora tests play (needs ffmpeg):
+# .nsh/tmp/zeo-player-test-music —— src/e2e.rs / tests/ui.rs 的曲库语料
+#   （6 个音频 + lrc + png；文件数有断言，新格式样本别放这里）
+# .nsh/tmp/zeo-player-test-formats —— 每种新格式一个 2 秒样本，
+#   codec 测试用它验解码 / seek / 标签 / 波形
 set -eu
 dir="${1:-$(dirname "$0")/../.nsh/tmp/zeo-player-test-music}"
 rm -rf "$dir"; mkdir -p "$dir/sub"
@@ -36,4 +38,14 @@ cat > "$dir/sine.lrc" <<'LRC'
 [00:12.00]间奏后的句子
 [00:15.00]最后一句 <00:15.50>呀
 LRC
+# 新格式样本：2 秒正弦波，标题写「格式 <主文件名>」。raw.aac 是 ADTS
+# 裸流、容器没有标签位置，标题会回退成主文件名「raw」（测试按此断言）。
+fmt_dir="$(dirname "$dir")/zeo-player-test-formats"
+rm -rf "$fmt_dir"; mkdir -p "$fmt_dir"
+ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a aac -b:a 128k -metadata title="格式 aac" "$fmt_dir/aac.m4a"
+ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a alac -metadata title="格式 alac" "$fmt_dir/alac.m4a"
+ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a aac -b:a 128k -f adts "$fmt_dir/raw.aac"
+ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a libvorbis -q:a 4 -metadata title="格式 vorbis" "$fmt_dir/vorbis.ogg"
+ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a pcm_s16be -metadata title="格式 pcm" "$fmt_dir/pcm.aiff"
 echo "wrote $(find "$dir" -type f | wc -l | tr -d ' ') files to $dir"
+echo "wrote $(find "$fmt_dir" -type f | wc -l | tr -d ' ') files to $fmt_dir"

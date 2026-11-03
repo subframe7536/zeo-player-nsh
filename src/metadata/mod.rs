@@ -117,6 +117,27 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "Unknown".to_owned());
 
+    let mut codec = codec_of(file_type).map(|s| s.to_owned());
+    let quality = match file_type {
+        lofty::file::FileType::Flac
+        | lofty::file::FileType::Wav
+        | lofty::file::FileType::Aiff => Some("Lossless".to_owned()),
+        lofty::file::FileType::Mpeg
+        | lofty::file::FileType::Vorbis
+        | lofty::file::FileType::Aac => Some("Lossy".to_owned()),
+        // M4A 可能是 AAC 也可能是 ALAC：按位深推断（ALAC 有位深，AAC 没有）。
+        lofty::file::FileType::Mp4 => {
+            if props.bit_depth().is_some() {
+                codec = Some("ALAC".to_owned());
+                Some("Lossless".to_owned())
+            } else {
+                codec = Some("AAC".to_owned());
+                Some("Lossy".to_owned())
+            }
+        }
+        _ => None,
+    };
+
     let mut info = MetaInfo {
         title: file_stem,
         artist: "Unknown Artist".to_owned(),
@@ -128,14 +149,8 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
         bit_depth: props.bit_depth().map(u32::from),
         sample_rate: props.sample_rate(),
         channels: props.channels().map(u32::from),
-        codec: codec_of(file_type).map(|s| s.to_owned()),
-        quality: match file_type {
-            lofty::file::FileType::Flac
-            | lofty::file::FileType::Wav
-            | lofty::file::FileType::Aiff => Some("Lossless".to_owned()),
-            lofty::file::FileType::Mpeg => Some("Lossy".to_owned()),
-            _ => None,
-        },
+        codec,
+        quality,
         genres: Vec::new(),
         year: None,
         track: None,

@@ -192,7 +192,7 @@ const SECTIONS: &[Section] = &[
     Section {
         pane: Pane::Library,
         title: "音乐文件夹",
-        keys: "添加 文件夹 目录 拖放 根目录 mp3 flac wav",
+        keys: "添加 文件夹 目录 拖放 根目录 mp3 flac wav m4a aac alac ogg aiff",
         build: library::folders_section,
     },
     Section {

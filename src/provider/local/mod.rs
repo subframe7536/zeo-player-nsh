@@ -12,8 +12,8 @@ use crate::config::{
 };
 use crate::metadata::{CacheEntry, MetaCache};
 
-/// 基线音频扩展名（opus/ogg 暂缓，恢复时加回）。
-pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav"];
+/// 支持的音频扩展名（不含 .mp4——可能是视频；opus 暂缓）。
+pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "m4a", "aac", "ogg", "oga", "aif", "aiff"];
 
 /// 用数据库里上次的元数据建初始索引，界面马上有曲库；随后的扫描只重读
 /// 变了的文件。

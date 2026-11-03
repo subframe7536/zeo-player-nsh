@@ -26,7 +26,7 @@
 |---|---|---|---|---|---|---|
 | 001 | [拆分 settings.rs（纯搬移）](001-split-settings.md) | #7 | P1 | S | — | DONE |
 | 002 | [淡入淡出时长改数字输入框](002-fade-duration-input.md) | #7 | P2 | S | 001 | DONE |
-| 003 | [支持 AAC/ALAC/M4A/OGG/AIFF](003-more-audio-formats.md) | #6 | P1 | M | — | TODO |
+| 003 | [支持 AAC/ALAC/M4A/OGG/AIFF](003-more-audio-formats.md) | #6 | P1 | M | — | DONE |
 | 004 | [输出设备变化：重建输出流 + 可选暂停](004-output-device-change.md) | #7 | P1 | M | 001 | TODO |
 | 005 | [ReplayGain（值入 tracks 表）](005-replaygain.md) | #7 | P2 | M | 001, 004（真实文件测试样本依赖 003） | TODO |
 | 006 | [10 段均衡器](006-equalizer.md) | #7 | P2 | M | 001, 004, 005 | TODO |

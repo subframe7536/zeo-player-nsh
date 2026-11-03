@@ -18,7 +18,7 @@ pub struct Columns {
     pub cover: bool,
     pub album: bool,
     pub size: bool,
-    /// 音频格式（MP3 / FLAC / WAV）。
+    /// 音频格式（MP3 / FLAC / WAV / AIFF / M4A / OGG 等）。
     pub format: bool,
 }
 
@@ -67,7 +67,7 @@ pub fn fits_number() -> bool {
     content_width() >= 420.0
 }
 
-/// 文件的音频格式（扩展名大写）：MP3、FLAC、WAV。
+/// 文件的音频格式（扩展名大写）：MP3、FLAC、WAV、AIFF、M4A、OGG 等。
 pub fn audio_format(path: &str) -> String {
     std::path::Path::new(path)
         .extension()

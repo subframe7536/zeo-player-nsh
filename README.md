@@ -2,7 +2,7 @@
 
 本地优先的桌面音乐播放器，原生界面、低资源占用。支持 macOS 与 Windows。
 
-支持格式：MP3、FLAC、WAV。
+支持格式：MP3、FLAC、WAV、AIFF、M4A（AAC / ALAC）、AAC、OGG Vorbis。
 
 ## 功能
 
@@ -66,7 +66,7 @@
 
 ## 尚未支持
 
-- Opus / OGG 格式、逐字歌词、Linux 版本。
+- Opus 格式、逐字歌词、Linux 版本。
 
 ## 构建
 

@@ -110,7 +110,7 @@ fn no_library() -> View {
     empty_state(
         Icon::Folder,
         "还没有音乐文件夹",
-        "添加一个包含 MP3、FLAC 或 WAV 的文件夹，Zeo Player 会扫描并整理它们。",
+        "添加一个包含音乐文件（MP3、FLAC、M4A、OGG 等）的文件夹，Zeo Player 会扫描并整理它们。",
     )
     .child(
         view()

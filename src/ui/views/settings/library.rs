@@ -156,7 +156,7 @@ pub(super) fn folders_section() -> View {
 
     setting_section(
         "音乐文件夹",
-        "Zeo Player 会扫描这些文件夹里的 MP3、FLAC 和 WAV，包括子文件夹。也可以把文件夹拖到这一节上。",
+        "Zeo Player 会扫描这些文件夹里的 MP3、FLAC、WAV、AIFF、M4A（AAC / ALAC）、OGG，包括子文件夹。也可以把文件夹拖到这一节上。",
         Some(add.into_element()),
     )
     // 拖放目标的描边：平时透明，文件拖入时亮主题色。

@@ -13,7 +13,7 @@ nsh-core = "0.3.0"
 nsh-base = "0.3.0"
 
 # 音频：解码、输出、重采样、系统媒体会话。
-symphonia = { version = "0.6", features = ["mp3", "flac", "wav"] }
+symphonia = { version = "0.6", features = ["mp3", "flac", "wav", "aac", "alac", "isomp4", "ogg", "vorbis", "aiff"] }
 cpal = "0.18"
 rubato = "5"
 playwire = "2"

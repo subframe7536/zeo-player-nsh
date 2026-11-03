@@ -54,7 +54,7 @@ nsh package . --target windows --icon resources/icon-windows.png  # Windows inst
 
 - Run `nsh check .` and `nsh test .` before reporting a change as done.
 - On Windows, the tests need libclang (QuickJS bindings in the headless test runner): install LLVM and set `$env:LIBCLANG_PATH` to its `bin` directory (the one with `libclang.dll`, e.g. `C:\Program Files\LLVM\bin`) before `nsh test .`.
-- Playback e2e tests and track-dependent UI tests need `.nsh/tmp/zeo-player-test-music` in the repo (`sh scripts/make-test-music.sh`, requires ffmpeg). Without it they skip silently, so generate it when touching audio, lyrics, waveform, or the player UI.
+- Playback e2e tests and track-dependent UI tests need `.nsh/tmp/zeo-player-test-music` in the repo (`sh scripts/make-test-music.sh`, requires ffmpeg). Without it they skip silently, so generate it when touching audio, lyrics, waveform, or the player UI. 格式解码测试用同一脚本生成的 `.nsh/tmp/zeo-player-test-formats`（新格式样本放这里，不要放进 zeo-player-test-music——e2e 断言那里的文件数）。
 - `#[ignore]` tests use the real library / filesystem and share global state — run them one at a time:
   `cargo test --release -- --ignored scan_reports_progress` / `watcher_rescans` / `real_track_waveform`.
 - Cross-check Windows from a Mac when touching platform code:
