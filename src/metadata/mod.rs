@@ -16,6 +16,63 @@ use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::prelude::ItemKey;
 use lofty::tag::Tag;
 
+/// ReplayGain 标签（dB 与线性峰值）；没有的项为 `None`。
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ReplayGain {
+    pub track_gain: Option<f32>,
+    pub track_peak: Option<f32>,
+    pub album_gain: Option<f32>,
+    pub album_peak: Option<f32>,
+}
+
+impl ReplayGain {
+    /// 四项全空（没读到任何 RG 标签，或迁移前的老行）。
+    pub fn is_empty(&self) -> bool {
+        self.track_gain.is_none()
+            && self.track_peak.is_none()
+            && self.album_gain.is_none()
+            && self.album_peak.is_none()
+    }
+}
+
+/// `-6.54 dB` / `+1.2dB` / `-6.54` → -6.54；解析失败 `None`。
+fn parse_gain(text: &str) -> Option<f32> {
+    let lower = text.trim().to_lowercase();
+    let digits = lower.strip_suffix("db").unwrap_or(&lower).trim();
+    let value: f32 = digits.parse().ok()?;
+    (value.is_finite() && (-60.0..=60.0).contains(&value)).then_some(value)
+}
+
+/// `0.988525` → 0.988525；非正数或解析失败 `None`。
+fn parse_peak(text: &str) -> Option<f32> {
+    let value: f32 = text.trim().parse().ok()?;
+    (value.is_finite() && value > 0.0).then_some(value)
+}
+
+/// 先查主标签再查其余标签，取第一个能解析的值。
+fn rg_from_tagged(tagged: &lofty::file::TaggedFile) -> ReplayGain {
+    let find = |key: ItemKey, parse: fn(&str) -> Option<f32>| {
+        tagged
+            .primary_tag()
+            .into_iter()
+            .chain(tagged.tags().iter())
+            .find_map(|tag| first(tag, key).and_then(|text| parse(&text)))
+    };
+    ReplayGain {
+        track_gain: find(ItemKey::ReplayGainTrackGain, parse_gain),
+        track_peak: find(ItemKey::ReplayGainTrackPeak, parse_peak),
+        album_gain: find(ItemKey::ReplayGainAlbumGain, parse_gain),
+        album_peak: find(ItemKey::ReplayGainAlbumPeak, parse_peak),
+    }
+}
+
+/// 独立按路径读一次 ReplayGain（引擎对迁移前的老行回退时用）。
+pub fn read_replaygain(path: &Path) -> ReplayGain {
+    lofty::read_from_path(path)
+        .map(|tagged| rg_from_tagged(&tagged))
+        .unwrap_or_default()
+}
+
 /// 完整元数据（ap-spec AudioMetadata + 库索引需要的字段）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MetaInfo {
@@ -43,6 +100,8 @@ pub struct MetaInfo {
     /// 封面主色调（色相圈 0..1、饱和度 0..1）：不是标签，由 covers 工作线程
     /// 在解码封面时算好并写进同一行（`MetaCache::set_art_hue`）。
     pub art_hue: Option<(f32, f32)>,
+    /// ReplayGain 标签（音量标准化；没有的项为 `None`）。
+    pub replaygain: ReplayGain,
 }
 
 fn strings(tag: &Tag, key: ItemKey) -> Vec<String> {
@@ -160,6 +219,8 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
         album_artists: Vec::new(),
         composers: Vec::new(),
         art_hue: None,
+        // 文件已打开，顺手读（无额外 I/O）。
+        replaygain: rg_from_tagged(&tagged),
     };
 
     if let Some(tag) = tag {
@@ -467,5 +528,45 @@ impl MetaCache {
             self.flush();
         }
         Ok(entry)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ReplayGain 标签的常见写法：带 / 不带 dB 后缀、前导加号、空白。
+    #[test]
+    fn replaygain_parses_common_forms() {
+        assert_eq!(parse_gain("-6.54 dB"), Some(-6.54));
+        assert_eq!(parse_gain("+1.2dB"), Some(1.2));
+        assert_eq!(parse_gain(" -3 "), Some(-3.0));
+        assert_eq!(parse_gain("abc"), None);
+        assert_eq!(parse_gain("nan"), None);
+        assert_eq!(parse_gain("-100 dB"), None, "超界");
+        assert_eq!(parse_peak("0.988525"), Some(0.988525));
+        assert_eq!(parse_peak("0"), None, "峰值必须为正");
+        assert_eq!(parse_peak("abc"), None);
+    }
+
+    /// 带 RG 标签的语料样本（scripts/make-test-music.sh 生成）：
+    /// read_meta 与 read_replaygain 都读出相同的值。
+    #[test]
+    fn replaygain_reads_flac_tags() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(".nsh/tmp/zeo-player-test-formats/rg.flac");
+        if !path.is_file() {
+            eprintln!("跳过：没有 zeo-player-test-formats 测试语料");
+            return;
+        }
+        for rg in [
+            read_meta(&path).expect("read_meta").replaygain,
+            read_replaygain(&path),
+        ] {
+            assert_eq!(rg.track_gain, Some(-6.0));
+            assert_eq!(rg.track_peak, Some(0.5));
+            assert_eq!(rg.album_gain, Some(-3.0));
+            assert_eq!(rg.album_peak, None);
+        }
     }
 }

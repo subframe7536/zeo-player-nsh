@@ -546,6 +546,7 @@ mod tests {
             album_artists: Vec::new(),
             composers: Vec::new(),
             art_hue: None,
+            replaygain: Default::default(),
         }
     }
 

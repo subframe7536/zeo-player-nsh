@@ -47,5 +47,11 @@ ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a alac -metadata tit
 ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a aac -b:a 128k -f adts "$fmt_dir/raw.aac"
 ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a libvorbis -q:a 4 -metadata title="格式 vorbis" "$fmt_dir/vorbis.ogg"
 ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a pcm_s16be -metadata title="格式 pcm" "$fmt_dir/pcm.aiff"
+# 带 ReplayGain 标签的 FLAC：read_meta / read_replaygain / 增益测试用。
+ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 \
+  -metadata title="格式 rg" \
+  -metadata REPLAYGAIN_TRACK_GAIN="-6.00 dB" \
+  -metadata REPLAYGAIN_TRACK_PEAK="0.5" \
+  -metadata REPLAYGAIN_ALBUM_GAIN="-3.00 dB" "$fmt_dir/rg.flac"
 echo "wrote $(find "$dir" -type f | wc -l | tr -d ' ') files to $dir"
 echo "wrote $(find "$fmt_dir" -type f | wc -l | tr -d ' ') files to $fmt_dir"

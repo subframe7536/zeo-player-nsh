@@ -232,6 +232,12 @@ const SECTIONS: &[Section] = &[
         build: playback::device_section,
     },
     Section {
+        pane: Pane::Playback,
+        title: "ReplayGain",
+        keys: "replaygain 回放增益 音量 标准化 响度 专辑 曲目 预放大 削波 峰值",
+        build: playback::replaygain_section,
+    },
+    Section {
         pane: Pane::Lyrics,
         title: "歌词对齐",
         keys: "歌词 全屏 左对齐 居中 右对齐 对齐方式",

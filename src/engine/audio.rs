@@ -166,6 +166,75 @@ impl LoopMode {
     }
 }
 
+/// ReplayGain 模式。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReplayGainMode {
+    /// 不做音量标准化。
+    #[default]
+    Off,
+    /// 按曲目增益。
+    Track,
+    /// 按专辑增益。
+    Album,
+}
+
+/// ReplayGain 设置（界面 → 引擎，持久化在 `library.json`）。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReplayGainConfig {
+    pub mode: ReplayGainMode,
+    /// 预放大（dB，−15…+15）。
+    pub preamp_db: f32,
+    /// 没有 RG 标签的曲目用的增益（dB，−15…+15）。
+    pub fallback_db: f32,
+    /// 按标签峰值限制增益，防止削波。
+    pub clip_protect: bool,
+}
+
+impl Default for ReplayGainConfig {
+    fn default() -> ReplayGainConfig {
+        ReplayGainConfig {
+            mode: ReplayGainMode::Off,
+            preamp_db: 0.0,
+            fallback_db: 0.0,
+            clip_protect: true,
+        }
+    }
+}
+
+/// 一首曲目应乘的线性增益。
+///
+/// 回退：专辑模式没有专辑增益 → 曲目增益；曲目模式没有曲目增益 →
+/// 专辑增益；都没有 → `fallback_db`（peak 视为无）。`clip_protect` 且
+/// 有峰值时，增益不超过 `1 / peak`；结果钳到 `0.0..=4.0`（+12 dB）。
+pub(crate) fn replaygain_factor(
+    cfg: &ReplayGainConfig,
+    rg: &crate::metadata::ReplayGain,
+) -> f32 {
+    if cfg.mode == ReplayGainMode::Off {
+        return 1.0;
+    }
+    let (gain_db, peak) = match cfg.mode {
+        ReplayGainMode::Album => match rg.album_gain.or(rg.track_gain) {
+            Some(db) => (db, rg.album_peak.or(rg.track_peak)),
+            None => (cfg.fallback_db, None),
+        },
+        _ => match rg.track_gain.or(rg.album_gain) {
+            Some(db) => (db, rg.track_peak.or(rg.album_peak)),
+            None => (cfg.fallback_db, None),
+        },
+    };
+    let db = gain_db + cfg.preamp_db;
+    let mut factor = 10f32.powf(db / 20.0);
+    if cfg.clip_protect
+        && let Some(peak) = peak
+    {
+        factor = factor.min(1.0 / peak);
+    }
+    factor.clamp(0.0, 4.0)
+}
+
 /// 输出设备的变化（cpal 错误回调转来）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceEvent {
@@ -203,6 +272,8 @@ pub enum EngineCmd {
     SetLoopMode(LoopMode),
     /// 输出设备事件（见 [`DeviceEvent`]）。
     Device(DeviceEvent),
+    /// ReplayGain 设置变了：存进 `rg_config`，当前曲目立即重算增益。
+    SetReplayGain(ReplayGainConfig),
 }
 
 /// 曲目公开状态（跨线程读）：冷字段——换曲 / 封面就绪 / 队列 / 出错
@@ -250,6 +321,12 @@ pub struct Shared {
     pub cover_gen: AtomicU64,
     /// 输出设备变化时是否暂停（设置项；设备丢失时无论如何都暂停）。
     pub pause_on_device_change: AtomicBool,
+    /// 当前曲目的 ReplayGain 线性增益（f32 位；装载 / 设置变更时由
+    /// 引擎线程写，输出回调读）。
+    pub rg_factor: AtomicU32,
+    /// ReplayGain 设置（引擎线程与 `SetReplayGain` 的发送方用；
+    /// 输出回调不碰——它只读 `rg_factor`，避免在回调里取锁）。
+    pub rg_config: Mutex<ReplayGainConfig>,
 }
 
 impl Shared {
@@ -320,6 +397,8 @@ impl EngineHandle {
             loop_mode: AtomicU8::new(0),
             cover_gen: AtomicU64::new(0),
             pause_on_device_change: AtomicBool::new(true),
+            rg_factor: AtomicU32::new(1f32.to_bits()),
+            rg_config: Mutex::new(ReplayGainConfig::default()),
         });
         let media = MediaSession::start(tx.clone());
         std::thread::Builder::new()
@@ -356,6 +435,8 @@ struct Loaded {
     drain: Option<Drain>,
     /// 封面还没生成（缓冲先填起来再做，免得开头卡住）。
     cover_pending: bool,
+    /// 本曲目的 ReplayGain 标签（设置变更时重算 `Shared::rg_factor`）。
+    rg: crate::metadata::ReplayGain,
 }
 
 /// 文件解码完、等缓冲播空的状态（`len` 最近的缓冲长度，`since` 它最后
@@ -977,6 +1058,16 @@ fn handle_cmd(
         }
         // 设备事件在主循环里先拦截（见 run），不会走到这里。
         EngineCmd::Device(_) => {}
+        EngineCmd::SetReplayGain(cfg) => {
+            *shared.rg_config.lock().unwrap_or_else(|e| e.into_inner()) = cfg;
+            // 当前曲目立即生效（下一首装载时也会按新配置算）。
+            if let Some(l) = loaded.as_ref() {
+                shared.rg_factor.store(
+                    replaygain_factor(&cfg, &l.rg).to_bits(),
+                    Ordering::Relaxed,
+                );
+            }
+        }
     }
 }
 
@@ -1060,6 +1151,16 @@ fn load_track(
             } else {
                 None
             };
+            // RG 标签随扫描入缓存 / 库；迁移前的老行四项全空时现场补读。
+            let rg = if meta.replaygain.is_empty() {
+                crate::metadata::read_replaygain(&path)
+            } else {
+                meta.replaygain
+            };
+            let cfg = *shared.rg_config.lock().unwrap_or_else(|e| e.into_inner());
+            shared
+                .rg_factor
+                .store(replaygain_factor(&cfg, &rg).to_bits(), Ordering::Relaxed);
             *loaded = Some(Loaded {
                 source,
                 resampler,
@@ -1069,6 +1170,7 @@ fn load_track(
                 src_channels,
                 drain: None,
                 cover_pending: true,
+                rg,
             });
 
             let actual_index = if queue_index_hint >= 0 {
@@ -1287,6 +1389,7 @@ fn fade_step(ms: u32, rate: u32) -> f32 {
 
 fn output_callback(shared: &Shared, data: &mut [f32], channels: usize) {
     let volume = f32::from_bits(shared.volume.load(Ordering::Relaxed));
+    let rg = f32::from_bits(shared.rg_factor.load(Ordering::Relaxed));
     let playing = shared.playing.load(Ordering::Relaxed);
     let mut taken_samples = 0usize;
     if playing && !data.is_empty() {
@@ -1306,7 +1409,8 @@ fn output_callback(shared: &Shared, data: &mut [f32], channels: usize) {
                     (gain - step).max(target)
                 };
             }
-            data[i] = sample * volume * fade_curve(gain);
+            // 取样 → rg × 音量 × 淡变 → 钳到 ±1（EQ 挂在取样与增益之间）。
+            data[i] = (sample * rg * volume * fade_curve(gain)).clamp(-1.0, 1.0);
         });
         // 缓冲空了（还没解出来）也照样推进淡出，不让引擎干等。
         if take == 0 && target < gain {
@@ -1365,6 +1469,8 @@ mod tests {
             loop_mode: AtomicU8::new(0),
             cover_gen: AtomicU64::new(0),
             pause_on_device_change: AtomicBool::new(true),
+            rg_factor: AtomicU32::new(1f32.to_bits()),
+            rg_config: Mutex::new(ReplayGainConfig::default()),
         };
         // 100 ms 后到一半（smoothstep(0.5) = 0.5），200 ms 后满。
         let mut buf = vec![0.0_f32; 4800 * 2];
@@ -1523,5 +1629,97 @@ mod tests {
         let target = target_for(&out, capacity);
         assert!(target > 0);
         assert!(target <= capacity * 2 / 3, "{target} > {}", capacity * 2 / 3);
+    }
+
+    /// ReplayGain 增益：模式回退、预放大叠加、峰值限幅与上限钳制。
+    #[test]
+    fn replaygain_factor_follows_mode_and_fallbacks() {
+        use crate::engine::audio::ReplayGainMode::*;
+        use crate::metadata::ReplayGain;
+        let cfg = |mode, preamp, fallback, clip| ReplayGainConfig {
+            mode,
+            preamp_db: preamp,
+            fallback_db: fallback,
+            clip_protect: clip,
+        };
+        let rg = |tg, tp, ag, ap| ReplayGain {
+            track_gain: tg,
+            track_peak: tp,
+            album_gain: ag,
+            album_peak: ap,
+        };
+        let near = |got: f32, want: f32, what: &str| {
+            assert!((got - want).abs() < 1e-3, "{what}: {got} != {want}");
+        };
+        // 关闭 → 1.0；按曲目 −6.02 dB → ≈0.5。
+        assert_eq!(
+            replaygain_factor(&cfg(Off, 0.0, 0.0, true), &rg(Some(-6.0), None, None, None)),
+            1.0
+        );
+        near(
+            replaygain_factor(&cfg(Track, 0.0, 0.0, true), &rg(Some(-6.02), None, None, None)),
+            0.5,
+            "track -6.02dB",
+        );
+        // 专辑模式没有专辑增益 → 回退曲目增益。
+        near(
+            replaygain_factor(&cfg(Album, 0.0, 0.0, true), &rg(Some(-6.02), None, None, None)),
+            0.5,
+            "album 回退 track",
+        );
+        // 专辑模式有专辑增益 → 用专辑的。
+        near(
+            replaygain_factor(&cfg(Album, 0.0, 0.0, true), &rg(Some(-6.0), None, Some(-12.0), None)),
+            10f32.powf(-12.0 / 20.0),
+            "album gain",
+        );
+        // 都没有 → 无标签增益。
+        near(
+            replaygain_factor(&cfg(Track, 0.0, -3.0, true), &rg(None, None, None, None)),
+            10f32.powf(-3.0 / 20.0),
+            "fallback",
+        );
+        // 预放大 +6 dB 与曲目 −6 dB 抵消 → ≈1。
+        near(
+            replaygain_factor(&cfg(Track, 6.0, 0.0, true), &rg(Some(-6.0), None, None, None)),
+            1.0,
+            "preamp 叠加",
+        );
+        // 防削波：+6 dB 增益但峰值 0.8 → 钳到 1/0.8。
+        near(
+            replaygain_factor(&cfg(Track, 0.0, 0.0, true), &rg(Some(6.0), Some(0.8), None, None)),
+            1.0 / 0.8,
+            "clip protect",
+        );
+        // 关掉防削波 → 全额 +6 dB。
+        near(
+            replaygain_factor(&cfg(Track, 0.0, 0.0, false), &rg(Some(6.0), Some(0.8), None, None)),
+            10f32.powf(6.0 / 20.0),
+            "no clip protect",
+        );
+        // 上限钳到 4.0（+12 dB）。
+        assert_eq!(
+            replaygain_factor(&cfg(Track, 0.0, 0.0, false), &rg(Some(30.0), None, None, None)),
+            4.0
+        );
+    }
+
+    /// 峰值限幅不会让输出超过 1.0。
+    #[test]
+    fn replaygain_factor_never_clips() {
+        let cfg = ReplayGainConfig {
+            mode: ReplayGainMode::Track,
+            preamp_db: 0.0,
+            fallback_db: 0.0,
+            clip_protect: true,
+        };
+        let rg = crate::metadata::ReplayGain {
+            track_gain: Some(6.0),
+            track_peak: Some(0.8),
+            ..Default::default()
+        };
+        let factor = replaygain_factor(&cfg, &rg);
+        assert!((factor - 1.0 / 0.8).abs() < 1e-3, "{factor} != {}", 1.0 / 0.8);
+        assert!(factor <= 4.0);
     }
 }

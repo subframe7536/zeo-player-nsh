@@ -206,6 +206,11 @@ impl Player {
             .store(on, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// ReplayGain 设置（立即生效；对正在播放的曲目重算增益）。
+    pub fn set_replaygain(&self, cfg: crate::engine::audio::ReplayGainConfig) {
+        self.engine.send(EngineCmd::SetReplayGain(cfg));
+    }
+
     /// 测试用：注入一个输出设备事件。
     #[cfg(test)]
     pub(crate) fn simulate_device_event(&self, ev: crate::engine::audio::DeviceEvent) {

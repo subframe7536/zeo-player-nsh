@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::metadata::{CacheEntry, MetaInfo};
 
 /// 当前表结构版本（`PRAGMA user_version`）。改表时加一，并在 [`migrate`] 里迁移。
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS tracks (
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS state (
 
 const COLUMNS: &str = "path, stamp, size, modified, title, artist, album, album_artist, duration, has_art, \
     bit_rate, bit_depth, sample_rate, channels, codec, quality, genres, year, track, track_total, disk, disk_total, \
-    album_artists, composers, art_hue, art_sat";
+    album_artists, composers, art_hue, art_sat, rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak";
 
 fn db() -> Option<&'static Mutex<Connection>> {
     static DB: OnceLock<Option<Mutex<Connection>>> = OnceLock::new();
@@ -100,6 +100,16 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         // 歌词不再入全局缓存 / 数据库（内嵌歌词按需读，只缓存播放位置
         // 附近的几首）：清掉老行里存的歌词文本。列保留，新行写 NULL。
         conn.execute_batch("UPDATE tracks SET lyrics = NULL")?;
+    }
+    if version < 4 {
+        // ReplayGain 标签随扫描入库；迁移前的老行为 NULL，装载时由
+        // 引擎回退到现场读标签（metadata::read_replaygain）。
+        conn.execute_batch(
+            "ALTER TABLE tracks ADD COLUMN rg_track_gain REAL;
+             ALTER TABLE tracks ADD COLUMN rg_track_peak REAL;
+             ALTER TABLE tracks ADD COLUMN rg_album_gain REAL;
+             ALTER TABLE tracks ADD COLUMN rg_album_peak REAL;",
+        )?;
     }
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -162,46 +172,53 @@ fn json(values: &[String]) -> String {
 
 /// 读出全部元数据（启动时一次）。
 pub fn load_meta() -> Vec<(String, CacheEntry)> {
-    with("读取元数据", |conn| {
-        let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM tracks"))?;
-        let rows = stmt.query_map([], |r| {
-            let meta = MetaInfo {
-                title: r.get(4)?,
-                artist: r.get(5)?,
-                album: r.get(6)?,
-                album_artist: r.get(7)?,
-                duration: r.get(8)?,
-                has_art: r.get(9)?,
-                bit_rate: r.get(10)?,
-                bit_depth: r.get(11)?,
-                sample_rate: r.get(12)?,
-                channels: r.get(13)?,
-                codec: r.get(14)?,
-                quality: r.get(15)?,
-                genres: list(r.get(16)?),
-                year: r.get(17)?,
-                track: r.get(18)?,
-                track_total: r.get(19)?,
-                disk: r.get(20)?,
-                disk_total: r.get(21)?,
-                album_artists: list(r.get(22)?),
-                composers: list(r.get(23)?),
-                art_hue: match (r.get::<_, Option<f64>>(24)?, r.get::<_, Option<f64>>(25)?) {
-                    (Some(h), Some(s)) => Some((h as f32, s as f32)),
-                    _ => None,
-                },
-            };
-            let entry = CacheEntry {
-                stamp: r.get::<_, i64>(1)? as u64,
-                size: r.get::<_, i64>(2)? as u64,
-                modified: r.get::<_, i64>(3)? as u64,
-                value: Arc::new(meta),
-            };
-            Ok((r.get::<_, String>(0)?, entry))
-        })?;
-        rows.collect()
-    })
-    .unwrap_or_default()
+    with("读取元数据", |conn| load_meta_from(conn)).unwrap_or_default()
+}
+
+fn load_meta_from(conn: &Connection) -> rusqlite::Result<Vec<(String, CacheEntry)>> {
+    let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM tracks"))?;
+    let rows = stmt.query_map([], |r| {
+        let meta = MetaInfo {
+            title: r.get(4)?,
+            artist: r.get(5)?,
+            album: r.get(6)?,
+            album_artist: r.get(7)?,
+            duration: r.get(8)?,
+            has_art: r.get(9)?,
+            bit_rate: r.get(10)?,
+            bit_depth: r.get(11)?,
+            sample_rate: r.get(12)?,
+            channels: r.get(13)?,
+            codec: r.get(14)?,
+            quality: r.get(15)?,
+            genres: list(r.get(16)?),
+            year: r.get(17)?,
+            track: r.get(18)?,
+            track_total: r.get(19)?,
+            disk: r.get(20)?,
+            disk_total: r.get(21)?,
+            album_artists: list(r.get(22)?),
+            composers: list(r.get(23)?),
+            art_hue: match (r.get::<_, Option<f64>>(24)?, r.get::<_, Option<f64>>(25)?) {
+                (Some(h), Some(s)) => Some((h as f32, s as f32)),
+                _ => None,
+            },
+            replaygain: crate::metadata::ReplayGain {
+                track_gain: r.get::<_, Option<f64>>(26)?.map(|v| v as f32),
+                track_peak: r.get::<_, Option<f64>>(27)?.map(|v| v as f32),
+                album_gain: r.get::<_, Option<f64>>(28)?.map(|v| v as f32),
+                album_peak: r.get::<_, Option<f64>>(29)?.map(|v| v as f32),
+            },
+        };
+        let entry = CacheEntry {
+            stamp: r.get::<_, i64>(1)? as u64,
+            size: r.get::<_, i64>(2)? as u64,
+            modified: r.get::<_, i64>(3)? as u64,
+            value: Arc::new(meta),
+        };
+        Ok((r.get::<_, String>(0)?, entry))
+    })?;
+    rows.collect()
 }
 
 /// 写入（同一路径覆盖），一个事务。
@@ -209,47 +226,53 @@ pub fn save_meta(rows: &[(String, CacheEntry)]) {
     if rows.is_empty() {
         return;
     }
-    with("写入元数据", |conn| {
-        let tx = conn.transaction()?;
-        {
-            let mut stmt = tx.prepare_cached(&format!(
-                "INSERT OR REPLACE INTO tracks ({COLUMNS}) VALUES \
-                 (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)"
-            ))?;
-            for (path, entry) in rows {
-                let m = &entry.value;
-                stmt.execute(params![
-                    path,
-                    entry.stamp as i64,
-                    entry.size as i64,
-                    entry.modified as i64,
-                    m.title,
-                    m.artist,
-                    m.album,
-                    m.album_artist,
-                    m.duration,
-                    m.has_art,
-                    m.bit_rate,
-                    m.bit_depth,
-                    m.sample_rate,
-                    m.channels,
-                    m.codec,
-                    m.quality,
-                    json(&m.genres),
-                    m.year,
-                    m.track,
-                    m.track_total,
-                    m.disk,
-                    m.disk_total,
-                    json(&m.album_artists),
-                    json(&m.composers),
-                    m.art_hue.map(|(h, _)| h as f64),
-                    m.art_hue.map(|(_, s)| s as f64),
-                ])?;
-            }
+    with("写入元数据", |conn| save_meta_to(conn, rows));
+}
+
+fn save_meta_to(conn: &mut Connection, rows: &[(String, CacheEntry)]) -> rusqlite::Result<()> {
+    let tx = conn.transaction()?;
+    {
+        let mut stmt = tx.prepare_cached(&format!(
+            "INSERT OR REPLACE INTO tracks ({COLUMNS}) VALUES \
+             (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)"
+        ))?;
+        for (path, entry) in rows {
+            let m = &entry.value;
+            stmt.execute(params![
+                path,
+                entry.stamp as i64,
+                entry.size as i64,
+                entry.modified as i64,
+                m.title,
+                m.artist,
+                m.album,
+                m.album_artist,
+                m.duration,
+                m.has_art,
+                m.bit_rate,
+                m.bit_depth,
+                m.sample_rate,
+                m.channels,
+                m.codec,
+                m.quality,
+                json(&m.genres),
+                m.year,
+                m.track,
+                m.track_total,
+                m.disk,
+                m.disk_total,
+                json(&m.album_artists),
+                json(&m.composers),
+                m.art_hue.map(|(h, _)| h as f64),
+                m.art_hue.map(|(_, s)| s as f64),
+                m.replaygain.track_gain,
+                m.replaygain.track_peak,
+                m.replaygain.album_gain,
+                m.replaygain.album_peak,
+            ])?;
         }
-        tx.commit()
-    });
+    }
+    tx.commit()
 }
 
 /// 只留下 `keep` 里的路径（扫描后删掉已不存在的文件）。
@@ -372,4 +395,95 @@ pub fn save_last_played(last: &LastPlayed) {
 /// 队列可能有上万条，只在它变了时写。
 pub fn save_queue(queue: &[String]) {
     set_state(LAST_QUEUE, &json(queue));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metadata::{MetaInfo, ReplayGain};
+
+    /// 内存库 + 全部迁移；tracks 表 `name` 列存在性。
+    fn columns(conn: &Connection) -> Vec<String> {
+        conn.prepare("PRAGMA table_info(tracks)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    /// v3 库迁到 v4：四个 rg_ 列出现、老行还在且 rg 列为 NULL。
+    #[test]
+    fn replaygain_migrate_adds_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        // 造一个 v3 的库：v1 建表 + v2/v3 的迁移语句 + user_version=3。
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE tracks ADD COLUMN art_hue REAL;
+             ALTER TABLE tracks ADD COLUMN art_sat REAL;
+             UPDATE tracks SET lyrics = NULL;
+             PRAGMA user_version = 3;",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tracks (path, stamp, size, modified, title, artist, album, \
+             album_artist, duration, has_art, genres, album_artists, composers) \
+             VALUES ('a.flac', 1, 1, 1, 't', 'a', 'al', 'aa', 1.0, 0, '[]', '[]', '[]')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+        let version: i32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let cols = columns(&conn);
+        for col in [
+            "rg_track_gain",
+            "rg_track_peak",
+            "rg_album_gain",
+            "rg_album_peak",
+        ] {
+            assert!(cols.iter().any(|c| c == col), "缺列 {col}");
+        }
+        // 老行还在，rg 列为 NULL。
+        let (n, tg): (i64, Option<f64>) = conn
+            .query_row(
+                "SELECT count(*), (SELECT rg_track_gain FROM tracks WHERE path='a.flac') \
+                 FROM tracks",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(tg, None);
+    }
+
+    /// 带 ReplayGain 的 CacheEntry 写入后读回相等。
+    #[test]
+    fn replaygain_db_roundtrip() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let rg = ReplayGain {
+            track_gain: Some(-6.0),
+            track_peak: Some(0.5),
+            album_gain: Some(-3.0),
+            album_peak: None,
+        };
+        let entry = CacheEntry {
+            stamp: 1,
+            size: 1,
+            modified: 1,
+            value: Arc::new(MetaInfo {
+                replaygain: rg,
+                ..Default::default()
+            }),
+        };
+        save_meta_to(&mut conn, &[("a.flac".to_owned(), entry)]).unwrap();
+        let rows = load_meta_from(&conn).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "a.flac");
+        assert_eq!(rows[0].1.value.replaygain, rg);
+    }
 }

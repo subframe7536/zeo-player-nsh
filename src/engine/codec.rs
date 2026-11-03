@@ -158,6 +158,7 @@ mod tests {
             ("raw.aac", "raw", "Lossy"),
             ("vorbis.ogg", "格式 vorbis", "Lossy"),
             ("pcm.aiff", "格式 pcm", "Lossless"),
+            ("rg.flac", "格式 rg", "Lossless"),
         ];
         for (name, title, quality) in cases {
             let path = dir.join(name);

@@ -183,6 +183,9 @@ pub struct LibraryConfig {
     /// 输出设备变化（拔耳机、切默认设备）时暂停播放。
     #[serde(default = "default_true")]
     pub pause_on_device_change: bool,
+    /// ReplayGain 音量标准化（模式 / 预放大 / 无标签增益 / 防削波）。
+    #[serde(default)]
+    pub replaygain: crate::engine::audio::ReplayGainConfig,
     /// 重新打开时恢复上次的窗口大小与位置。
     #[serde(default = "default_true")]
     pub remember_frame: bool,
@@ -241,6 +244,7 @@ impl Default for LibraryConfig {
             show_covers: default_true(),
             delete_permanently: false,
             pause_on_device_change: true,
+            replaygain: crate::engine::audio::ReplayGainConfig::default(),
             remember_frame: true,
             window_frame: None,
         }
@@ -484,6 +488,15 @@ impl LibraryStore {
 
     pub fn set_pause_on_device_change(&self, on: bool) {
         self.update_config(|c| c.pause_on_device_change = on);
+    }
+
+    /// ReplayGain 设置。
+    pub fn replaygain(&self) -> crate::engine::audio::ReplayGainConfig {
+        self.config().replaygain
+    }
+
+    pub fn set_replaygain(&self, cfg: crate::engine::audio::ReplayGainConfig) {
+        self.update_config(|c| c.replaygain = cfg);
     }
 
     pub fn close_action(&self) -> CloseAction {
