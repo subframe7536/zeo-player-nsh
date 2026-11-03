@@ -222,7 +222,7 @@ const SECTIONS: &[Section] = &[
     Section {
         pane: Pane::Playback,
         title: "淡入淡出",
-        keys: "播放 音量 渐变 切歌 暂停",
+        keys: "播放 音量 渐变 切歌 暂停 毫秒 时长",
         build: playback::playback_section,
     },
     Section {

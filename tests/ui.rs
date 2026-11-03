@@ -173,6 +173,50 @@ fn settings_search_filters_sections() {
     assert!(has(&app, "播放"));
 }
 
+/// 数据目录里 library.json 的 fade_ms（保存在后台线程，调用方轮询）。
+fn saved_fade_ms() -> Option<u64> {
+    let file =
+        std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap()).join("library.json");
+    std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v["fade_ms"].as_u64())
+}
+
+/// 设置弹窗 →「播放」分类 →「淡入淡出」数字输入：正常值、超上限钳到
+/// 5000、非法输入不改值（保存在后台线程，轮询 library.json 等落盘）。
+#[test]
+fn fade_duration_input_saves_clamped_value() {
+    let mut app = start(1200.0, 800.0);
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[播放]").unwrap();
+    app.wait_for("label:淡入淡出时长").unwrap();
+    let field = "label:淡入淡出时长";
+    let saved = |ms: u64| {
+        for _ in 0..40 {
+            if saved_fade_ms() == Some(ms) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    };
+    app.clear(field).unwrap();
+    app.type_text(field, "750\n").unwrap();
+    assert!(saved(750), "fade_ms 应为 750: {:?}", saved_fade_ms());
+    app.clear(field).unwrap();
+    app.type_text(field, "99999\n").unwrap();
+    assert!(saved(5000), "fade_ms 应钳到 5000: {:?}", saved_fade_ms());
+    app.clear(field).unwrap();
+    app.type_text(field, "abc\n").unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(saved_fade_ms(), Some(5000), "非法输入不应改值");
+    // 共享全局配置，用例结束前恢复默认 200。
+    app.clear(field).unwrap();
+    app.type_text(field, "200\n").unwrap();
+    assert!(saved(200), "结束时恢复默认 200: {:?}", saved_fade_ms());
+}
+
 /// 设置弹窗 →「外观」分类 →「外观」下拉：选深色 / 浅色立即换色板
 /// （文字颜色即变），回到「系统」。
 #[test]

@@ -627,6 +627,7 @@ fn drain_dominant() {
 
 /// 淡入淡出时长（立即生效并保存）。
 pub fn set_fade_ms(ms: u32) {
+    let ms = ms.min(5000);
     update_config(|c| c.fade_ms = ms);
     player().set_fade_ms(ms);
     std::thread::spawn(move || library_store().set_fade_ms(ms));
