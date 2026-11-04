@@ -1,7 +1,8 @@
 //! 窗口与托盘：拦截关闭（最小化到托盘或退出）、隐藏 / 显示窗口、托盘图标
 //! 与菜单。托盘图标本身是播放 / 暂停按钮：左键切播放暂停、右键开菜单；
-//! macOS 是模板图（黑白、图标旁带曲名），Windows 是绿底白字形（悬停
-//! 提示显示曲名 — 歌手）。NSH 0.3.0 没有这些接口，这里直接用系统 API：
+//! macOS 是模板图（黑白、图标旁带曲名），Windows 是应用图标同款的外浅
+//! 内深（浅绿渐变底 + 深绿字形，悬停提示显示曲名 — 歌手）。NSH 0.3.0
+//! 没有这些接口，这里直接用系统 API：
 //!
 //! - macOS：替换 NSH 窗口代理的 `windowShouldClose:` 实现；显示 / 隐藏用
 //!   `makeKeyAndOrderFront` / `orderOut`；全部在主线程（GCD 主队列）。
@@ -339,6 +340,7 @@ pub use platform::{caption_ready, close, is_full_screen, is_maximized, minimize,
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod tray {
     use std::cell::RefCell;
+    use std::sync::OnceLock;
 
     use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -387,49 +389,92 @@ mod tray {
         du * du + dv * dv <= R * R
     }
 
-    /// 托盘图标自己画：4× 超采样覆盖率当抗锯齿。macOS 是模板图（黑色
-    /// + alpha，系统按菜单栏明暗反色成黑白）；Windows 叠一层应用绿的
-    /// 圆角方块底、白字形（`icon.svg` 的 #246449），深 / 浅任务栏都看得见。
-    fn glyph_icon(pause: bool) -> Option<Icon> {
-        let (size, fg, tile): (u32, [u8; 3], Option<[u8; 3]>) = if cfg!(target_os = "macos") {
-            // 44px：菜单栏 22pt @2x（tray-icon 会把更高的缩到 22pt）。
-            (44, [0, 0, 0], None)
+    /// Windows 图标底色：应用图标同款浅绿渐变（`icon.svg` 的对角渐变
+    /// #f0ffd1 → #deffe5 → #dafff6）。
+    pub(super) fn tile_color(u: f32, v: f32) -> [u8; 3] {
+        const STOPS: [[u8; 3]; 3] = [[0xf0, 0xff, 0xd1], [0xde, 0xff, 0xe5], [0xda, 0xff, 0xf6]];
+        let t = ((u + v) * 0.5).clamp(0.0, 1.0) * 2.0;
+        let (a, b, t) = if t <= 1.0 {
+            (STOPS[0], STOPS[1], t)
         } else {
-            // 64px：系统按 DPI 缩到 16–32px。
-            (64, [255, 255, 255], Some([0x24, 0x64, 0x49]))
+            (STOPS[1], STOPS[2], t - 1.0)
         };
-        const SS: usize = 4;
-        let hi = (size as usize * SS) as f32;
+        std::array::from_fn(|c| (a[c] as f32 + (b[c] as f32 - a[c] as f32) * t).round() as u8)
+    }
+
+    /// 播放三角、暂停双杠、圆角方块底的覆盖率掩码（每像素 0..=255，
+    /// 4× 超采样出抗锯齿）。形状只光栅一次：`OnceLock` 缓存，换图标 /
+    /// 叠色都不再重算。
+    fn masks(size: u32) -> &'static [Vec<u8>; 3] {
+        static MASKS: OnceLock<([Vec<u8>; 3], u32)> = OnceLock::new();
+        let (masks, cached_size) = MASKS.get_or_init(|| {
+            const SS: usize = 4;
+            let hi = (size as usize * SS) as f32;
+            let pixels = (size * size) as usize;
+            let mut out = [vec![0u8; pixels], vec![0u8; pixels], vec![0u8; pixels]];
+            for y in 0..size as usize {
+                for x in 0..size as usize {
+                    let (mut p, mut q, mut t) = (0u32, 0u32, 0u32);
+                    for sy in 0..SS {
+                        for sx in 0..SS {
+                            let u = ((x * SS + sx) as f32 + 0.5) / hi;
+                            let v = ((y * SS + sy) as f32 + 0.5) / hi;
+                            p += in_glyph(false, u, v) as u32;
+                            q += in_glyph(true, u, v) as u32;
+                            t += in_tile(u, v) as u32;
+                        }
+                    }
+                    let i = y * size as usize + x;
+                    let s = (SS * SS) as f32;
+                    out[0][i] = (p as f32 / s * 255.0).round() as u8;
+                    out[1][i] = (q as f32 / s * 255.0).round() as u8;
+                    out[2][i] = (t as f32 / s * 255.0).round() as u8;
+                }
+            }
+            (out, size)
+        });
+        debug_assert_eq!(*cached_size, size, "托盘图标尺寸随平台固定");
+        masks
+    }
+
+    /// 托盘图标：缓存的形状掩码上叠色。macOS 是模板图（黑形 + alpha，
+    /// 系统按菜单栏明暗反色成黑白）；Windows 和应用图标一样「外浅内
+    /// 深」——浅绿渐变圆角方块底 + 深绿字形（#246449），深浅任务栏都可见。
+    fn glyph_icon(pause: bool) -> Option<Icon> {
+        // 44px：菜单栏 22pt @2x（tray-icon 会把更高的缩到 22pt）；
+        // 64px：Windows 按 DPI 缩到 16–32px。
+        let size = if cfg!(target_os = "macos") { 44 } else { 64 };
+        let m = masks(size);
+        let glyph = if pause { &m[1] } else { &m[0] };
+        let tile = &m[2];
         let mut rgba = vec![0u8; size as usize * size as usize * 4];
         for y in 0..size as usize {
             for x in 0..size as usize {
-                let (mut g, mut t) = (0u32, 0u32);
-                for sy in 0..SS {
-                    for sx in 0..SS {
-                        let u = ((x * SS + sx) as f32 + 0.5) / hi;
-                        let v = ((y * SS + sy) as f32 + 0.5) / hi;
-                        if in_glyph(pause, u, v) {
-                            g += 1;
-                        }
-                        if tile.is_some() && in_tile(u, v) {
-                            t += 1;
-                        }
-                    }
-                }
-                let fa = g as f32 / (SS * SS) as f32;
-                let ba = t as f32 / (SS * SS) as f32;
+                let i = y * size as usize + x;
+                let fa = glyph[i] as f32 / 255.0;
+                let ba = if cfg!(target_os = "macos") {
+                    0.0
+                } else {
+                    tile[i] as f32 / 255.0
+                };
                 let alpha = fa + ba * (1.0 - fa);
                 if alpha <= 0.0 {
                     continue;
                 }
-                let bg = tile.unwrap_or([0, 0, 0]);
-                let i = (y * size as usize + x) * 4;
+                let (fg, bg) = if cfg!(target_os = "macos") {
+                    ([0, 0, 0], [0, 0, 0])
+                } else {
+                    let u = (x as f32 + 0.5) / size as f32;
+                    let v = (y as f32 + 0.5) / size as f32;
+                    ([0x24, 0x64, 0x49], tile_color(u, v))
+                };
+                let o = i * 4;
                 for c in 0..3 {
-                    rgba[i + c] =
+                    rgba[o + c] =
                         (fg[c] as f32 * fa / alpha + bg[c] as f32 * ba * (1.0 - fa) / alpha)
                             .round() as u8;
                 }
-                rgba[i + 3] = (alpha * 255.0).round() as u8;
+                rgba[o + 3] = (alpha * 255.0).round() as u8;
             }
         }
         Icon::from_rgba(rgba, size, size).ok()
@@ -1419,5 +1464,9 @@ mod tests {
         // 圆角方块底：角外透明。
         assert!(tray::in_tile(0.5, 0.5));
         assert!(!tray::in_tile(0.02, 0.02));
+        // 底色：icon.svg 的对角渐变端点与中点。
+        assert_eq!(tray::tile_color(0.0, 0.0), [0xf0, 0xff, 0xd1]);
+        assert_eq!(tray::tile_color(0.5, 0.5), [0xde, 0xff, 0xe5]);
+        assert_eq!(tray::tile_color(1.0, 1.0), [0xda, 0xff, 0xf6]);
     }
 }
