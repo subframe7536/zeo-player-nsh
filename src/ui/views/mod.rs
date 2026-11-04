@@ -3,6 +3,7 @@
 
 mod browse;
 mod folders;
+mod home;
 pub(super) mod playlists;
 mod settings;
 
@@ -21,6 +22,7 @@ use crate::config::{TrackEntry, library_store};
 
 pub(super) use self::browse::{albums, artists, genres};
 pub(super) use self::folders::folders;
+pub(super) use self::home::home;
 pub(super) use self::settings::dialog as settings_dialog;
 
 // --- 菜单部件 -----------------------------------------------------------------

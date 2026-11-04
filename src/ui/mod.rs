@@ -21,7 +21,9 @@ use theme::*;
 /// 侧栏的去处。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Nav {
+    /// 首页：随机推荐、曲库与播放统计（默认启动页）。
     #[default]
+    Home,
     Folders,
     Artists,
     Albums,
@@ -184,6 +186,7 @@ fn page(nav: Signal<Nav>, search_page: frame::SearchFocus) -> AnyElement {
                 return views::search_results().into_element();
             }
             match nav.get() {
+                Nav::Home => views::home().into_element(),
                 Nav::Folders => views::folders().into_element(),
                 Nav::Artists => views::artists().into_element(),
                 Nav::Albums => views::albums().into_element(),

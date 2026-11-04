@@ -74,6 +74,104 @@ pub(super) fn playback_section() -> View {
     )
 }
 
+/// 整数输入行：标题 + 说明 | 草稿制数字输入 + 单位（非法回退，提交钳到 `max`）。
+fn int_row(
+    title: &'static str,
+    desc: &'static str,
+    label: &'static str,
+    unit: &'static str,
+    max: u32,
+    get: impl Fn() -> u32 + Copy + 'static,
+    set: impl Fn(u32) + Copy + 'static,
+) -> View {
+    let draft = signal(format!("{}", get()));
+    // 外部改了配置（另一个实例、测试）时同步草稿；computed 拦掉无关的
+    // s.library 写，不顶掉输入中的草稿。
+    let lib_v = computed(move || get());
+    effect(move || draft.set(lib_v.get().to_string()));
+    let commit = move || match draft.get().trim().parse::<u32>() {
+        Ok(v) => {
+            let v = v.min(max);
+            set(v);
+            draft.set(v.to_string());
+        }
+        Err(_) => draft.set(format!("{}", get())),
+    };
+    let field = input_field(true)
+        .w(px(88.0))
+        .label(label)
+        .keyboard_type(KeyboardType::Number)
+        .value(move || draft.get())
+        .on_change(move |t: &str| draft.set(t.to_owned()))
+        .on_submit(move |_: &str| commit())
+        .on_blur(move || commit());
+    view()
+        .flex_row()
+        .flex_wrap()
+        .items_center()
+        .gap(px(16.0))
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(200.0))
+                .gap(px(2.0))
+                .child(
+                    text(title)
+                        .text_size(px(14.0))
+                        .line_height(px(14.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(fg()),
+                )
+                .child(
+                    text(desc)
+                        .text_size(px(12.0))
+                        .line_height(px(12.0))
+                        .text_color(muted_fg()),
+                ),
+        )
+        .child(field)
+        .child(
+            text(unit)
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .text_color(muted_fg()),
+        )
+}
+
+/// 播放统计：听过多少算一次播放（用于首页的统计与排行）。
+pub(super) fn stats_section() -> View {
+    let s = store();
+    setting_section(
+        "播放统计",
+        "听过多少才算一次播放（用于首页的统计与排行）。两个条件任一满足即计；填 0 表示不用该条件；都是 0 则开始播放即计一次。",
+        None,
+    )
+    .child(int_row(
+        "最少播放百分比",
+        "听到整首的这个比例就算播放过一次。",
+        "最少播放百分比",
+        "%",
+        100,
+        move || s.library.with(|l| l.config.stats_min_percent),
+        move |v| {
+            let secs = s.library.with(|l| l.config.stats_min_secs);
+            super::super::super::store::set_stats_thresholds(v, secs)
+        },
+    ))
+    .child(int_row(
+        "最少播放时长",
+        "实际播出这么多秒就算播放过一次（拖动进度条不计入）。",
+        "最少播放时长",
+        "秒",
+        3600,
+        move || s.library.with(|l| l.config.stats_min_secs),
+        move |v| {
+            let percent = s.library.with(|l| l.config.stats_min_percent);
+            super::super::super::store::set_stats_thresholds(percent, v)
+        },
+    ))
+}
+
 /// 输出设备：拔下耳机或切换系统默认输出设备时的行为。
 pub(super) fn device_section() -> View {
     let s = store();

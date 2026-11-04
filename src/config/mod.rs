@@ -189,6 +189,12 @@ pub struct LibraryConfig {
     /// 输出设备变化（拔耳机、切默认设备）时暂停播放。
     #[serde(default = "default_true")]
     pub pause_on_device_change: bool,
+    /// 播放统计：听过整首的该百分比算一次播放（0 = 不用此条件）。
+    #[serde(default = "default_stats_min_percent")]
+    pub stats_min_percent: u32,
+    /// 播放统计：实际播出该秒数算一次播放（0 = 不用此条件）。
+    #[serde(default = "default_stats_min_secs")]
+    pub stats_min_secs: u32,
     /// ReplayGain 音量标准化（模式 / 预放大 / 无标签增益 / 防削波）。
     #[serde(default)]
     pub replaygain: crate::engine::audio::ReplayGainConfig,
@@ -228,6 +234,14 @@ fn default_min_size_kb() -> u32 {
     DEFAULT_MIN_SIZE_KB
 }
 
+fn default_stats_min_percent() -> u32 {
+    crate::engine::audio::DEFAULT_STATS_MIN_PERCENT
+}
+
+fn default_stats_min_secs() -> u32 {
+    crate::engine::audio::DEFAULT_STATS_MIN_SECS
+}
+
 fn default_true() -> bool {
     true
 }
@@ -255,6 +269,8 @@ impl Default for LibraryConfig {
             show_covers: default_true(),
             delete_permanently: false,
             pause_on_device_change: true,
+            stats_min_percent: default_stats_min_percent(),
+            stats_min_secs: default_stats_min_secs(),
             replaygain: crate::engine::audio::ReplayGainConfig::default(),
             eq: crate::engine::eq::EqConfig::default(),
             remember_frame: true,
@@ -286,6 +302,57 @@ pub fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+/// 本地时区相对 UTC 的偏移（秒）。取现值——夏令时切换边界的历史时刻
+/// 用现值近似即可（首页统计的粒度是天）。
+pub fn local_offset_seconds() -> i64 {
+    #[cfg(target_os = "macos")]
+    {
+        // NSTimeZone.localTimeZone.secondsFromGMT 是现成的偏移秒数。
+        objc2_foundation::NSTimeZone::localTimeZone().secondsFromGMT() as i64
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // GetTimeZoneInformation 的 Bias 是「本地 + N 分钟 = UTC」——
+        // 偏移取负；夏令时时段叠 DaylightBias。返回值是裸 u32
+        // （windows-sys 0.61 只导出 INVALID 常量）：1=STANDARD 2=DAYLIGHT。
+        use windows_sys::Win32::System::Time::{
+            GetTimeZoneInformation, TIME_ZONE_INFORMATION,
+        };
+        unsafe {
+            let mut info: TIME_ZONE_INFORMATION = std::mem::zeroed();
+            let id = GetTimeZoneInformation(&mut info);
+            let extra = match id {
+                2 => info.DaylightBias,
+                1 => info.StandardBias,
+                _ => 0,
+            };
+            -((info.Bias + extra) as i64) * 60
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        0
+    }
+}
+
+/// `unix` 秒的本地天数（本地历法从 `unix + offset` 切）。
+pub fn local_day(unix: u64, offset: i64) -> i64 {
+    (unix as i64 + offset).div_euclid(86_400)
+}
+
+/// `unix` 秒的本地小时（0–23）。
+pub fn local_hour(unix: u64, offset: i64) -> u32 {
+    ((unix as i64 + offset).rem_euclid(86_400) / 3600) as u32
+}
+
+/// `unix` 所在本地周（周一 00:00）的起始 Unix 秒。
+pub fn local_week_start(unix: u64, offset: i64) -> u64 {
+    let day = local_day(unix, offset);
+    // 纪元日 1970-01-01 是周四：day+3 对 7 取模 = 周一为 0 的星期序。
+    let monday = day - (day + 3).rem_euclid(7);
+    (monday * 86_400 - offset).max(0) as u64
 }
 
 /// 去空、去重（保持顺序）。分隔符可以为空列表：不拆分。
@@ -344,6 +411,15 @@ pub fn library_store() -> &'static LibraryStore {
     static STORE: OnceLock<LibraryStore> = OnceLock::new();
     STORE.get_or_init(|| {
         let dir = data_dir();
+        // 单元测试不碰真实数据目录（自己设了 ZEO_PLAYER_DATA_DIR 的测试除外，
+        // 同 db() 的护栏）：谁先调谁就绑，把全局绑到 dev-data 会让别人的
+        // 断言吃到真实配置。
+        #[cfg(test)]
+        let dir = if std::env::var_os("ZEO_PLAYER_DATA_DIR").is_none() {
+            std::env::temp_dir().join(format!("zeo-player-store-{}", std::process::id()))
+        } else {
+            dir
+        };
         let _ = std::fs::create_dir_all(&dir);
         let config = load_config(&dir);
         // 先用数据库里上次的元数据建索引，界面马上有曲库；随后的同步只重读变了的内容。
@@ -510,6 +586,23 @@ impl LibraryStore {
 
     pub fn set_pause_on_device_change(&self, on: bool) {
         self.update_config(|c| c.pause_on_device_change = on);
+    }
+
+    /// 播放统计阈值（听过多少算一次播放；0 = 不用该条件）。
+    pub fn stats_min_percent(&self) -> u32 {
+        self.config().stats_min_percent
+    }
+
+    pub fn stats_min_secs(&self) -> u32 {
+        self.config().stats_min_secs
+    }
+
+    /// 两个阈值一起写（保存）。
+    pub fn set_stats_thresholds(&self, percent: u32, secs: u32) {
+        self.update_config(|c| {
+            c.stats_min_percent = percent.min(100);
+            c.stats_min_secs = secs.min(3600);
+        });
     }
 
     /// ReplayGain 设置。
@@ -940,5 +1033,32 @@ mod tests {
             none.normalized().genre_separators.is_empty(),
             "显式清空时不拆分"
         );
+    }
+
+    /// 本地天数 / 小时 / 周起点：东八区（+8h）与负偏移都验。
+    #[test]
+    fn local_time_math() {
+        const CST: i64 = 8 * 3600;
+        // 2026-11-04 00:00:00+08:00 = 2026-11-03T16:00:00Z（日序号 20760）。
+        let utc = |h: u64, m: u64| 1_793_664_000 + h * 3600 + m * 60;
+        // UTC 16:00 → 本地 11-04 00:00。
+        assert_eq!(local_hour(utc(16, 0), CST), 0);
+        assert_eq!(local_hour(utc(17, 30), CST), 1);
+        // UTC 15:59:59 还在前一天。
+        assert_eq!(local_hour(utc(15, 59), CST), 23);
+        // 11-04 是周三：本周起点 = 11-02 周一 00:00+08:00 = UTC 11-01 16:00。
+        let monday = local_week_start(utc(16, 0), CST);
+        assert_eq!(local_day(monday, CST) - local_day(utc(16, 0), CST), -2);
+        assert_eq!(local_hour(monday, CST), 0, "周起点落在本地周一 00:00");
+        // 周日（11-08 本地 12:00）仍归本周一。
+        let sunday = monday + 5 * 86400 + 12 * 3600;
+        assert_eq!(local_week_start(sunday, CST), monday);
+        // 下周一零点后起点前移。
+        let next = monday + 7 * 86400;
+        assert_eq!(local_week_start(next, CST), next);
+        // 负偏移（UTC-5）：本地时间比 UTC 慢。
+        assert_eq!(local_hour(utc(16, 0), -5 * 3600), 11);
+        let m = local_week_start(utc(16, 0), -5 * 3600);
+        assert_eq!(local_hour(m, -5 * 3600), 0);
     }
 }

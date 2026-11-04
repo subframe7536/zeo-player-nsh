@@ -81,7 +81,7 @@ fn group_by(
 }
 
 /// 圆形头像：封面或首字。`size` 为 `None` 时铺满宽度、正方形。
-fn avatar(
+pub(super) fn avatar(
     cover: impl Fn() -> Option<String> + Copy + 'static,
     name: impl Fn() -> String + 'static,
     size: Option<f32>,
@@ -123,7 +123,8 @@ fn avatar(
 #[component]
 pub fn Artists() -> impl IntoElement {
     let s = store();
-    let selected = signal(None::<String>);
+    // 选中的歌手存在 store 上：首页「热门艺术家」可以深链进详情。
+    let selected = s.artist_sel;
     let groups = computed(move || {
         let tracks = s.tracks.get();
         Rc::new(group_by(&tracks, |t| {

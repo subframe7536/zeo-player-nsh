@@ -80,6 +80,10 @@ pub(crate) fn scan(store: &LibraryStore) -> usize {
     cache.retain(&keep);
     sort_tracks(&mut entries);
     let count = entries.len();
+    // 「新添加」对账：第一次见到路径才记入庫时间，已不在库的清掉。
+    let paths: Vec<String> = entries.iter().map(|t| t.path.clone()).collect();
+    let now = crate::config::unix_now();
+    crate::db::later(move || crate::db::reconcile_added(&paths, now));
     *store.tracks.write().unwrap() = Arc::new(entries);
     store.current.lock().unwrap().clear();
     store.scanning.store(false, Ordering::Release);

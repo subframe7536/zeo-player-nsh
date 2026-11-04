@@ -14,7 +14,8 @@ use super::super::components::icons::{Icon, icon};
 use super::super::theme::{self, *};
 use super::super::{Nav, store};
 
-const LIBRARY: [(Nav, &str, Icon); 4] = [
+const LIBRARY: [(Nav, &str, Icon); 5] = [
+    (Nav::Home, "首页", Icon::Home),
     (Nav::Folders, "文件夹", Icon::Folder),
     (Nav::Artists, "歌手", Icon::Mic),
     (Nav::Albums, "专辑", Icon::Disc),

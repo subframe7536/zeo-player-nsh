@@ -84,15 +84,19 @@ fn has(app: &Headless, s: &str) -> bool {
     app.screen().texts().contains(&s)
 }
 
-/// 双击播放 `sel`（行选中了即已播）：行的双击窗口是 450ms，并行负载下
-/// 两次 `press` 的往返间隔可能超过它、退化成两次单击——连按到有相邻
-/// 一对落进窗口为止（有上界，超时说明播放真的没发生）。
+/// 双击播放 `sel`：行的双击窗口是 450ms，并行负载下两次 `press` 的往返
+/// 间隔可能超过它、退化成两次单击——连按到有相邻一对落进窗口为止（有上
+/// 界，超时说明播放真的没发生）。退出要看「选中且在播」，不能只看选中：
+/// `restore_last` 会把上次暂停的曲目恢复成暂停的当前行（selected 为真），
+/// 那时一次单击什么都不会触发。
 fn double_press(app: &mut Headless, sel: &str) {
     for _ in 0..12 {
-        app.press(sel).unwrap();
-        if app.screen().selected(sel).unwrap_or(false) {
+        if app.screen().selected(sel).unwrap_or(false)
+            && zeo_player::engine::Player::global().state().is_playing
+        {
             return;
         }
+        app.press(sel).unwrap();
         std::thread::sleep(Duration::from_millis(40));
     }
     panic!("双击 {sel} 未播放: {:?}", texts(app));
@@ -296,6 +300,7 @@ fn lyrics_offset_nudges_and_resets() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
+    app.press("文件夹").unwrap();
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     double_press(&mut app, "role:button[测试歌曲]");
@@ -385,6 +390,7 @@ fn lyrics_offset_global_saves() {
     app.type_text(field, "300\n").unwrap();
     assert!(saved(300), "改回 300: {:?}", saved_global_offset());
     app.press("label:关闭设置").unwrap();
+    app.press("文件夹").unwrap();
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     double_press(&mut app, "role:button[测试歌曲]");
@@ -504,6 +510,7 @@ fn cover_mode_tints_the_playing_track_title() {
     })
     .unwrap();
     // 文件夹视图 → 点进根文件夹，曲目行才出现。双击才播放。
+    app.press("文件夹").unwrap();
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     double_press(&mut app, "role:button[测试歌曲]");
@@ -533,6 +540,7 @@ fn list_rows_drop_the_cover_column_when_covers_are_off() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
+    app.press("文件夹").unwrap();
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     let frame = "role:button[测试歌曲] >> id:cover";
@@ -611,6 +619,7 @@ fn folders_page_shows_tree_and_files() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
+    app.press("文件夹").unwrap();
     // 子文件夹要等扫描完曲目才出现在树里，顺带等到曲库就绪。
     app.wait_for_within("text:sub", Duration::from_secs(20))
         .unwrap();
@@ -635,6 +644,7 @@ fn folders_page_tree_ops() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
+    app.press("文件夹").unwrap();
     app.wait_for_within("text:sub", Duration::from_secs(20))
         .unwrap();
     let sub = dunce::canonicalize(CORPUS).unwrap().join("sub");
@@ -704,6 +714,7 @@ fn context_menus_replace_each_other() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
+    app.press("文件夹").unwrap();
     app.wait_for_within("text:sub", Duration::from_secs(20))
         .unwrap();
     app.press("sub").unwrap();
@@ -734,6 +745,7 @@ fn narrow_windows_drop_album_and_size_columns() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
+    app.press("文件夹").unwrap();
     app.wait_for_within("大小", Duration::from_secs(20))
         .unwrap();
     // 侧栏收成图标栏（< 900 pt，导航文字被裁掉不绘制），内容区 572 pt：
@@ -752,6 +764,7 @@ fn number_column_only_in_album_detail() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
+    app.press("文件夹").unwrap();
     // 等扫描完（树里的 sub 出现即曲库就绪）。
     app.wait_for_within("text:sub", Duration::from_secs(20))
         .unwrap();
@@ -915,6 +928,7 @@ fn track_row_double_click_like_and_menu() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
+    app.press("文件夹").unwrap();
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     let row = "role:button[测试歌曲]";
@@ -950,6 +964,107 @@ fn track_row_double_click_like_and_menu() {
     // 还原：取消喜欢，别让喜欢状态漏给别的用例。
     app.press("role:button[测试歌曲] >> role:button[取消喜欢]")
         .unwrap();
+}
+
+/// 首页是默认页：侧栏「首页」选中；有语料时随机推荐（「随机翻到了」
+/// 小歌单卡 + 「换一批」）与曲库 / 播放统计标签都在。没语料时是曲库为
+/// 空的空状态。
+#[test]
+fn home_is_default_and_shows_stats() {
+    let mut app = start(1200.0, 800.0);
+    assert!(
+        app.screen().selected("role:button[首页]").unwrap_or(false),
+        "默认应停在首页: {:?}",
+        texts(&app)
+    );
+    if !isolate() {
+        assert!(has(&app, "还没有音乐文件夹"), "{:?}", texts(&app));
+        return;
+    }
+    // 曲库扫描完才出内容（扫描期间首页是空状态）。
+    app.wait_for_within("label:立即播放", Duration::from_secs(20))
+        .unwrap();
+    // 「随机翻到了「X」」的曲名是动态的，按前缀查。
+    assert!(
+        texts(&app).iter().any(|t| t.starts_with("随机翻到了「")),
+        "{:?}",
+        texts(&app)
+    );
+    // 头部：五档时段问候之一 + 三个本周指标。
+    let greetings = ["早上好", "中午好", "下午好", "晚上好", "夜深了"];
+    assert!(
+        greetings.iter().any(|g| has(&app, g)),
+        "时段问候: {:?}",
+        texts(&app)
+    );
+    for label in ["本周时长", "新增收藏", "连续收听"] {
+        assert!(has(&app, label), "{label}: {:?}", texts(&app));
+    }
+    // 「新添加」等 added 表对账完（db::later 异步 + 2 秒轮询重读）才出现。
+    app.wait_for("新添加").unwrap();
+    // 换一批重抽：卡还在、按钮还在（语料里必有一首被抽中）。
+    app.press("label:换一批").unwrap();
+    assert!(
+        texts(&app).iter().any(|t| t.starts_with("随机翻到了「")),
+        "换一批后: {:?}",
+        texts(&app)
+    );
+}
+
+/// 播放统计：听过阈值那一刻就计一次（不等播完）。把阈值改成「实际播
+/// 1 秒即计」后播 sine 3 秒，回首页应出现「最常播放」一节；测完把阈值
+/// 恢复成默认 60% / 30 秒并暂停共享播放器。
+#[test]
+fn home_counts_a_play() {
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    // 设置 → 播放 → 播放统计：百分比改 0、秒数改 1（任一满足即计）。
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[播放]").unwrap();
+    app.wait_for("label:最少播放时长").unwrap();
+    app.clear("label:最少播放时长").unwrap();
+    app.type_text("label:最少播放时长", "1\n").unwrap();
+    app.clear("label:最少播放百分比").unwrap();
+    app.type_text("label:最少播放百分比", "0\n").unwrap();
+    app.press("label:关闭设置").unwrap();
+
+    // 播三秒：阈值一过引擎即记播放（播放记录代次 +1）。
+    let before = zeo_player::engine::Player::global().plays_generation();
+    app.press("文件夹").unwrap();
+    app.press("zeo-player-test-music").unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+    double_press(&mut app, "role:button[测试歌曲]");
+    app.wait_until("应已记一次播放", Duration::from_secs(10), |_| {
+        zeo_player::engine::Player::global().plays_generation() > before
+    })
+    .unwrap();
+    // 共享播放器别放着歌（也防 10 秒的曲子播完自动切下一首）。
+    zeo_player::engine::Player::global().pause();
+
+    // 回首页：统计重读后「最近播放」卡在，「热门艺术家」同时在。
+    app.press("role:button[首页]").unwrap();
+    app.wait_for("最近播放").unwrap();
+    assert!(has(&app, "热门艺术家"), "{:?}", texts(&app));
+    assert!(has(&app, "测试歌曲"), "{:?}", texts(&app));
+
+    // 「热门艺术家」深链：点歌手圆钮直接落进「歌手」详情（复用 Artists）。
+    app.press("role:button[测试歌手 A; 测试歌手 B]").unwrap();
+    app.wait_for("label:返回").unwrap();
+    // 回网格并把选中复位，别留给后面的侧栏用例。
+    app.press("label:返回").unwrap();
+
+    // 还原阈值（60% / 30 秒），别漏给别的用例。
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[播放]").unwrap();
+    app.wait_for("label:最少播放百分比").unwrap();
+    app.clear("label:最少播放百分比").unwrap();
+    app.type_text("label:最少播放百分比", "60\n").unwrap();
+    app.clear("label:最少播放时长").unwrap();
+    app.type_text("label:最少播放时长", "30\n").unwrap();
+    app.press("label:关闭设置").unwrap();
 }
 
 /// 测试语料根文件夹在文件夹页里的名字。

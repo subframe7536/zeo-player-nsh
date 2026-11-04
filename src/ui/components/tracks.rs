@@ -45,7 +45,7 @@ pub const W_LIKE: f32 = 32.0;
 
 /// 内容区宽度（窗口减侧栏；窄窗口侧栏收成图标栏）。文件夹页左侧还有一
 /// 棵目录树，正在显示它时把它也减去。读取即订阅窗口大小与导航。
-fn content_width() -> f32 {
+pub(crate) fn content_width() -> f32 {
     let s = store();
     let folders = global::<super::super::Nav>().get() == super::super::Nav::Folders
         && !s.search_open.get()

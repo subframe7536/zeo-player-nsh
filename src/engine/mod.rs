@@ -55,6 +55,11 @@ impl Player {
         });
     }
 
+    /// 把 `paths` 追加到当前队尾（当前曲目与循环模式不变）。
+    pub fn queue_add(&self, paths: Vec<String>) {
+        self.engine.send(EngineCmd::QueueAdd(paths));
+    }
+
     /// 装载 `path` 但不播放，停在 `time` 秒。
     pub fn cue(&self, path: String, queue: Vec<String>, time: f64) {
         self.engine.send(EngineCmd::Cue {
@@ -210,6 +215,28 @@ impl Player {
     /// ReplayGain 设置（立即生效；对正在播放的曲目重算增益）。
     pub fn set_replaygain(&self, cfg: crate::engine::audio::ReplayGainConfig) {
         self.engine.send(EngineCmd::SetReplayGain(cfg));
+    }
+
+    /// 播放统计的阈值（听过多少算一次播放）。写共享原子量，引擎主
+    /// 循环下一轮即按新值判定；`min_percent` 限 0–100，`min_secs` 限
+    /// 0–3600，0 表示不用该条件。
+    pub fn set_stats_thresholds(&self, min_percent: u32, min_secs: u32) {
+        self.engine
+            .shared
+            .stats_min_percent
+            .store(min_percent.min(100), std::sync::atomic::Ordering::Relaxed);
+        self.engine
+            .shared
+            .stats_min_secs
+            .store(min_secs.min(3600), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 播放记录代次：每记一次播放 +1（界面据此刷新统计）。
+    pub fn plays_generation(&self) -> u64 {
+        self.engine
+            .shared
+            .plays_gen
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// 均衡器设置（立即生效：写配置 + 加代次，回调下一块读取）。

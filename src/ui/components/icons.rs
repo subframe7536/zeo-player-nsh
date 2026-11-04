@@ -15,6 +15,7 @@ pub enum Icon {
     Play,
     Volume,
     Mute,
+    Home,
     Folder,
     Mic,
     Disc,
@@ -81,6 +82,10 @@ impl Icon {
             // volume-x
             Icon::Mute => {
                 r#"<path d="M11 4.702a.7.7 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.7.7 0 0 0 11 19.298z"/><path d="m16.5 14.5 5-5"/><path d="m16.5 9.5 5 5"/>"#
+            }
+            // house
+            Icon::Home => {
+                r#"<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>"#
             }
             // folder
             Icon::Folder => {

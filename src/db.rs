@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -14,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::metadata::{CacheEntry, MetaInfo};
 
 /// 当前表结构版本（`PRAGMA user_version`）。改表时加一，并在 [`migrate`] 里迁移。
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 7;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS tracks (
@@ -118,6 +119,36 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             "CREATE TABLE IF NOT EXISTS lyrics_offsets (
                 path TEXT PRIMARY KEY,
                 offset_ms INTEGER NOT NULL
+            );",
+        )?;
+    }
+    if version < 6 {
+        // 播放记录：越过统计阈值时写一行。跟随文件移动；删除文件、
+        // 重建曲库都不清（历史保留）。
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS plays (
+                id INTEGER PRIMARY KEY,
+                path TEXT NOT NULL,
+                played_at INTEGER NOT NULL,
+                listened REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS plays_path ON plays(path);
+            CREATE INDEX IF NOT EXISTS plays_time ON plays(played_at);",
+        )?;
+    }
+    if version < 7 {
+        // 收藏时间（首页「新增收藏」要它）：与「我喜欢」歌单内容对应，
+        // 升级前的老收藏由启动回填补 `liked_at = 0`——不计新增。
+        // 入库时间（首页「新添加」要它）：路径第一次见到时记 `added_at`，
+        // 升级前的老曲目由启动回填补文件修改时间。
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS likes (
+                path TEXT PRIMARY KEY,
+                liked_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS added (
+                path TEXT PRIMARY KEY,
+                added_at INTEGER NOT NULL
             );",
         )?;
     }
@@ -303,6 +334,13 @@ pub fn retain_meta(keep: &HashSet<String>) {
                 delete.execute([path])?;
             }
         }
+        {
+            // 「新添加」跟曲目走：文件没了，入库时间也不留（删掉再加算重新加入）。
+            let mut delete = tx.prepare("DELETE FROM added WHERE path = ?1")?;
+            for path in &gone {
+                delete.execute([path])?;
+            }
+        }
         tx.commit()
     });
 }
@@ -310,6 +348,7 @@ pub fn retain_meta(keep: &HashSet<String>) {
 fn remove_meta_on(conn: &Connection, path: &str) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM tracks WHERE path = ?1", [path])?;
     conn.execute("DELETE FROM lyrics_offsets WHERE path = ?1", [path])?;
+    conn.execute("DELETE FROM added WHERE path = ?1", [path])?;
     Ok(())
 }
 
@@ -317,14 +356,12 @@ fn remove_meta_under_on(conn: &Connection, path: &str) -> rusqlite::Result<()> {
     let sep = std::path::MAIN_SEPARATOR;
     let trimmed = path.trim_end_matches(sep);
     let under = format!("{trimmed}{sep}");
-    conn.execute(
-        "DELETE FROM tracks WHERE path = ?1 OR substr(path, 1, ?2) = ?3",
-        params![trimmed, under.len() as i64, under],
-    )?;
-    conn.execute(
-        "DELETE FROM lyrics_offsets WHERE path = ?1 OR substr(path, 1, ?2) = ?3",
-        params![trimmed, under.len() as i64, under],
-    )?;
+    for table in ["tracks", "lyrics_offsets", "added"] {
+        conn.execute(
+            &format!("DELETE FROM {table} WHERE path = ?1 OR substr(path, 1, ?2) = ?3"),
+            params![trimmed, under.len() as i64, under],
+        )?;
+    }
     Ok(())
 }
 
@@ -350,6 +387,27 @@ fn move_meta_on(conn: &Connection, rows: &[(String, String, u64, u64)]) -> rusql
     {
         // 每曲歌词偏移跟随文件移动 / 改名。
         let mut stmt = conn.prepare_cached("UPDATE lyrics_offsets SET path = ?1 WHERE path = ?2")?;
+        for (old, new, ..) in rows {
+            stmt.execute(params![new, old])?;
+        }
+    }
+    {
+        // 播放记录跟随文件移动 / 改名（历史保留，只换路径键）。
+        let mut stmt = conn.prepare_cached("UPDATE plays SET path = ?1 WHERE path = ?2")?;
+        for (old, new, ..) in rows {
+            stmt.execute(params![new, old])?;
+        }
+    }
+    {
+        // 收藏时间也跟随（同 plays）。
+        let mut stmt = conn.prepare_cached("UPDATE likes SET path = ?1 WHERE path = ?2")?;
+        for (old, new, ..) in rows {
+            stmt.execute(params![new, old])?;
+        }
+    }
+    {
+        // 入库时间同样跟随。
+        let mut stmt = conn.prepare_cached("UPDATE added SET path = ?1 WHERE path = ?2")?;
         for (old, new, ..) in rows {
             stmt.execute(params![new, old])?;
         }
@@ -411,6 +469,273 @@ pub fn set_lyrics_offset(path: &str, offset_ms: i64) {
     with("写歌词偏移", |conn| {
         set_lyrics_offset_on(conn, path, offset_ms)
     });
+}
+
+// --- 播放记录 -----------------------------------------------------------------
+
+fn record_play_on(
+    conn: &Connection,
+    path: &str,
+    played_at: u64,
+    listened: f64,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO plays (path, played_at, listened) VALUES (?1, ?2, ?3)",
+        params![path, played_at as i64, listened],
+    )?;
+    Ok(())
+}
+
+/// 记一次播放（`played_at` 为 Unix 秒，`listened` 为实际播出的秒数）。
+/// 引擎在越过统计阈值的那一刻写一行；文件移动 / 改名跟随 `move_meta`，
+/// 删除与重建曲库不清（历史保留）。
+pub fn record_play(path: &str, played_at: u64, listened: f64) {
+    with("写播放记录", |conn| {
+        record_play_on(conn, path, played_at, listened)
+    });
+}
+
+// --- 收藏时间 -----------------------------------------------------------------
+
+/// 记一次喜欢（`liked_at` 为 Unix 秒；重新收藏视为新喜欢）。
+pub fn record_like(path: &str, liked_at: u64) {
+    with("写收藏时间", |conn| {
+        conn.execute(
+            "INSERT OR REPLACE INTO likes (path, liked_at) VALUES (?1, ?2)",
+            params![path, liked_at as i64],
+        )?;
+        Ok(())
+    });
+}
+
+/// 取消喜欢。
+pub fn remove_like(path: &str) {
+    with("删收藏时间", |conn| {
+        conn.execute("DELETE FROM likes WHERE path = ?1", params![path])?;
+        Ok(())
+    });
+}
+
+/// 把升级前已存在的收藏路径补进表（`liked_at = 0`：有记录但不计新增）。
+pub fn backfill_likes(paths: &[String]) {
+    with("补收藏时间", |conn| {
+        let mut stmt = conn.prepare_cached(
+            "INSERT OR IGNORE INTO likes (path, liked_at) VALUES (?1, 0)",
+        )?;
+        for p in paths {
+            stmt.execute(params![p])?;
+        }
+        Ok(())
+    });
+}
+
+// --- 入库时间 -----------------------------------------------------------------
+
+/// `added` 表的代次：首页据它重读「新添加」（写是 `db::later` 异步的）。
+static ADDED_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// `added` 表变过几次。
+pub fn added_generation() -> u64 {
+    ADDED_GEN.load(Ordering::Relaxed)
+}
+
+/// 扫描结束对账：表里没有的路径以 `now` 记（第一次见到才算入库），不在
+/// `paths` 里的行清掉（文件删了再加算重新加入）。在 `db::later` 上跑。
+pub fn reconcile_added(paths: &[String], now: u64) {
+    let done = with("对账入库时间", |conn| {
+        let tx = conn.transaction()?;
+        {
+            let mut ins = tx.prepare_cached(
+                "INSERT OR IGNORE INTO added (path, added_at) VALUES (?1, ?2)",
+            )?;
+            for p in paths {
+                ins.execute(params![p, now as i64])?;
+            }
+        }
+        {
+            tx.execute_batch(
+                "CREATE TEMP TABLE IF NOT EXISTS added_keep (path TEXT PRIMARY KEY);
+                 DELETE FROM added_keep;",
+            )?;
+            let mut keep =
+                tx.prepare_cached("INSERT OR IGNORE INTO added_keep (path) VALUES (?1)")?;
+            for p in paths {
+                keep.execute(params![p])?;
+            }
+            tx.execute(
+                "DELETE FROM added WHERE path NOT IN (SELECT path FROM added_keep)",
+                [],
+            )?;
+        }
+        tx.commit()
+    });
+    if done.is_some() {
+        ADDED_GEN.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// 升级前的老曲目回填：用文件修改时间当入库时间的近似（`INSERT OR
+/// IGNORE`——已经记过的不动）。`entries = (路径, 文件修改时间)`。
+pub fn backfill_added(entries: &[(String, u64)]) {
+    let done = with("补入库时间", |conn| {
+        let mut stmt = conn.prepare_cached(
+            "INSERT OR IGNORE INTO added (path, added_at) VALUES (?1, ?2)",
+        )?;
+        for (p, modified) in entries {
+            stmt.execute(params![p, *modified as i64])?;
+        }
+        Ok(())
+    });
+    if done.is_some() {
+        ADDED_GEN.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// 播放统计摘要（首页用）。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlayStats {
+    /// 全部播放次数（含曲库已没有的历史记录）。
+    pub total: u64,
+    /// `played_at` 大于 `since` 的播放次数。
+    pub since: u64,
+    /// （路径，次数）按次数降序，只统计曲库里还在的曲目；零播放的
+    /// 按入库时间排在末位（0 次也上榜）。
+    pub top_tracks: Vec<(String, u64)>,
+    /// （歌手标签原文，次数）按次数降序：`artist` 是标签原文，可能是
+    /// `A; B` 这样的组合——按原文分组，不拆分。含零播放的歌手（排在末位），
+    /// 首页「热门艺术家」在没听过歌时也有内容。
+    pub top_artists: Vec<(String, u64)>,
+    /// 最近播放的路径（去重，最新在前），只统计曲库里还在的曲目；
+    /// 零播放的曲目按入库时间排在末位。
+    pub recent: Vec<String>,
+    /// `played_at >= week_start` 的实际播出总秒数。
+    pub week_secs: f64,
+    /// `liked_at >= week_start` 的收藏数（`liked_at = 0` 的老收藏不算）。
+    pub week_likes: u64,
+    /// 连续收听天数（本地日）：今天没听时算到昨天为止的连续段。
+    pub streak: u64,
+    /// 最新入库的路径（`added_at` 倒序，只统计曲库里还在的曲目）。
+    pub new_added: Vec<String>,
+}
+
+/// 连续天数：本地日序号倒序（去重）从 `today`（或它没听时的昨天）往回
+/// 数，断档即停。`days` 为 DESC 序。
+fn streak_days(days: &[i64], today: i64) -> u64 {
+    let mut expected = if days.first().is_some_and(|&d| d >= today) {
+        today
+    } else {
+        today - 1
+    };
+    let mut n = 0u64;
+    for &d in days {
+        if d > expected {
+            continue; // 未来时间戳（时钟回拨）跳过
+        }
+        if d < expected {
+            break;
+        }
+        n += 1;
+        expected -= 1;
+    }
+    n
+}
+
+fn play_stats_on(
+    conn: &Connection,
+    since: u64,
+    week_start: u64,
+    offset: i64,
+    limit: usize,
+) -> rusqlite::Result<PlayStats> {
+    let limit = limit as i64;
+    let total = conn.query_row("SELECT COUNT(*) FROM plays", [], |r| {
+        r.get::<_, i64>(0)
+    })? as u64;
+    let recent_n = conn.query_row(
+        "SELECT COUNT(*) FROM plays WHERE played_at > ?1",
+        [since as i64],
+        |r| r.get::<_, i64>(0),
+    )? as u64;
+    let week_secs = conn.query_row(
+        "SELECT COALESCE(SUM(listened), 0) FROM plays WHERE played_at >= ?1",
+        [week_start as i64],
+        |r| r.get::<_, f64>(0),
+    )?;
+    let week_likes = conn.query_row(
+        "SELECT COUNT(*) FROM likes WHERE liked_at >= ?1",
+        [week_start as i64],
+        |r| r.get::<_, i64>(0),
+    )? as u64;
+    // 本地日序号（去重倒序）：offset 是本地时区相对 UTC 的秒数。
+    let days: Vec<i64> = conn
+        .prepare(
+            "SELECT DISTINCT CAST((played_at + ?1) / 86400 AS INTEGER) d \
+             FROM plays ORDER BY d DESC",
+        )?
+        .query_map([offset], |r| r.get::<_, i64>(0))?
+        .collect::<Result<_, _>>()?;
+    let today = crate::config::local_day(crate::config::unix_now(), offset);
+    let streak = streak_days(&days, today);
+    let ranked = |sql: &str| -> rusqlite::Result<Vec<(String, u64)>> {
+        conn.prepare(sql)?
+            .query_map([limit], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+            })?
+            .collect()
+    };
+    // 三个榜都含零播放的（LEFT JOIN）：播放过的按次数 / 时间在前，
+    // 零播放的按入库时间在末。
+    let top_tracks = ranked(
+        "SELECT t.path, COUNT(p.id) c FROM tracks t \
+         LEFT JOIN plays p ON p.path = t.path \
+         LEFT JOIN added a ON a.path = t.path \
+         GROUP BY t.path \
+         ORDER BY c DESC, MAX(p.played_at) DESC, COALESCE(a.added_at, 0) DESC, t.path \
+         LIMIT ?1",
+    )?;
+    let top_artists = ranked(
+        "SELECT t.artist, COUNT(p.id) c FROM tracks t \
+         LEFT JOIN plays p ON p.path = t.path \
+         GROUP BY t.artist ORDER BY c DESC, MAX(p.played_at) DESC, t.artist LIMIT ?1",
+    )?;
+    let recent = conn
+        .prepare(
+            "SELECT t.path FROM tracks t \
+             LEFT JOIN plays p ON p.path = t.path \
+             LEFT JOIN added a ON a.path = t.path \
+             GROUP BY t.path \
+             ORDER BY MAX(p.played_at) DESC, COALESCE(a.added_at, 0) DESC, t.path \
+             LIMIT ?1",
+        )?
+        .query_map([limit], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let new_added = conn
+        .prepare(
+            "SELECT a.path FROM added a JOIN tracks t ON t.path = a.path \
+             ORDER BY a.added_at DESC, a.path LIMIT ?1",
+        )?
+        .query_map([limit], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(PlayStats {
+        total,
+        since: recent_n,
+        top_tracks,
+        top_artists,
+        recent,
+        week_secs,
+        week_likes,
+        streak,
+        new_added,
+    })
+}
+
+/// 播放统计摘要（`since` / `week_start` 为 Unix 秒，`offset` 为本地时区
+/// 偏移秒，`limit` 为各排行条数）；数据库不可用时全零。
+pub fn play_stats(since: u64, week_start: u64, offset: i64, limit: usize) -> PlayStats {
+    with("读播放统计", |conn| {
+        play_stats_on(conn, since, week_start, offset, limit)
+    })
+    .unwrap_or_default()
 }
 
 // --- 播放状态 -----------------------------------------------------------------
@@ -635,5 +960,198 @@ mod tests {
         // 新表可写。
         set_lyrics_offset_on(&conn, "a.flac", 100).unwrap();
         assert_eq!(lyrics_offset_on(&conn, "a.flac").unwrap(), 100);
+    }
+
+    /// 往 tracks 里插一行最小曲目。
+    fn track(conn: &Connection, path: &str, artist: &str) {
+        conn.execute(
+            "INSERT INTO tracks (path, stamp, size, modified, title, artist, album, \
+             album_artist, duration, has_art, genres, album_artists, composers) \
+             VALUES (?1, 1, 1, 1, 't', ?2, 'al', 'aa', 1.0, 0, '[]', '[]', '[]')",
+            params![path, artist],
+        )
+        .unwrap();
+    }
+
+    /// 播放统计：计数与排序；曲库里没有的历史路径算进总数、不进排行。
+    /// 歌手榜与「最近」含零播放的（补在末位），「最常播放」仍只听过的。
+    #[test]
+    fn play_stats_counts_and_orders() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        track(&conn, "a", "X");
+        track(&conn, "b", "X");
+        track(&conn, "c", "Y");
+        track(&conn, "d", "Z"); // 零播放
+        // a×3、c×2、b×1，外加一条孤儿记录（曲库已没有该文件）。
+        for (p, at) in [
+            ("a", 1),
+            ("c", 2),
+            ("a", 3),
+            ("b", 4),
+            ("c", 5),
+            ("a", 6),
+            ("gone", 7),
+        ] {
+            record_play_on(&conn, p, at, 1.0).unwrap();
+        }
+        let s = play_stats_on(&conn, 4, 0, 0, 10).unwrap();
+        assert_eq!(s.total, 7);
+        assert_eq!(s.since, 3); // played_at 5、6、7
+        assert_eq!(s.week_secs, 7.0); // 全部 played_at >= 0 都计
+        // 零播放的 d 计 0 也上榜（排末位）。
+        assert_eq!(
+            s.top_tracks,
+            vec![
+                ("a".to_owned(), 3),
+                ("c".to_owned(), 2),
+                ("b".to_owned(), 1),
+                ("d".to_owned(), 0)
+            ]
+        );
+        // 歌手排行把孤儿排除：X = a×3 + b×1；零播放的 Z 计 0 排末位。
+        assert_eq!(
+            s.top_artists,
+            vec![
+                ("X".to_owned(), 4),
+                ("Y".to_owned(), 2),
+                ("Z".to_owned(), 0)
+            ]
+        );
+        // 去重，最新在前；零播放的 d 排在最后。
+        assert_eq!(s.recent, vec!["a", "c", "b", "d"]);
+    }
+
+    /// 文件移动 / 改名：播放记录换到新路径。
+    #[test]
+    fn play_stats_follow_move() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        track(&conn, "/m/a.flac", "X");
+        record_play_on(&conn, "/m/a.flac", 1, 10.0).unwrap();
+        move_meta_on(
+            &conn,
+            &[("/m/a.flac".to_owned(), "/n/a.flac".to_owned(), 1, 1)],
+        )
+        .unwrap();
+        let s = play_stats_on(&conn, 0, 0, 0, 10).unwrap();
+        assert_eq!(s.total, 1);
+        // 元数据行与播放记录一起换到新路径。
+        assert_eq!(s.top_tracks, vec![("/n/a.flac".to_owned(), 1)]);
+        assert_eq!(s.recent, vec!["/n/a.flac"]);
+    }
+
+    /// 收藏时间：周新增计数、取消、回填补 0、移动跟随。
+    #[test]
+    fn likes_week_and_follow_move() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO likes (path, liked_at) VALUES
+             ('a', 100), ('b', 200), ('old', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM likes WHERE path = 'b'", []).unwrap();
+        // week_start=150：a(100) 不计、old(0) 不计。
+        let s = play_stats_on(&conn, 0, 150, 0, 10).unwrap();
+        assert_eq!(s.week_likes, 0);
+        let s = play_stats_on(&conn, 0, 50, 0, 10).unwrap();
+        assert_eq!(s.week_likes, 1, "只有 liked_at>=50 的 a 算新增");
+        // 收藏路径跟随 move_meta。
+        move_meta_on(&conn, &[("a".to_owned(), "/n/a".to_owned(), 1, 1)]).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM likes WHERE path = '/n/a'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    /// 「新添加」：added_at 倒序、不在曲库的不进榜、移动跟随。
+    #[test]
+    fn new_added_orders_and_follows_move() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        track(&conn, "old", "X");
+        track(&conn, "new", "X");
+        conn.execute(
+            "INSERT INTO added (path, added_at) VALUES ('new', 200), ('old', 100), ('gone', 300)",
+            [],
+        )
+        .unwrap();
+        let s = play_stats_on(&conn, 0, 0, 0, 10).unwrap();
+        assert_eq!(s.new_added, vec!["new", "old"], "gone 不在曲库不进榜");
+        move_meta_on(&conn, &[("new".to_owned(), "/n/new".to_owned(), 1, 1)]).unwrap();
+        let s = play_stats_on(&conn, 0, 0, 0, 10).unwrap();
+        assert_eq!(s.new_added[0], "/n/new", "入库时间跟随 move_meta");
+    }
+
+    /// 连续收听：本地日序去重；今天没听算到昨天，断档归零。
+    #[test]
+    fn streak_counts_consecutive_days() {
+        // days 是 DESC 序的本地日序号。
+        assert_eq!(streak_days(&[], 10), 0);
+        assert_eq!(streak_days(&[10, 9, 8], 10), 3);
+        assert_eq!(streak_days(&[9, 8, 7], 10), 3, "今天没听：昨天的连段仍算");
+        assert_eq!(streak_days(&[8, 7], 10), 0, "昨天也没听：连击已断");
+        assert_eq!(streak_days(&[10, 8], 10), 1, "中间断档只算最近一段");
+        assert_eq!(streak_days(&[12, 11, 10, 9], 10), 2, "未来日跳过");
+    }
+
+    /// 清元数据（重建曲库 / 删除文件）不动播放记录。
+    #[test]
+    fn play_stats_survive_clear() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        track(&conn, "a", "X");
+        record_play_on(&conn, "a", 1, 10.0).unwrap();
+        conn.execute("DELETE FROM tracks", []).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM plays", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        let s = play_stats_on(&conn, 0, 0, 0, 10).unwrap();
+        assert_eq!(s.total, 1); // 历史还在
+        assert!(s.top_tracks.is_empty()); // 排行只显示曲库里还在的
+    }
+
+    /// v5 库迁到 v6：plays 表出现、老行还在。
+    #[test]
+    fn play_stats_migrate_from_v5() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_V1).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE tracks ADD COLUMN art_hue REAL;
+             ALTER TABLE tracks ADD COLUMN art_sat REAL;
+             UPDATE tracks SET lyrics = NULL;
+             ALTER TABLE tracks ADD COLUMN rg_track_gain REAL;
+             ALTER TABLE tracks ADD COLUMN rg_track_peak REAL;
+             ALTER TABLE tracks ADD COLUMN rg_album_gain REAL;
+             ALTER TABLE tracks ADD COLUMN rg_album_peak REAL;
+             CREATE TABLE lyrics_offsets (path TEXT PRIMARY KEY, offset_ms INTEGER NOT NULL);
+             PRAGMA user_version = 5;",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tracks (path, stamp, size, modified, title, artist, album, \
+             album_artist, duration, has_art, genres, album_artists, composers) \
+             VALUES ('a.flac', 1, 1, 1, 't', 'a', 'al', 'aa', 1.0, 0, '[]', '[]', '[]')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+        let version: i32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM tracks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        // 新表可写。
+        record_play_on(&conn, "a.flac", 1, 10.0).unwrap();
+        assert_eq!(play_stats_on(&conn, 0, 0, 0, 10).unwrap().total, 1);
     }
 }

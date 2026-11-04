@@ -155,6 +155,9 @@ pub struct Store {
     /// 「跟随封面」时封面的原始主色调（色相圈、饱和度）——界面底色向它
     /// 轻调（`theme::bg` 等）；预设色 / 黑白时 `None`。
     pub tint: Signal<Option<(f32, f32)>>,
+    /// 「歌手」页当前点开的歌手（分组 key，即歌手标签原文）；首页
+    /// 「热门艺术家」深链进详情也写它。
+    pub artist_sel: Signal<Option<String>>,
     /// 当前开着的弹出菜单（`menu_control` 的 id）：同一时刻只开一个。
     /// 桌面上右键按下不产生 PressOutside（平台只发 ContextMenu 事件），
     /// 已开的菜单不会被平台关掉，由它互斥。
@@ -253,6 +256,7 @@ pub fn install() -> Store {
         delete_ask: signal(None),
         accent: signal(None),
         tint: signal(None),
+        artist_sel: signal(None),
         menu_open: signal(None),
     };
     STORE.with(|cell| cell.set(Some(s)));
@@ -512,9 +516,27 @@ pub fn install() -> Store {
     set_color_scheme(color_scheme(library_store().appearance()));
     player().set_fade_ms(library_store().fade_ms());
     player().set_pause_on_device_change(library_store().pause_on_device_change());
+    player().set_stats_thresholds(
+        library_store().stats_min_percent(),
+        library_store().stats_min_secs(),
+    );
     player().set_replaygain(library_store().replaygain());
     player().set_eq(library_store().eq());
     player().set_loop_mode(library_store().loop_mode());
+    // 升级前的老收藏补进 likes 表（liked_at=0：有记录但不计「新增」）；
+    // 老曲目补 added 表（文件修改时间当入库时间的近似）。
+    {
+        let favs = s.playlists.with_untracked(|l| favorite_paths(l));
+        if !favs.is_empty() {
+            crate::db::later(move || crate::db::backfill_likes(&favs));
+        }
+        let entries: Vec<(String, u64)> = s
+            .tracks
+            .with_untracked(|l| l.iter().map(|t| (t.path.clone(), t.modified)).collect());
+        if !entries.is_empty() {
+            crate::db::later(move || crate::db::backfill_added(&entries));
+        }
+    }
     // 在设好循环模式之后：随机模式下恢复的队列按它重新洗牌。
     player().restore_last();
     crate::window::start();
@@ -704,6 +726,18 @@ pub fn set_pause_on_device_change(on: bool) {
     update_config(|c| c.pause_on_device_change = on);
     player().set_pause_on_device_change(on);
     std::thread::spawn(move || library_store().set_pause_on_device_change(on));
+}
+
+/// 播放统计阈值：听过多少算一次播放（立即生效并保存；两个条件任一
+/// 满足即计，填 0 表示不用该条件）。
+pub fn set_stats_thresholds(percent: u32, secs: u32) {
+    let (percent, secs) = (percent.min(100), secs.min(3600));
+    update_config(|c| {
+        c.stats_min_percent = percent;
+        c.stats_min_secs = secs;
+    });
+    player().set_stats_thresholds(percent, secs);
+    std::thread::spawn(move || library_store().set_stats_thresholds(percent, secs));
 }
 
 /// ReplayGain 设置（立即生效并保存）。
@@ -931,13 +965,50 @@ pub fn active_index(output: &LyricsOutput, time: f64) -> i64 {
 
 // --- 歌单 ---------------------------------------------------------------------
 
+/// 「我喜欢」歌单当前的曲目路径（没有时为空）。
+fn favorite_paths(lists: &[Playlist]) -> Vec<String> {
+    lists
+        .iter()
+        .find(|p| p.favorite)
+        .map(|p| match &p.kind {
+            Kind::Manual { tracks } => tracks.clone(),
+            _ => Vec::new(),
+        })
+        .unwrap_or_default()
+}
+
 /// 改歌单并保存（文件只有几 KB，直接在界面线程写）。
 fn change_playlists(f: impl FnOnce(&mut Vec<Playlist>)) {
     let s = store();
     let mut lists = s.playlists.with_untracked(|l| l.0.as_ref().clone());
+    let fav_before = favorite_paths(&lists);
     f(&mut lists);
     if let Err(err) = crate::playlists::save(&lists) {
         eprintln!("zeo-player: 歌单保存失败: {err}");
+    }
+    // 「我喜欢」的差集同步 likes 表（首页「新增收藏」要 liked_at）：
+    // 所有改收藏的路径都会过这里——点喜欢、右键「加到我喜欢」、歌单编辑。
+    let fav_after = favorite_paths(&lists);
+    if fav_before != fav_after {
+        let added: Vec<String> = fav_after
+            .iter()
+            .filter(|p| !fav_before.contains(p))
+            .cloned()
+            .collect();
+        let removed: Vec<String> = fav_before
+            .iter()
+            .filter(|p| !fav_after.contains(p))
+            .cloned()
+            .collect();
+        let now = crate::config::unix_now();
+        crate::db::later(move || {
+            for p in &added {
+                crate::db::record_like(p, now);
+            }
+            for p in &removed {
+                crate::db::remove_like(p);
+            }
+        });
     }
     s.playlists.set(Same(Arc::new(lists)));
 }
@@ -1037,7 +1108,7 @@ pub fn delete_playlist(id: u64) {
     change_playlists(|lists| lists.retain(|p| p.id != id));
     let nav = global::<super::Nav>();
     if nav.get_untracked() == super::Nav::Playlist(id) {
-        nav.set(super::Nav::Folders);
+        nav.set(super::Nav::Home);
     }
 }
 
@@ -1085,6 +1156,11 @@ pub struct MenuGate {
 }
 
 impl MenuGate {
+    /// 主动开这个弹层（行内「⋯」按钮这类显式触发器用）。
+    pub fn request_open(self) {
+        self.open.set(Some(self.id));
+    }
+
     /// `menu` / `context_menu` 的 `.open(..)`。
     pub fn open(self) -> impl Fn() -> Option<bool> + 'static {
         let (id, open) = (self.id, self.open);
@@ -1238,6 +1314,11 @@ pub fn play_list(tracks: &[TrackEntry], index: usize) {
         let queue = tracks.iter().map(|t| t.path.clone()).collect();
         player().open(track.path.clone(), queue);
     }
+}
+
+/// 把曲目追加到当前队尾（当前曲目与循环模式不变）。
+pub fn queue_add(tracks: &[TrackEntry]) {
+    player().queue_add(tracks.iter().map(|t| t.path.clone()).collect());
 }
 
 /// 拖动/点击进度的提交。

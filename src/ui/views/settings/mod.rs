@@ -227,6 +227,12 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         pane: Pane::Playback,
+        title: "播放统计",
+        keys: "统计 播放次数 首页 排行 阈值 百分比 秒 听过",
+        build: playback::stats_section,
+    },
+    Section {
+        pane: Pane::Playback,
         title: "输出设备",
         keys: "输出 设备 耳机 拔出 暂停 默认设备 声卡 蓝牙",
         build: playback::device_section,

@@ -29,14 +29,30 @@ fn wait_for(timeout_ms: u64, check: impl Fn() -> bool) -> bool {
     false
 }
 
+/// e2e 数据目录：三个用例共用。`library_store()` / `db()` 是进程级
+/// OnceLock，谁先到谁绑（播曲时歌词预热经 `Meta::lyrics` 就会先绑）；
+/// 漏设的话绑到的是仓库 `.nsh/dev-data`，`end_to_end_playback` 的
+/// roots 断言会被它的历史数据弄炸。整个进程只写一次环境变量——并发
+/// `set_var`/`var_os` 可能互相看见「还没设」，重复写没有收益。
+fn e2e_env() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // SAFETY(测试): 进程内只有这一次环境变量写（在 Once 里），且所有
+        // 读它的路径都先过同一个 Once——写完之后才对各线程可见。
+        unsafe {
+            std::env::set_var("ZEO_PLAYER_DATA_DIR", "/tmp/zeo-player-test-data-e2e")
+        };
+    });
+}
+
 #[test]
 fn end_to_end_playback() {
     let Some(root) = corpus() else {
         eprintln!("跳过：没有 .nsh/tmp/zeo-player-test-music 测试语料");
         return;
     };
-    // SAFETY(测试): 其它测试线程不读写环境变量；此处进程内仅本测试使用库存储。
-    unsafe { std::env::set_var("ZEO_PLAYER_DATA_DIR", "/tmp/zeo-player-test-data-e2e") };
+    // SAFETY(测试): 所有读这个变量的路径都先过 e2e_env 的 Once。
+    e2e_env();
     let _ = std::fs::remove_dir_all("/tmp/zeo-player-test-data-e2e");
 
     // 1. 曲库：多根目录 + 扫描 + 流派拆分
@@ -192,6 +208,9 @@ fn device_invalidated_rebuilds_and_resumes() {
         eprintln!("跳过：没有 .nsh/tmp/zeo-player-test-music 测试语料");
         return;
     };
+    // SAFETY(测试): 播曲时歌词预热会经 `Meta::lyrics` 绑 `library_store()`
+    // ——先过 e2e_env，保证绑的是这个目录而不是 .nsh/dev-data。
+    e2e_env();
     let player = Player::new();
     player.set_volume(0.0);
     let flac = root.join("sine.flac");
@@ -249,6 +268,8 @@ fn paused_engine_resumes_after_stream_pause() {
         eprintln!("跳过：没有 .nsh/tmp/zeo-player-test-music 测试语料");
         return;
     };
+    // SAFETY(测试): 同上——先过 e2e_env。
+    e2e_env();
     let player = Player::new();
     player.set_volume(0.0);
     let flac = root.join("sine.flac");

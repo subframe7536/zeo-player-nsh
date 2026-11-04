@@ -23,6 +23,10 @@ const RING_TARGET_SECS: usize = 2;
 const RING_CAPACITY_SECS: usize = 3;
 /// 默认淡入淡出时长。
 pub const DEFAULT_FADE_MS: u32 = 200;
+/// 默认播放统计阈值：听过整首的百分比。
+pub const DEFAULT_STATS_MIN_PERCENT: u32 = 60;
+/// 默认播放统计阈值：实际播出秒数。
+pub const DEFAULT_STATS_MIN_SECS: u32 = 30;
 
 /// 每轮最多解码的包数（防止一轮占太久，命令响应变慢）。
 const MAX_PACKETS_PER_TICK: usize = 64;
@@ -270,6 +274,8 @@ pub enum EngineCmd {
     Previous,
     /// 设置循环模式（队列按新模式重排，当前曲目不变）。
     SetLoopMode(LoopMode),
+    /// 把路径追加到当前队尾（当前曲目与播放状态不变）。
+    QueueAdd(Vec<String>),
     /// 输出设备事件（见 [`DeviceEvent`]）。
     Device(DeviceEvent),
     /// ReplayGain 设置变了：存进 `rg_config`，当前曲目立即重算增益。
@@ -304,6 +310,8 @@ pub struct Shared {
     pub ready: AtomicBool,
     pub volume: AtomicU32, // f32 位
     pub played: AtomicU64, // 输出帧计数（含 seek 基线）
+    /// 本次装载实际播出的输出帧数（`load_track` 清零；seek 不动它）。
+    pub listened: AtomicU64,
     pub dev_rate: AtomicU32,
     pub ring: Ring,
     /// 冷字段的共享快照（所有写路径换新 `Arc`，见 [`TrackPublic`]）。
@@ -320,6 +328,12 @@ pub struct Shared {
     pub cover_gen: AtomicU64,
     /// 输出设备变化时是否暂停（设置项；设备丢失时无论如何都暂停）。
     pub pause_on_device_change: AtomicBool,
+    /// 播放统计阈值：听过整首的百分比算一次播放（0 = 不用此条件）。
+    pub stats_min_percent: AtomicU32,
+    /// 播放统计阈值：实际播出多少秒算一次播放（0 = 不用此条件）。
+    pub stats_min_secs: AtomicU32,
+    /// 播放记录代次：每记一次播放 +1（界面据此刷新统计）。
+    pub plays_gen: AtomicU64,
     /// 当前曲目的 ReplayGain 线性增益（f32 位；装载 / 设置变更时由
     /// 引擎线程写，输出回调读）。
     pub rg_factor: AtomicU32,
@@ -395,12 +409,16 @@ impl EngineHandle {
             fade_target: AtomicU32::new(1f32.to_bits()),
             gain: AtomicU32::new(0f32.to_bits()),
             played: AtomicU64::new(0),
+            listened: AtomicU64::new(0),
             dev_rate: AtomicU32::new(48_000),
             ring: Ring::new(),
             track: Mutex::new(Arc::new(TrackPublic::default())),
             loop_mode: AtomicU8::new(0),
             cover_gen: AtomicU64::new(0),
             pause_on_device_change: AtomicBool::new(true),
+            stats_min_percent: AtomicU32::new(DEFAULT_STATS_MIN_PERCENT),
+            stats_min_secs: AtomicU32::new(DEFAULT_STATS_MIN_SECS),
+            plays_gen: AtomicU64::new(0),
             rg_factor: AtomicU32::new(1f32.to_bits()),
             rg_config: Mutex::new(ReplayGainConfig::default()),
             eq_gen: AtomicU64::new(0),
@@ -443,6 +461,8 @@ struct Loaded {
     cover_pending: bool,
     /// 本曲目的 ReplayGain 标签（设置变更时重算 `Shared::rg_factor`）。
     rg: crate::metadata::ReplayGain,
+    /// 本次装载已记过播放统计（每次装载最多记一次）。
+    counted: bool,
 }
 
 /// 文件解码完、等缓冲播空的状态（`len` 最近的缓冲长度，`since` 它最后
@@ -845,6 +865,29 @@ fn run(
                         || out.stream.is_none()
                         || drain.since.elapsed() > Duration::from_secs(1));
             }
+            // 播放统计：越过阈值的那一刻记一次（不等播完——中途退出也不丢
+            // 已记的这次）。`listened` 只由输出回调推进的实际播出帧数
+            // 累加，拖动进度条不算听过。
+            if !l.counted {
+                let t = shared.track.lock().unwrap().clone();
+                let rate = shared.dev_rate.load(Ordering::Relaxed).max(1) as f64;
+                let listened = shared.listened.load(Ordering::Relaxed) as f64 / rate;
+                if counts_as_play(
+                    listened,
+                    t.duration,
+                    shared.stats_min_percent.load(Ordering::Relaxed),
+                    shared.stats_min_secs.load(Ordering::Relaxed),
+                ) {
+                    l.counted = true;
+                    if let Some(path) = t.path.clone() {
+                        let at = crate::config::unix_now();
+                        crate::db::later(move || {
+                            crate::db::record_play(&path, at, listened)
+                        });
+                        shared.plays_gen.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            }
         }
         if track_done {
             let (queue, index) = {
@@ -1107,6 +1150,25 @@ fn handle_cmd(
             t.queue = queue;
             *slot = Arc::new(t);
         }
+        EngineCmd::QueueAdd(paths) => {
+            // 追加进原始队列后按当前循环模式重算顺序；当前曲目挪到它在
+            // 新顺序里的位置（随机模式下整队顺序会变）。
+            let mut base = (**base_queue).clone();
+            base.extend(paths);
+            *base_queue = Arc::new(base);
+            let queue = ordered_queue(base_queue, shared.loop_mode());
+            let mut slot = shared.track.lock().unwrap();
+            let mut t = (**slot).clone();
+            if let Some(path) = &t.path {
+                t.queue_index = queue
+                    .iter()
+                    .position(|p| p == path)
+                    .map(|i| i as i64)
+                    .unwrap_or(t.queue_index.max(0));
+            }
+            t.queue = queue;
+            *slot = Arc::new(t);
+        }
         // 设备事件在主循环里先拦截（见 run），不会走到这里。
         EngineCmd::Device(_) => {}
         EngineCmd::SetReplayGain(cfg) => {
@@ -1149,6 +1211,21 @@ fn shuffled(base: &[String]) -> Vec<String> {
     out
 }
 
+/// 「听过多少算一次播放」：实际播出 `listened` 秒、整首 `duration` 秒时，
+/// 百分比阈值（`min_percent`，0 = 不用）或时长阈值（`min_secs`，0 = 不用）
+/// 任一满足即算一次。两个都是 0 时开始播放就算。`duration` 缺失 / 为 0
+/// 时百分比条件不生效（秒数条件仍可用）。
+fn counts_as_play(listened: f64, duration: f64, min_percent: u32, min_secs: u32) -> bool {
+    if min_percent == 0 && min_secs == 0 {
+        return true;
+    }
+    let by_percent = min_percent > 0
+        && duration > 0.0
+        && listened >= duration * f64::from(min_percent) / 100.0;
+    let by_seconds = min_secs > 0 && listened >= f64::from(min_secs);
+    by_percent || by_seconds
+}
+
 /// 下标 `index` 后去哪一首（`forward` 上一首 / 下一首）：单曲停在原地
 /// （重播当前），其余模式前进 / 后退一步并在端点回绕。
 fn advance(index: i64, len: usize, mode: LoopMode, forward: bool) -> Option<i64> {
@@ -1176,6 +1253,8 @@ fn load_track(
 ) {
     shared.loading.store(true, Ordering::Relaxed);
     reset_ring(shared, 0.0, dev_rate);
+    // 播放统计按「本次装载」归零（单曲循环重载即新的计次机会）。
+    shared.listened.store(0, Ordering::Relaxed);
 
     let meta = match MetaCache::global().get(&path) {
         Ok(meta) => meta,
@@ -1222,6 +1301,7 @@ fn load_track(
                 drain: None,
                 cover_pending: true,
                 rg,
+                counted: false,
             });
 
             let actual_index = if queue_index_hint >= 0 {
@@ -1468,6 +1548,7 @@ fn output_callback(
     if taken_samples > 0 {
         let frames = (taken_samples / channels.max(1)) as u64;
         shared.played.fetch_add(frames, Ordering::Relaxed);
+        shared.listened.fetch_add(frames, Ordering::Relaxed);
     }
 }
 
@@ -1496,6 +1577,7 @@ mod tests {
             ready: AtomicBool::new(true),
             volume: AtomicU32::new(1f32.to_bits()),
             played: AtomicU64::new(0),
+            listened: AtomicU64::new(0),
             dev_rate: AtomicU32::new(48_000),
             ring: {
                 let ring = Ring::new();
@@ -1510,6 +1592,9 @@ mod tests {
             loop_mode: AtomicU8::new(0),
             cover_gen: AtomicU64::new(0),
             pause_on_device_change: AtomicBool::new(true),
+            stats_min_percent: AtomicU32::new(DEFAULT_STATS_MIN_PERCENT),
+            stats_min_secs: AtomicU32::new(DEFAULT_STATS_MIN_SECS),
+            plays_gen: AtomicU64::new(0),
             rg_factor: AtomicU32::new(1f32.to_bits()),
             rg_config: Mutex::new(ReplayGainConfig::default()),
             eq_gen: AtomicU64::new(0),
@@ -1535,6 +1620,26 @@ mod tests {
             long[long.len() - 1].abs() < 1e-6
                 && f32::from_bits(shared.gain.load(Ordering::Relaxed)) == 0.0
         );
+    }
+
+    /// 播放统计阈值：任一条件满足即计；0 关闭该条件；两个都 0 立即计。
+    #[test]
+    fn play_stats_threshold_rules() {
+        // 默认 60% / 30 秒，60 秒的歌。
+        assert!(!counts_as_play(20.0, 60.0, 60, 30)); // 33% 且 <30s
+        assert!(counts_as_play(30.0, 60.0, 60, 30)); // 秒数到了
+        assert!(counts_as_play(36.0, 60.0, 60, 30)); // 60% 到了
+        assert!(counts_as_play(60.0, 100.0, 60, 30)); // 恰好 60%
+        // 0 = 不用该条件。
+        assert!(counts_as_play(1.0, 600.0, 0, 1)); // 只按秒
+        assert!(!counts_as_play(0.5, 600.0, 0, 1));
+        assert!(counts_as_play(300.0, 600.0, 50, 0)); // 只按百分比
+        assert!(!counts_as_play(299.0, 600.0, 50, 0));
+        // 两个都 0：开始播放即计。
+        assert!(counts_as_play(0.0, 600.0, 0, 0));
+        // 时长未知 / 为 0：百分比条件不生效，秒数仍可用。
+        assert!(!counts_as_play(20.0, 0.0, 60, 30));
+        assert!(counts_as_play(30.0, 0.0, 60, 30));
     }
 
     /// 环形缓冲：按序取出、绕回、只写整帧、`clear` 作废未播样本。
