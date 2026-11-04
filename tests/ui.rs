@@ -523,11 +523,11 @@ fn cover_mode_tints_the_playing_track_title() {
     zeo_player::engine::Player::global().pause();
 }
 
-/// 「在列表中显示封面」关掉：曲目行的封面图元素消失，改显示标题首字符
-/// （占位框一直在，开关切回图片恢复）；播放条的当前曲目封面不受影响
+/// 「在列表中显示封面」关掉：曲目表的封面列整列移除——行内封面框与
+/// 首字占位都不画，开关切回整列恢复；播放条的当前曲目封面不受影响
 /// 一直显示。设置是全局持久化的，测完开回来。
 #[test]
-fn list_rows_show_title_initial_when_covers_are_off() {
+fn list_rows_drop_the_cover_column_when_covers_are_off() {
     let _guard = play_lock();
     let mut app = start_inner(1200.0, 800.0);
     if !isolate() {
@@ -535,6 +535,7 @@ fn list_rows_show_title_initial_when_covers_are_off() {
     }
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
+    let frame = "role:button[测试歌曲] >> id:cover";
     let img = "role:button[测试歌曲] >> id:cover-img";
     let letter = "role:button[测试歌曲] >> text:测";
     let bar_img = "role:button[展开播放页] >> id:cover-img";
@@ -550,19 +551,30 @@ fn list_rows_show_title_initial_when_covers_are_off() {
         s.count(bar_img).unwrap_or(0) == 1
     })
     .unwrap();
-    // 设置 → 封面 → 关掉「在列表中显示封面」：行内图片没了，只剩首字；
-    // 播放条封面还在。
+    // 设置 → 封面 → 关掉「在列表中显示封面」：整列没了——图与首字占位
+    // 都不画；播放条封面还在。
     app.press("设置").unwrap();
     app.press("id:settings-nav >> role:button[封面]").unwrap();
     app.wait_for("role:switch[在列表中显示封面]").unwrap();
     app.press("role:switch[在列表中显示封面]").unwrap();
     app.press("label:关闭设置").unwrap();
-    app.wait_until("行内封面图应消失", Duration::from_secs(5), |s| {
-        s.count(img).unwrap_or(1) == 0
+    app.wait_until("封面列应整列消失", Duration::from_secs(5), |s| {
+        s.count(frame).unwrap_or(1) == 0
     })
     .unwrap();
-    assert_eq!(app.screen().count(letter).unwrap(), 1);
+    assert_eq!(app.screen().count(img).unwrap(), 0);
+    assert_eq!(app.screen().count(letter).unwrap(), 0);
     assert_eq!(app.screen().count(bar_img).unwrap(), 1, "播放条封面应一直显示");
+    // 队列弹层的行也没有封面位了（行在，封面槽被移除）。
+    app.press("label:播放队列").unwrap();
+    app.wait_for("label:关闭播放队列").unwrap();
+    assert_eq!(
+        app.screen().count("role:button[测试歌曲]").unwrap(),
+        2,
+        "列表行 + 队列行"
+    );
+    assert_eq!(app.screen().count(frame).unwrap(), 0);
+    app.press("label:关闭播放队列").unwrap();
     // 开回来（别把关闭状态留给同进程的其他用例）。
     app.press("设置").unwrap();
     app.press("id:settings-nav >> role:button[封面]").unwrap();
@@ -730,6 +742,35 @@ fn narrow_windows_drop_album_and_size_columns() {
     assert!(!has(&app, "大小"));
     assert!(!has(&app, "专辑"));
     assert!(has(&app, "时长"));
+}
+
+/// 序号列（`#`）只在专辑详情显示（值是标签曲目号）；文件夹页与歌手详
+/// 情的曲目表都没有这一列。
+#[test]
+fn number_column_only_in_album_detail() {
+    let mut app = start(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    // 等扫描完（树里的 sub 出现即曲库就绪）。
+    app.wait_for_within("text:sub", Duration::from_secs(20))
+        .unwrap();
+    // 文件夹页：没有 `#` 列头。
+    assert!(!has(&app, "#"), "{:?}", texts(&app));
+    // 歌手详情：也没有。
+    app.press("label:歌手").unwrap();
+    app.wait_for("role:button[测试歌手 A; 测试歌手 B]").unwrap();
+    app.press("role:button[测试歌手 A; 测试歌手 B]").unwrap();
+    app.wait_for("label:返回").unwrap();
+    assert!(!has(&app, "#"), "歌手详情: {:?}", texts(&app));
+    app.press("label:返回").unwrap();
+    // 专辑详情：有 `#` 列头（行内是标签曲目号；sine.flac 若正是共享播放
+    // 器的当前曲目，格子里是播放图标而不是「1」，不断言数字本身）。
+    app.press("label:专辑").unwrap();
+    app.wait_for("role:button[测试专辑]").unwrap();
+    app.press("role:button[测试专辑]").unwrap();
+    app.wait_for("#").unwrap();
+    app.press("label:返回").unwrap();
 }
 
 #[test]

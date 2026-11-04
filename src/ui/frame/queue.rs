@@ -11,7 +11,7 @@ use nsh_core::prelude::*;
 use super::super::components::button::{RADIUS_MD, icon_button};
 use super::super::components::cover::{cover_initial, initial_letter};
 use super::super::components::icons::{Icon, icon, icon_dyn};
-use super::super::store::{cover_for, format_time, player, store};
+use super::super::store::{cover_for, covers_on, format_time, player, store};
 use super::super::theme::*;
 use crate::engine::audio::LoopMode;
 
@@ -134,7 +134,9 @@ fn queue_panel(open: Signal<bool>) -> View {
                     }),
                 ),
             )
-            .child(cover_initial(src, letter, Some(36.0), 6.0))
+            .child(when(covers_on, move || {
+                cover_initial(src, letter, Some(36.0), 6.0)
+            }))
             .child(
                 view()
                     .flex_1()

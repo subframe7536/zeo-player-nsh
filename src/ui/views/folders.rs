@@ -34,6 +34,7 @@ use crate::config::{TrackEntry, library_store};
 
 /// 文件夹：面向文件，带大小列。
 const FOLDER_COLS: Columns = Columns {
+    number: false,
     cover: true,
     album: true,
     size: true,
@@ -1625,7 +1626,8 @@ mod tests {
 
     #[test]
     fn move_into_renames_and_reports_collisions() {
-        let base = std::env::temp_dir().join(format!("zeo-move-test-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("zeo-move-into-test-{}", std::process::id()));
         let src = base.join("src");
         let dst = base.join("dst");
         std::fs::create_dir_all(&src).unwrap();

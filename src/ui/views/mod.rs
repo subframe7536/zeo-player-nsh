@@ -121,14 +121,10 @@ fn no_library() -> View {
     )
 }
 
-/// 曲目列表（虚拟化），`header` 随内容滚动。
-fn track_list(
-    items: Memo<Rc<Vec<TrackEntry>>>,
-    use_track_numbers: bool,
-    cols: Columns,
-    header: AnyElement,
-) -> VirtualList {
-    list_of_tracks(items, use_track_numbers, cols, header, None)
+/// 曲目列表（虚拟化），`header` 随内容滚动。序号列（`cols.number`，
+/// 只有专辑详情开）显示标签曲目号，没有该列时 `number` 不会被读。
+fn track_list(items: Memo<Rc<Vec<TrackEntry>>>, cols: Columns, header: AnyElement) -> VirtualList {
+    list_of_tracks(items, cols, header, None)
 }
 
 /// 歌单页的曲目列表：`from` 为手动歌单时右键菜单可从中移除。
@@ -138,12 +134,11 @@ pub(super) fn track_list_in(
     header: AnyElement,
     from: Option<u64>,
 ) -> VirtualList {
-    list_of_tracks(items, false, cols, header, from)
+    list_of_tracks(items, cols, header, from)
 }
 
 fn list_of_tracks(
     items: Memo<Rc<Vec<TrackEntry>>>,
-    use_track_numbers: bool,
     cols: Columns,
     header: AnyElement,
     from: Option<u64>,
@@ -153,7 +148,7 @@ fn list_of_tracks(
         let track = computed(move || items.with(|v| v.get(at.index()).cloned()));
         let number = computed(move || {
             let index = at.index();
-            if use_track_numbers {
+            if cols.number {
                 track.with(|t| {
                     t.as_ref()
                         .and_then(|t| t.track)
@@ -180,9 +175,10 @@ fn list_of_tracks(
 }
 
 /// 详情页的大头部：封面（或头像）、类别、标题、说明、播放按钮。
+/// `art` 自己带阴影等样式；「在列表中显示封面」关掉时传 `when` 空位。
 fn hero(
     eyebrow: &'static str,
-    art: View,
+    art: impl IntoElement,
     title: String,
     subtitle: String,
     meta: String,
@@ -223,7 +219,7 @@ fn hero(
                 .flex_row()
                 .items_end()
                 .gap(px(24.0))
-                .child(art.shadow_xl())
+                .child(art)
                 .child(
                     view()
                         .flex_1()
@@ -311,7 +307,7 @@ pub fn search_results() -> View {
         ))
         .child(track_columns(Columns::ALL));
     view().flex_1().child(
-        track_list(items, false, Columns::ALL, header.into_element()).empty(empty_state(
+        track_list(items, Columns::ALL, header.into_element()).empty(empty_state(
             Icon::Search,
             "没有匹配的曲目",
             "搜索匹配曲目的标题、歌手、专辑和文件名。",

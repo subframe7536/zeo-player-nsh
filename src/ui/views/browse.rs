@@ -11,13 +11,14 @@ use super::super::components::cover::cover_initial;
 use super::super::components::icons::Icon;
 use super::super::components::page::{empty_state, page_header};
 use super::super::components::tracks::{Columns, track_columns};
-use super::super::store::{cover_for, format_total, play_list, store};
+use super::super::store::{cover_for, covers_on, format_total, play_list, store};
 use super::super::theme::*;
 use super::{by_disc_track, compare, hero, no_library, total_duration, track_list};
 use crate::config::TrackEntry;
 
-/// 专辑详情：头部已有封面与专辑名。
+/// 专辑详情：头部已有封面与专辑名；序号列显示标签曲目号。
 const ALBUM_COLS: Columns = Columns {
+    number: true,
     cover: false,
     album: false,
     size: false,
@@ -145,10 +146,13 @@ pub fn Artists() -> impl IntoElement {
                     move || list.clone()
                 });
                 let cover_path = stored(group.cover.clone());
-                let name = group.title.clone();
+                let art_name = stored(group.title.clone());
                 let header = hero(
                     "歌手",
-                    avatar(move || cover_path.get(), move || name.clone(), Some(168.0)),
+                    when(covers_on, move || {
+                        avatar(move || cover_path.get(), move || art_name.get(), Some(168.0))
+                            .shadow_xl()
+                    }),
                     group.title.clone(),
                     format!("{} 首 · {} 张专辑", group.tracks.len(), group.albums()),
                     format_total(total_duration(&group.tracks)),
@@ -158,12 +162,7 @@ pub fn Artists() -> impl IntoElement {
                 .child(track_columns(Columns::ALL).mx(px(-12.0)));
                 view()
                     .flex_1()
-                    .child(track_list(
-                        items,
-                        false,
-                        Columns::ALL,
-                        header.into_element(),
-                    ))
+                    .child(track_list(items, Columns::ALL, header.into_element()))
                     .into_element()
             }
             None => {
@@ -186,7 +185,7 @@ pub fn Artists() -> impl IntoElement {
                         .hover(|st| st.bg(hover()))
                         .active(|st| st.opacity(0.75))
                         .on_press(move |_: &()| selected.set(group.get_untracked().map(|g| g.key)))
-                        .child(avatar(cover, name, None))
+                        .child(when(covers_on, move || avatar(cover, name, None)))
                         .child(
                             view()
                                 .gap(px(2.0))
@@ -284,15 +283,19 @@ pub fn Albums() -> impl IntoElement {
                 .flatten()
                 .collect::<Vec<_>>()
                 .join(" · ");
-                let first = group.title.chars().next().map(String::from).unwrap_or_default();
+                let first =
+                    stored(group.title.chars().next().map(String::from).unwrap_or_default());
                 let header = hero(
                     "专辑",
-                    cover_initial(
-                        move || cover_src.get(),
-                        move || first.clone(),
-                        Some(200.0),
-                        12.0,
-                    ),
+                    when(covers_on, move || {
+                        cover_initial(
+                            move || cover_src.get(),
+                            move || first.get(),
+                            Some(200.0),
+                            12.0,
+                        )
+                        .shadow_xl()
+                    }),
                     group.title.clone(),
                     group.subtitle.clone(),
                     meta,
@@ -302,7 +305,7 @@ pub fn Albums() -> impl IntoElement {
                 .child(track_columns(ALBUM_COLS).mx(px(-12.0)));
                 view()
                     .flex_1()
-                    .child(track_list(items, true, ALBUM_COLS, header.into_element()))
+                    .child(track_list(items, ALBUM_COLS, header.into_element()))
                     .into_element()
             }
             None => {
@@ -327,7 +330,7 @@ pub fn Albums() -> impl IntoElement {
                         .hover(|st| st.bg(hover()))
                         .active(|st| st.opacity(0.75))
                         .on_press(move |_: &()| selected.set(group.get_untracked().map(|g| g.key)))
-                        .child(
+                        .child(when(covers_on, move || {
                             cover_initial(
                                 move || cover_path().and_then(|p| cover_for(&p, 184.0)),
                                 move || {
@@ -340,8 +343,8 @@ pub fn Albums() -> impl IntoElement {
                                 None,
                                 10.0,
                             )
-                                .shadow_md(),
-                        )
+                            .shadow_md()
+                        }))
                         .child(
                             view()
                                 .gap(px(2.0))
@@ -438,12 +441,7 @@ pub fn Genres() -> impl IntoElement {
                     .child(track_columns(Columns::ALL));
                 view()
                     .flex_1()
-                    .child(track_list(
-                        items,
-                        false,
-                        Columns::ALL,
-                        header.into_element(),
-                    ))
+                    .child(track_list(items, Columns::ALL, header.into_element()))
                     .into_element()
             }
             None => {
@@ -460,7 +458,8 @@ pub fn Genres() -> impl IntoElement {
                 let chips = list.iter().map(|g| {
                     let key = g.key.clone();
                     let art = stored(g.cover.clone());
-                    let first = g.title.chars().next().map(String::from).unwrap_or_default();
+                    let first =
+                        stored(g.title.chars().next().map(String::from).unwrap_or_default());
                     nsh_base::button()
                         .flex_row()
                         .items_center()
@@ -474,12 +473,14 @@ pub fn Genres() -> impl IntoElement {
                         .hover(|st| st.bg(hover()))
                         .active(|st| st.opacity(0.7))
                         .on_press(move |_: &()| selected.set(Some(key.clone())))
-                        .child(cover_initial(
-                            move || art.get().and_then(|p| cover_for(&p, 32.0)),
-                            move || first.clone(),
-                            Some(32.0),
-                            16.0,
-                        ))
+                        .child(when(covers_on, move || {
+                            cover_initial(
+                                move || art.get().and_then(|p| cover_for(&p, 32.0)),
+                                move || first.get(),
+                                Some(32.0),
+                                16.0,
+                            )
+                        }))
                         .child(
                             text(g.title.clone())
                                 .text_size(px(14.0))

@@ -1380,10 +1380,17 @@ pub async fn pick_folders() -> Option<String> {
 /// 不发请求，列表完全不解码封面；读库信号让调用处的闭包订阅它，切换
 /// 即重渲。
 pub fn cover_for(path: &str, pt: f32) -> Option<SharedString> {
-    if !store().library.with(|l| l.config.show_covers) {
+    if !covers_on() {
         return None;
     }
     cover_for_always(path, pt)
+}
+
+/// 「在列表中显示封面」开关的响应式读：关掉后曲目表、网格卡片、队列
+/// 行等封面槽位整个移除（各处用 `when(covers_on, …)` 包着），不再画
+/// 首字占位图。
+pub fn covers_on() -> bool {
+    store().library.with(|l| l.config.show_covers)
 }
 
 /// 与 [`cover_for`] 相同但不受「列表显示封面」开关影响：播放条的当前

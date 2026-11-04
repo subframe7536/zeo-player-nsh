@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use nsh_core::prelude::*;
 
-use super::super::store::{cover_for, format_time, is_liked, store, toggle_like};
+use super::super::store::{cover_for, covers_on, format_time, is_liked, store, toggle_like};
 use super::super::theme::*;
 use super::cover::{cover_initial, initial_letter};
 use super::icons::{Icon, icon_dyn};
@@ -15,6 +15,8 @@ use crate::config::TrackEntry;
 /// 曲目列表显示哪些列。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Columns {
+    /// 序号列（`#`）：只有专辑详情显示（曲目号取自标签）；其它列表没有。
+    pub number: bool,
     pub cover: bool,
     pub album: bool,
     pub size: bool,
@@ -24,6 +26,7 @@ pub struct Columns {
 
 impl Columns {
     pub const ALL: Columns = Columns {
+        number: false,
         cover: true,
         album: true,
         size: false,
@@ -56,7 +59,8 @@ fn content_width() -> f32 {
         }
 }
 
-/// 窄窗口里依次收起：专辑列（< 760 pt）、大小列（< 600 pt）、序号列（< 420 pt）。
+/// 窄窗口里依次收起：专辑列（< 760 pt）、大小列（< 600 pt）、序号列
+/// （< 420 pt；序号列只在专辑详情存在）。
 pub fn fits_album() -> bool {
     content_width() >= 760.0
 }
@@ -143,10 +147,14 @@ pub fn track_columns(cols: Columns) -> View {
         .mx(px(20.0))
         .border_b_1()
         .border_b_color(border())
-        .child(when(fits_number, move || {
-            view().w(px(W_NUMBER)).items_center().child(label("#"))
+        .child(cols.number.then(|| {
+            when(fits_number, move || {
+                view().w(px(W_NUMBER)).items_center().child(label("#"))
+            })
         }))
-        .child(cols.cover.then(|| view().w(px(W_COVER))))
+        .child(cols.cover.then(|| {
+            when(covers_on, move || view().w(px(W_COVER)))
+        }))
         .child(view().flex_1().min_w(px(60.0)).child(label("标题")))
         .child(cols.album.then(|| {
             when(fits_album, move || {
@@ -174,8 +182,9 @@ pub const ROW: f32 = 56.0;
 /// 双击窗口（行内按压只选中曲目所在的行，双击才播放）。
 const DOUBLE_CLICK: Duration = Duration::from_millis(450);
 
-/// 一行曲目：序号（当前曲目为音波）、封面、曲名 + 歌手、专辑、时长、
-/// 喜欢按钮。双击播放（`on_play`）；`track` 随单元格复用而变化。
+/// 一行曲目：序号（当前曲目为音波，仅 `cols.number` 的列表有此列）、
+/// 封面、曲名 + 歌手、专辑、时长、喜欢按钮。双击播放（`on_play`）；
+/// `track` 随单元格复用而变化。
 pub fn track_row(
     track: Memo<Option<TrackEntry>>,
     number: Memo<String>,
@@ -236,30 +245,32 @@ pub fn track_row(
                 *last.borrow_mut() = path().map(|p| (p, now));
             }
         })
-        .child(when(fits_number, move || {
-            view()
-                .w(px(W_NUMBER))
-                .items_center()
-                .justify_center()
-                .child(
-                    when(
-                        move || current.get(),
-                        move || {
-                            icon_dyn(
-                                move || if playing() { Icon::Wave } else { Icon::Play },
-                                14.0,
-                                primary,
-                            )
-                        },
+        .child(cols.number.then(|| {
+            when(fits_number, move || {
+                view()
+                    .w(px(W_NUMBER))
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        when(
+                            move || current.get(),
+                            move || {
+                                icon_dyn(
+                                    move || if playing() { Icon::Wave } else { Icon::Play },
+                                    14.0,
+                                    primary,
+                                )
+                            },
+                        )
+                        .otherwise(move || {
+                            text(move || number.get())
+                                .text_size(px(13.0))
+                                .line_height(px(13.0))
+                                .tabular_nums()
+                                .text_color(faint())
+                        }),
                     )
-                    .otherwise(move || {
-                        text(move || number.get())
-                            .text_size(px(13.0))
-                            .line_height(px(13.0))
-                            .tabular_nums()
-                            .text_color(faint())
-                    }),
-                )
+            })
         }))
         .child(cols.cover.then(|| {
             let src = move || track.with(|t| t.as_ref().and_then(|t| cover_for(&t.path, 40.0)));
@@ -270,7 +281,9 @@ pub fn track_row(
                         .unwrap_or_default()
                 })
             };
-            cover_initial(src, letter, Some(40.0), 6.0)
+            when(covers_on, move || {
+                cover_initial(src, letter, Some(40.0), 6.0)
+            })
         }))
         .child(
             view()

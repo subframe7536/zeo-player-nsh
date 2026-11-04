@@ -850,7 +850,8 @@ mod tests {
     #[test]
     fn move_path_rekeys_index_and_roots() {
         let sep = std::path::MAIN_SEPARATOR;
-        let base = std::env::temp_dir().join(format!("zeo-move-test-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("zeo-move-path-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let sub = base.join("music/sub");
         std::fs::create_dir_all(&sub).unwrap();
