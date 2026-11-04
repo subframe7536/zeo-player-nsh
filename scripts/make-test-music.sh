@@ -45,7 +45,8 @@ rm -rf "$fmt_dir"; mkdir -p "$fmt_dir"
 ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a aac -b:a 128k -metadata title="格式 aac" "$fmt_dir/aac.m4a"
 ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a alac -metadata title="格式 alac" "$fmt_dir/alac.m4a"
 ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a aac -b:a 128k -f adts "$fmt_dir/raw.aac"
-ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a libvorbis -q:a 4 -metadata title="格式 vorbis" "$fmt_dir/vorbis.ogg"
+# brew 的 ffmpeg 已不带 libvorbis，用内置的实验 vorbis 编码器（-strict -2）
+ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a vorbis -strict -2 -metadata title="格式 vorbis" "$fmt_dir/vorbis.ogg"
 ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 -c:a pcm_s16be -metadata title="格式 pcm" "$fmt_dir/pcm.aiff"
 # 带 ReplayGain 标签的 FLAC：read_meta / read_replaygain / 增益测试用。
 ffmpeg -loglevel error -y -f lavfi -i "$tone" -t 2 -ac 2 \
