@@ -1,5 +1,7 @@
 //! 窗口与托盘：拦截关闭（最小化到托盘或退出）、隐藏 / 显示窗口、托盘图标
-//! 与菜单。NSH 0.3.0 没有这些接口，这里直接用系统 API：
+//! 与菜单。托盘图标本身是播放 / 暂停按钮：左键切播放暂停、右键开菜单；
+//! macOS 是模板图（黑白、图标旁带曲名），Windows 是绿底白字形（悬停
+//! 提示显示曲名 — 歌手）。NSH 0.3.0 没有这些接口，这里直接用系统 API：
 //!
 //! - macOS：替换 NSH 窗口代理的 `windowShouldClose:` 实现；显示 / 隐藏用
 //!   `makeKeyAndOrderFront` / `orderOut`；全部在主线程（GCD 主队列）。
@@ -124,8 +126,84 @@ pub enum TrayAction {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrayState {
     pub title: String,
+    pub artist: String,
     pub playing: bool,
     pub has_track: bool,
+}
+
+// --- 托盘文案（纯函数，两平台共用，直接可单测） ------------------------------
+
+/// 「曲名 — 歌手」（无歌手只留曲名）：菜单行、悬停提示、菜单栏文字共用。
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn track_label(s: &TrayState) -> String {
+    if s.artist.is_empty() {
+        s.title.clone()
+    } else {
+        format!("{} — {}", s.title, s.artist)
+    }
+}
+
+/// 悬停提示：有曲目是「曲名 — 歌手」，没有就回到应用名。
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn tray_tooltip(s: &TrayState) -> String {
+    if s.has_track {
+        track_label(s)
+    } else {
+        "Zeo Player".to_string()
+    }
+}
+
+/// 菜单栏文字（macOS）的宽度预算：全角按 2 列、半角按 1 列。状态栏空间
+/// 宝贵，超了先丢歌手、再截歌名。
+#[cfg(any(target_os = "macos", test))]
+const BAR_TITLE_WIDTH: usize = 40;
+
+/// CJK 与 emoji 等全角字符区间（近似 wcwidth，够预算判断用）。
+#[cfg(any(target_os = "macos", test))]
+fn is_wide(c: char) -> bool {
+    matches!(c as u32,
+        0x1100..=0x115F | 0x2E80..=0xA4CF | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE6B | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6
+        | 0x1F300..=0x1FAFF | 0x20000..=0x3FFFD)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn text_width(s: &str) -> usize {
+    s.chars().map(|c| if is_wide(c) { 2 } else { 1 }).sum()
+}
+
+/// 按显示宽度截断：超 `budget` 列时末尾加 `…`（占 1 列）。
+#[cfg(any(target_os = "macos", test))]
+fn truncate_width(s: &str, budget: usize) -> String {
+    if text_width(s) <= budget {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        let w = if is_wide(c) { 2 } else { 1 };
+        if used + w > budget.saturating_sub(1) {
+            break;
+        }
+        out.push(c);
+        used += w;
+    }
+    out.push('…');
+    out
+}
+
+/// 菜单栏文字（macOS）：「曲名 — 歌手」放得下就全显示，放不下只留曲名
+///（仍超宽再截断）；无曲目返回 `None`，状态栏只留图标。
+#[cfg(any(target_os = "macos", test))]
+fn bar_title(s: &TrayState) -> Option<String> {
+    if !s.has_track {
+        return None;
+    }
+    let full = track_label(s);
+    if text_width(&full) <= BAR_TITLE_WIDTH {
+        return Some(full);
+    }
+    Some(truncate_width(&s.title, BAR_TITLE_WIDTH))
 }
 
 /// 取走托盘上发生的操作（菜单项、Windows 上单击图标）。
@@ -180,12 +258,14 @@ fn install_tray_handlers() {
     }));
     tray_icon::TrayIconEvent::set_event_handler(Some(
         |event: tray_icon::TrayIconEvent| match event {
-            // Windows：左键单击图标打开窗口（右键出菜单）。
+            // 左键点图标 = 播放 / 暂停（两平台一致；右键出菜单，
+            // `menu_on_right_click` 默认开）。
             tray_icon::TrayIconEvent::Click {
                 button: tray_icon::MouseButton::Left,
                 button_state: tray_icon::MouseButtonState::Up,
                 ..
-            } if cfg!(target_os = "windows") => push_tray(TrayAction::Show),
+            } => push_tray(TrayAction::Toggle),
+            // Windows：双击 = 打开窗口。
             tray_icon::TrayIconEvent::DoubleClick { .. } => push_tray(TrayAction::Show),
             _ => {}
         },
@@ -224,7 +304,8 @@ pub fn quit() {
     platform::quit();
 }
 
-/// 更新托盘菜单（当前曲目、播放 / 暂停）。
+/// 更新托盘（当前曲目、播放 / 暂停）：图标字形、悬停提示、菜单、
+/// macOS 的菜单栏文字。
 pub fn update_tray(state: TrayState) {
     platform::update(state);
 }
@@ -265,31 +346,93 @@ mod tray {
     use super::TrayState;
 
     struct Tray {
-        _icon: TrayIcon,
+        icon: TrayIcon,
         now: MenuItem,
         toggle: MenuItem,
         prev: MenuItem,
         next: MenuItem,
+        /// 播放 / 暂停两个字形图标（左键点图标切播放暂停，图标跟状态换）。
+        play: Option<Icon>,
+        pause: Option<Icon>,
     }
 
     thread_local! {
         static TRAY: RefCell<Option<Tray>> = const { RefCell::new(None) };
+        /// 上次应用到托盘的状态，相同就跳过系统调用（store 的 memo 已经
+        /// 拦掉进度类高频刷新，这层兜底重复调用）。
+        static LAST: RefCell<Option<TrayState>> = const { RefCell::new(None) };
     }
 
-    /// 应用图标缩到托盘尺寸（RGBA）。Windows 用满幅版（`icon-windows.png`），
-    /// macOS 留白版（`icon.png`）在托盘里会比别的图标小一圈。
-    fn icon() -> Option<Icon> {
-        let bytes: &[u8] = if cfg!(target_os = "windows") {
-            include_bytes!("../resources/icon-windows.png")
+    /// 字形：播放三角 / 暂停双杠，`pause` 为 true 画双杠。`u`/`v` 是
+    /// 画布归一化坐标（0..1）。
+    pub(super) fn in_glyph(pause: bool, u: f32, v: f32) -> bool {
+        if pause {
+            (0.26..=0.74).contains(&v)
+                && ((0.30..=0.42).contains(&u) || (0.58..=0.70).contains(&u))
         } else {
-            include_bytes!("../resources/icon.png")
+            // 三角（略右移做视觉居中）：左竖边 + 右尖。
+            let (ax, ay, bx, by, cx, cy) = (0.36, 0.25, 0.36, 0.75, 0.74, 0.50);
+            let s = |x0: f32, y0: f32, x1: f32, y1: f32| {
+                (u - x0) * (y1 - y0) - (v - y0) * (x1 - x0)
+            };
+            let (d1, d2, d3) = (s(ax, ay, bx, by), s(bx, by, cx, cy), s(cx, cy, ax, ay));
+            (d1 >= 0.0 && d2 >= 0.0 && d3 >= 0.0) || (d1 <= 0.0 && d2 <= 0.0 && d3 <= 0.0)
+        }
+    }
+
+    /// Windows 图标的圆角方块底（半径 18%，角外透明）。
+    pub(super) fn in_tile(u: f32, v: f32) -> bool {
+        const R: f32 = 0.18;
+        let (du, dv) = (u - u.clamp(R, 1.0 - R), v - v.clamp(R, 1.0 - R));
+        du * du + dv * dv <= R * R
+    }
+
+    /// 托盘图标自己画：4× 超采样覆盖率当抗锯齿。macOS 是模板图（黑色
+    /// + alpha，系统按菜单栏明暗反色成黑白）；Windows 叠一层应用绿的
+    /// 圆角方块底、白字形（`icon.svg` 的 #246449），深 / 浅任务栏都看得见。
+    fn glyph_icon(pause: bool) -> Option<Icon> {
+        let (size, fg, tile): (u32, [u8; 3], Option<[u8; 3]>) = if cfg!(target_os = "macos") {
+            // 44px：菜单栏 22pt @2x（tray-icon 会把更高的缩到 22pt）。
+            (44, [0, 0, 0], None)
+        } else {
+            // 64px：系统按 DPI 缩到 16–32px。
+            (64, [255, 255, 255], Some([0x24, 0x64, 0x49]))
         };
-        let img = image::load_from_memory(bytes).ok()?;
-        let img = img
-            .resize(64, 64, image::imageops::FilterType::Triangle)
-            .to_rgba8();
-        let (w, h) = img.dimensions();
-        Icon::from_rgba(img.into_raw(), w, h).ok()
+        const SS: usize = 4;
+        let hi = (size as usize * SS) as f32;
+        let mut rgba = vec![0u8; size as usize * size as usize * 4];
+        for y in 0..size as usize {
+            for x in 0..size as usize {
+                let (mut g, mut t) = (0u32, 0u32);
+                for sy in 0..SS {
+                    for sx in 0..SS {
+                        let u = ((x * SS + sx) as f32 + 0.5) / hi;
+                        let v = ((y * SS + sy) as f32 + 0.5) / hi;
+                        if in_glyph(pause, u, v) {
+                            g += 1;
+                        }
+                        if tile.is_some() && in_tile(u, v) {
+                            t += 1;
+                        }
+                    }
+                }
+                let fa = g as f32 / (SS * SS) as f32;
+                let ba = t as f32 / (SS * SS) as f32;
+                let alpha = fa + ba * (1.0 - fa);
+                if alpha <= 0.0 {
+                    continue;
+                }
+                let bg = tile.unwrap_or([0, 0, 0]);
+                let i = (y * size as usize + x) * 4;
+                for c in 0..3 {
+                    rgba[i + c] =
+                        (fg[c] as f32 * fa / alpha + bg[c] as f32 * ba * (1.0 - fa) / alpha)
+                            .round() as u8;
+                }
+                rgba[i + 3] = (alpha * 255.0).round() as u8;
+            }
+        }
+        Icon::from_rgba(rgba, size, size).ok()
     }
 
     /// 在托盘所属线程上创建（macOS 主线程；Windows 托盘线程）。
@@ -311,24 +454,32 @@ mod tray {
             &show,
             &quit,
         ]);
+        let (play, pause) = (glyph_icon(false), glyph_icon(true));
+        // 左键点图标 = 播放 / 暂停（`TrayIconEvent` 里处理），右键出菜单。
         let mut builder = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
-            .with_tooltip("Zeo Player");
-        if let Some(icon) = icon() {
-            builder = builder.with_icon(icon);
-        }
-        // Windows：左键单击打开窗口，右键出菜单。
-        if cfg!(target_os = "windows") {
-            builder = builder.with_menu_on_left_click(false);
+            .with_tooltip("Zeo Player")
+            .with_menu_on_left_click(false);
+        if let Some(icon) = play.clone() {
+            #[cfg(target_os = "macos")]
+            {
+                builder = builder.with_icon_templated(icon);
+            }
+            #[cfg(target_os = "windows")]
+            {
+                builder = builder.with_icon(icon);
+            }
         }
         match builder.build() {
             Ok(icon) => TRAY.with(|t| {
                 *t.borrow_mut() = Some(Tray {
-                    _icon: icon,
+                    icon,
                     now,
                     toggle,
                     prev,
                     next,
+                    play,
+                    pause,
                 })
             }),
             Err(err) => eprintln!("zeo-player: 托盘图标创建失败：{err}"),
@@ -339,30 +490,40 @@ mod tray {
     #[cfg(target_os = "windows")]
     pub fn remove() {
         TRAY.with(|t| drop(t.borrow_mut().take()));
+        LAST.with(|l| *l.borrow_mut() = None);
     }
 
     pub fn apply(state: &TrayState) {
+        if LAST.with(|l| l.borrow().as_ref() == Some(state)) {
+            return;
+        }
+        LAST.with(|l| *l.borrow_mut() = Some(state.clone()));
         TRAY.with(|t| {
-            let Some(t) = t.borrow().as_ref().map(|t| {
-                (
-                    t.now.clone(),
-                    t.toggle.clone(),
-                    t.prev.clone(),
-                    t.next.clone(),
-                )
-            }) else {
+            let t = t.borrow();
+            let Some(t) = t.as_ref() else {
                 return;
             };
-            let (now, toggle, prev, next) = t;
-            now.set_text(if state.has_track {
-                state.title.as_str()
+            t.now.set_text(if state.has_track {
+                super::track_label(state)
             } else {
-                "未在播放"
+                "未在播放".to_string()
             });
-            toggle.set_text(if state.playing { "暂停" } else { "播放" });
-            for item in [&toggle, &prev, &next] {
+            t.toggle.set_text(if state.playing { "暂停" } else { "播放" });
+            for item in [&t.toggle, &t.prev, &t.next] {
                 item.set_enabled(state.has_track);
             }
+            let _ = t.icon.set_tooltip(Some(super::tray_tooltip(state)));
+            // 图标即播放 / 暂停按钮：显示的是动作（播放中给暂停键）。
+            let glyph = if state.playing { &t.pause } else { &t.play };
+            if let Some(glyph) = glyph.clone() {
+                #[cfg(target_os = "macos")]
+                let _ = t.icon.set_icon_templated(Some(glyph));
+                #[cfg(target_os = "windows")]
+                let _ = t.icon.set_icon(Some(glyph));
+            }
+            // macOS：图标旁带曲名（放得下连歌手），无曲目只留图标。
+            #[cfg(target_os = "macos")]
+            t.icon.set_title(super::bar_title(state));
         });
     }
 }
@@ -1194,5 +1355,69 @@ mod platform {
     #[cfg(any(debug_assertions, test))]
     pub fn memory_usage() -> (u64, u64) {
         (0, 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn track(title: &str, artist: &str) -> TrayState {
+        TrayState {
+            title: title.into(),
+            artist: artist.into(),
+            playing: true,
+            has_track: true,
+        }
+    }
+
+    #[test]
+    fn tray_tooltip_shows_label_or_app_name() {
+        assert_eq!(tray_tooltip(&track("歌名", "歌手")), "歌名 — 歌手");
+        assert_eq!(tray_tooltip(&track("歌名", "")), "歌名");
+        assert_eq!(tray_tooltip(&TrayState::default()), "Zeo Player");
+    }
+
+    #[test]
+    fn tray_bar_title_shows_artist_when_it_fits() {
+        assert_eq!(
+            bar_title(&track("歌名", "歌手")).as_deref(),
+            Some("歌名 — 歌手")
+        );
+        // 「曲名 — 歌手」整体超预算就只留曲名。
+        let s = track("一首名字很长的歌曲标题", "一个非常长的歌手名字让整体超宽");
+        assert_eq!(bar_title(&s).as_deref(), Some("一首名字很长的歌曲标题"));
+        // 无曲目：菜单栏只留图标。
+        assert_eq!(bar_title(&TrayState::default()), None);
+    }
+
+    #[test]
+    fn tray_bar_title_truncates_long_title() {
+        let t = bar_title(&track(&"长".repeat(40), "")).unwrap();
+        assert!(t.ends_with('…'));
+        assert!(text_width(&t) <= BAR_TITLE_WIDTH);
+    }
+
+    #[test]
+    fn tray_text_width_and_truncate() {
+        assert_eq!(text_width("abc"), 3);
+        assert_eq!(text_width("中文测试"), 8);
+        assert_eq!(truncate_width("short", 10), "short");
+        assert_eq!(truncate_width("abcdefghijkl", 10), "abcdefghi…");
+        assert_eq!(truncate_width("一二三四五六", 5), "一二…");
+    }
+
+    #[test]
+    fn tray_glyph_hit_tests() {
+        // 暂停双杠：左杠、右杠在里面，中间缝不在。
+        assert!(tray::in_glyph(true, 0.36, 0.5));
+        assert!(tray::in_glyph(true, 0.64, 0.5));
+        assert!(!tray::in_glyph(true, 0.5, 0.5));
+        // 播放三角：内部在外，右下角外。
+        assert!(tray::in_glyph(false, 0.45, 0.5));
+        assert!(!tray::in_glyph(false, 0.6, 0.72));
+        // 圆角方块底：角外透明。
+        assert!(tray::in_tile(0.5, 0.5));
+        assert!(!tray::in_tile(0.02, 0.02));
     }
 }

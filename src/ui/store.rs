@@ -334,26 +334,19 @@ pub fn install() -> Store {
         }
     });
 
-    // 托盘菜单跟着当前曲目与播放状态（memo 拦掉进度刷新：订阅整个
+    // 托盘图标与菜单跟着当前曲目与播放状态（memo 拦掉进度刷新：订阅整个
     // playback 信号会让 effect 每 100ms 都跑一次 format! + 通道 +
-    // SetMenuItemInfoW）。
+    // SetMenuItemInfoW；平台侧 apply 还有一层按 TrayState 的重复过滤）。
     let tray_key = computed(move || {
-        let (title, has_track) = s.track.with(|t| {
-            (
-                if t.artist.is_empty() {
-                    t.title.clone()
-                } else {
-                    format!("{} — {}", t.title, t.artist)
-                },
-                t.path.is_some(),
-            )
-        });
-        (title, s.playback.with(|p| p.playing), has_track)
+        let (title, artist, has_track) =
+            s.track.with(|t| (t.title.clone(), t.artist.clone(), t.path.is_some()));
+        (title, artist, s.playback.with(|p| p.playing), has_track)
     });
     effect(move || {
-        let (title, playing, has_track) = tray_key.get();
+        let (title, artist, playing, has_track) = tray_key.get();
         crate::window::update_tray(crate::window::TrayState {
             title,
+            artist,
             playing,
             has_track,
         });
