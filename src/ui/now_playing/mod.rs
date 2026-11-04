@@ -56,24 +56,32 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
     // 左列大封面的 data-URI（`t.artwork`，已在内存里——以前挂列表封面
     // 的 96px 文件路径，升档 400px 后小文件被 prune，路径会悬空）。上下
     // 两层：`under` 是上一张，`top` 是当前这张（见 `Swap::backdrop`）。
+    //
+    // 模糊分平台挂两处：macOS 后端不画容器 view 的 `filter: blur()`，
+    // 只在 image 元素上烘 `blur_radius`；Windows 反过来——`blur_radius`
+    // 的位图效果路径画不出铺满（见 AGENTS.md 待上游），而容器 view 的
+    // 滤镜会走离屏合成（decor::draw_layered），能画。
     let layer = |path: Signal<Option<SharedString>>, alpha: &AnimatedValue| {
         view()
             .absolute()
             .inset(px(-40.0))
             .bind_opacity(alpha)
+            // Windows 的模糊挂在层上（macOS 忽略容器滤镜，无副作用）。
+            .style_with(|st| st.blur(px(32.0)))
             .child(when(
                 move || path.with(Option::is_some),
                 move || {
-                    image(move || path.get().unwrap_or_default())
+                    let art = image(move || path.get().unwrap_or_default())
                         .absolute()
                         // 多出窗口一圈：模糊在图层边缘会淡出成透明，外扩后
-                        // 淡出发生在屏幕外。模糊要挂在 image 上：macOS 后
-                        // 端只把模糊烘进 image 元素的位图，普通 view 的
-                        // `filter: blur()` 不画（见 AGENTS.md 待上游）。
+                        // 淡出发生在屏幕外。
                         .inset(px(-40.0))
                         .resize_mode(ResizeMode::Cover)
-                        .blur_radius(px(32.0))
-                        .opacity(0.9)
+                        .opacity(0.9);
+                    // macOS 的模糊烘在 image 位图上。
+                    #[cfg(not(target_os = "windows"))]
+                    let art = art.blur_radius(px(32.0));
+                    art
                 },
             ))
     };
