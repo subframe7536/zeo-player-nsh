@@ -231,8 +231,8 @@ pub fn track_row(
             }
         })
         .hover(|st| st.bg(hover()))
-        .on_hover_in(move |_: &()| hovering.set(true))
-        .on_hover_out(move |_: &()| hovering.set(false))
+        .on_mouse_enter(move |_: &MouseEvent| hovering.set(true))
+        .on_mouse_leave(move |_: &MouseEvent| hovering.set(false))
         .on_press(move |_: &()| {
             let now = Instant::now();
             let hit = last.borrow().as_ref().is_some_and(|(p, t)| {

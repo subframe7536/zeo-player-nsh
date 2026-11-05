@@ -1181,6 +1181,21 @@ impl MenuGate {
         }
     }
 
+    /// `select` 的 `.on_open_change(..)`：开关请求写回令牌（同
+    /// `menu_change`，配 `.open(gate.open())` 用）。
+    pub fn select_change(self) -> impl Fn(&nsh_base::SelectEvent) + 'static {
+        let (id, open) = (self.id, self.open);
+        move |e| {
+            if let nsh_base::SelectEvent::OpenChange(next, _) = e {
+                if *next {
+                    open.set(Some(id));
+                } else if open.get_untracked() == Some(id) {
+                    open.set(None);
+                }
+            }
+        }
+    }
+
     /// `popover` 的 `.open(..)`：它另有自己的开关信号 `local`，弹层开着
     /// 且令牌还在时才显示（令牌被夺走即被挤掉）。
     pub fn open_with(self, local: Signal<bool>) -> impl Fn() -> Option<bool> + 'static {

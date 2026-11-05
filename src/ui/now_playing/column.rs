@@ -91,7 +91,7 @@ pub(super) fn left_column(swap: &Swap) -> View {
                 image(move || artwork().unwrap_or_default())
                     .absolute()
                     .inset(px(0.0))
-                    .resize_mode(ResizeMode::Cover)
+                    .object_fit(ResizeMode::Cover)
             },
         ));
 
@@ -445,6 +445,8 @@ fn waveform_seek() -> View {
                 .on_layout(move |frame: &Bounds<Points>| width.set(frame.size.width.0))
                 .child(canvas(painter).w_full().h(px(H))),
             false,
+            "播放进度",
+            progress_fraction,
             move |f| s.seek_preview.set(Some(f * duration())),
             move |f| seek_to(f * duration()),
         ))
@@ -501,6 +503,7 @@ fn volume_row() -> View {
         .child(
             slider(
                 SliderStyle::HORIZONTAL,
+                "音量",
                 volume,
                 white_a(0.2),
                 white_a(0.9),

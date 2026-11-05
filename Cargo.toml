@@ -9,8 +9,8 @@ publish = false
 [dependencies]
 # NSH：与 nsh CLI 同版本（nsh --version），dev-dependencies 里的 nsh-engine / nsh-testing 一起改。
 # 见 https://nsh.dev/docs/installation
-nsh-core = "0.3.0"
-nsh-base = "0.3.0"
+nsh-core = "0.4.0"
+nsh-base = "0.4.0"
 
 # 音频：解码、输出、重采样、系统媒体会话。
 symphonia = { version = "0.6", features = ["mp3", "flac", "wav", "aac", "alac", "isomp4", "ogg", "vorbis", "aiff"] }
@@ -60,5 +60,5 @@ dispatch2 = "0.3"
 
 # 界面测试（tests/ui.rs）：无头引擎运行根组件，不带 QuickJS。
 [dev-dependencies]
-nsh-engine = "0.3.0"
-nsh-testing = { version = "0.3.0", default-features = false }
+nsh-engine = "0.4.0"
+nsh-testing = { version = "0.4.0", default-features = false }

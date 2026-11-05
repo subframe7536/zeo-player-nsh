@@ -478,8 +478,8 @@ fn added_card(t: &TrackEntry, index: usize, list: Rc<Vec<TrackEntry>>) -> AnyEle
         .bg(muted())
         .hover(|st| st.bg(hover()))
         .active(|st| st.opacity(0.85))
-        .on_hover_in(move |_: &()| hovering.set(true))
-        .on_hover_out(move |_: &()| hovering.set(false))
+        .on_mouse_enter(move |_: &MouseEvent| hovering.set(true))
+        .on_mouse_leave(move |_: &MouseEvent| hovering.set(false))
         .on_press(move |_: &()| play_row())
         .child(when(covers_on, move || cover_initial(src, letter, Some(64.0), 0.0)))
         .child(

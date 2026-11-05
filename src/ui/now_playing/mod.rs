@@ -76,7 +76,7 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
                         // 多出窗口一圈：模糊在图层边缘会淡出成透明，外扩后
                         // 淡出发生在屏幕外。
                         .inset(px(-40.0))
-                        .resize_mode(ResizeMode::Cover)
+                        .object_fit(ResizeMode::Cover)
                         .opacity(0.9);
                     // macOS 的模糊烘在 image 位图上。
                     #[cfg(not(target_os = "windows"))]

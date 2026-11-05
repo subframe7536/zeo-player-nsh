@@ -12,8 +12,8 @@ use super::super::components::button::{
     Size, Variant, icon_button, outline_button, pill_button, text_button,
 };
 use super::super::components::form::{
-    SELECT_POPUP_H, dialog_content, dialog_footer, dialog_header, input_field, menu_heading,
-    modal, select, select_trigger, tab_list,
+    SELECT_POPUP_H, dialog_content, dialog_footer, dialog_header, input_field, modal, select,
+    select_trigger, tab_list,
     tab_trigger,
 };
 use super::super::components::icons::{Icon, icon};
@@ -339,11 +339,11 @@ pub fn confirm_delete(id: u64) {
     let answer = nsh_base::alert_dialog()
         .title(format!("删除「{}」？", p.name))
         .description(body)
-        .cancel("取消")
-        .destructive("删除")
+        .cancel("cancel", "取消")
+        .destructive("delete", "删除")
         .show();
     spawn(async move {
-        if answer.await == Ok(Some("删除".into())) {
+        if answer.await.map(|r| r.action) == Ok(Some("delete".into())) {
             store::delete_playlist(id);
         }
     });
@@ -810,6 +810,7 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
 }
 
 /// 标签条件的值：从曲库现有标签里选（按小写名排序，忽略大小写去重）。
+/// nsh-base `select`：可搜索（标签多了以后），列表虚拟化。
 fn tag_select(
     current: impl Fn() -> String + Copy + 'static,
     pick: impl Fn(String) + Copy + 'static,
@@ -817,34 +818,82 @@ fn tag_select(
     let s = store();
     let trigger = select_trigger(current, || None, "值", 0.0, "选择标签");
     let gate = store::menu_control();
-    let menu = menu()
+    let no_tags = move || !s.tracks.get().iter().any(|t| !t.genres.is_empty());
+    nsh_base::select()
+        .items(move || {
+            let tracks = s.tracks.get();
+            // 键用小写：匹配不分大小写，只差大小写的标签算同一个。
+            let mut tags: BTreeMap<String, String> = BTreeMap::new();
+            for g in tracks.iter().flat_map(|t| &t.genres) {
+                tags.entry(g.to_lowercase()).or_insert_with(|| g.clone());
+            }
+            tags.into_values()
+                .map(|tag| nsh_base::SelectItem::new(tag.clone(), tag))
+                .collect::<Vec<_>>()
+        })
+        .value(move || {
+            let cur = current();
+            nsh_base::SelectValue::Controlled((!cur.is_empty()).then(|| cur.into()))
+        })
+        .searchable(true)
+        .search_placeholder("搜索标签")
+        .search_accessibility_label("搜索标签")
+        .accessibility_label("值")
+        .placement(Placement::Bottom)
+        .align(Align::Start)
         .offset(px(4.0))
         .margin(px(8.0))
-        .trigger(trigger)
         .open(gate.open())
-        .on_open_change(gate.menu_change());
-    let items = dynamic(move || {
-        let tracks = s.tracks.get();
-        // 键用小写：匹配不分大小写，只差大小写的标签算同一个。
-        let mut tags: BTreeMap<String, String> = BTreeMap::new();
-        for g in tracks.iter().flat_map(|t| &t.genres) {
-            tags.entry(g.to_lowercase()).or_insert_with(|| g.clone());
-        }
-        let options: Vec<AnyElement> = tags
-            .into_values()
-            .map(|tag| {
-                let picked = tag.clone();
-                item(tag, None, move || pick(picked.clone()))
-            })
-            .collect();
-        if options.is_empty() {
-            vec![menu_heading("曲库里还没有标签")]
-        } else {
-            options
-        }
-    });
-    popup!(menu, 200.0, SELECT_POPUP_H)
-        // 减去弹层的上下内边距与边框。
-        .child(scroll().max_h(px(SELECT_POPUP_H - 10.0)).child(items))
+        .on_open_change(gate.select_change())
+        .on_change(move |v: &Option<SharedString>| {
+            if let Some(v) = v {
+                pick(v.to_string())
+            }
+        })
+        .popup_style(|st| {
+            st.min_w(px(200.0))
+                .p(px(4.0))
+                .rounded(px(10.0))
+                .overflow_hidden()
+                .border_1()
+                .border_color(border())
+                .bg(nsh_base::theme().popover)
+                .shadow_lg()
+        })
+        .list_style(|st| st.max_h(px(SELECT_POPUP_H - 10.0)))
+        .item_class("focus:bg-hover")
+        .item_style(|st| {
+            st.px(px(10.0))
+                .py(px(6.0))
+                .rounded(px(6.0))
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .text_color(fg())
+        })
+        .search_style(|st| {
+            st.h(px(32.0))
+                .px(px(10.0))
+                .text_size(px(13.0))
+                .text_color(fg())
+        })
+        .empty(
+            view()
+                .h(px(48.0))
+                .items_center()
+                .justify_center()
+                .child(
+                    text(move || {
+                        if no_tags() {
+                            "曲库里还没有标签"
+                        } else {
+                            "没有匹配的标签"
+                        }
+                    })
+                    .text_size(px(13.0))
+                    .line_height(px(13.0))
+                    .text_color(muted_fg()),
+                ),
+        )
+        .trigger(trigger)
         .into_element()
 }

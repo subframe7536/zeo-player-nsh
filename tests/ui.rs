@@ -249,7 +249,7 @@ fn equalizer_preset_applies_and_persists() {
     for _ in 0..10 {
         app.press("label:预设").unwrap();
         if app
-            .wait_for_within("role:menuitem[低音增强]", Duration::from_millis(500))
+            .wait_for_within("role:option[低音增强]", Duration::from_millis(500))
             .is_ok()
         {
             opened = true;
@@ -257,7 +257,7 @@ fn equalizer_preset_applies_and_persists() {
         }
     }
     assert!(opened, "预设菜单应打开");
-    app.press("role:menuitem[低音增强]").unwrap();
+    app.press("role:option[低音增强]").unwrap();
     // 低音增强的第一段（31 Hz）是 +6.0 dB，立即显示。
     app.wait_for("+6.0 dB").unwrap();
     let saved = |want: bool| {
@@ -896,12 +896,12 @@ fn playlists_manual_and_smart() {
     if corpus {
         // 字段换「标签」后值变成选择器：列出曲库的标签，选 Indie 命中 1 首。
         app.press("label:字段").unwrap();
-        app.press("role:menuitem[标签]").unwrap();
+        app.press("role:option[标签]").unwrap();
         app.press("label:值").unwrap();
-        app.press("role:menuitem[Indie]").unwrap();
+        app.press("role:option[Indie]").unwrap();
         app.wait_for("匹配 1 首").unwrap();
         app.press("label:字段").unwrap();
-        app.press("role:menuitem[歌手]").unwrap();
+        app.press("role:option[歌手]").unwrap();
         app.clear("label:值").unwrap();
     }
     app.type_text("label:值", "不存在的歌手-zz").unwrap();

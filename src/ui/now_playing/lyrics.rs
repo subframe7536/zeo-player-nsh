@@ -188,6 +188,7 @@ fn offset_rail() -> AnyElement {
                         .child(
                             slider(
                                 SliderStyle::HORIZONTAL,
+                                "歌词偏移",
                                 fraction,
                                 input(),
                                 fg(),
@@ -662,8 +663,8 @@ fn lyrics_scroller() -> View {
     view()
         .flex_1()
         .w_full()
-        .on_hover_in(move || blur_in(1.0))
-        .on_hover_out(move || blur_out(0.0))
+        .on_mouse_enter(move |_: &MouseEvent| blur_in(1.0))
+        .on_mouse_leave(move |_: &MouseEvent| blur_out(0.0))
         .child((!timed).then(|| {
             text("歌词无时间信息")
                 .text_center()

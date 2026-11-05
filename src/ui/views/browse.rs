@@ -115,7 +115,7 @@ pub(super) fn avatar(
                 })
                     .absolute()
                     .inset(px(0.0))
-                    .resize_mode(ResizeMode::Cover)
+                    .object_fit(ResizeMode::Cover)
             },
         ))
 }

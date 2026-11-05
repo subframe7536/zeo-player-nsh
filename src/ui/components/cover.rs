@@ -72,7 +72,7 @@ fn cover_frame<E: IntoElement>(
                 .test_id("cover-img")
                 .absolute()
                 .inset(px(0.0))
-                .resize_mode(ResizeMode::Cover)
+                .object_fit(ResizeMode::Cover)
         },
     ))
 }

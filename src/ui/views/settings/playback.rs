@@ -393,6 +393,7 @@ fn eq_fader(
         .child(
             slider(
                 SliderStyle::FADER,
+                a11y,
                 move || {
                     ((get() + crate::engine::eq::MAX_DB) / (2.0 * crate::engine::eq::MAX_DB)) as f64
                 },
@@ -413,7 +414,6 @@ fn eq_fader(
                     live_db.set(None);
                 },
             )
-            .label(a11y)
             .w(px(EQ_FADER_W))
             .h(px(EQ_FADER_H)),
         )

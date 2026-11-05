@@ -193,6 +193,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .child(
             slider(
                 SliderStyle::HORIZONTAL,
+                "播放进度",
                 progress_fraction,
                 input(),
                 fg(),
@@ -257,6 +258,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 .child(
                     slider(
                         SliderStyle::HORIZONTAL,
+                        "音量",
                         volume,
                         input(),
                         muted_fg(),
@@ -366,6 +368,7 @@ fn volume_popover(open: Signal<bool>) -> AnyElement {
                 .child(
                     slider(
                         SliderStyle::VERTICAL,
+                        "音量",
                         volume,
                         input(),
                         muted_fg(),
