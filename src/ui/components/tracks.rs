@@ -152,9 +152,10 @@ pub fn track_columns(cols: Columns) -> View {
                 view().w(px(W_NUMBER)).items_center().child(label("#"))
             })
         }))
-        .child(cols.cover.then(|| {
-            when(covers_on, move || view().w(px(W_COVER)))
-        }))
+        .child(
+            cols.cover
+                .then(|| when(covers_on, move || view().w(px(W_COVER)))),
+        )
         .child(view().flex_1().min_w(px(60.0)).child(label("标题")))
         .child(cols.album.then(|| {
             when(fits_album, move || {

@@ -267,14 +267,18 @@ fn equalizer_preset_applies_and_persists() {
                     if eq["enabled"].as_bool() == Some(want)
                         && eq["bands"][0].as_f64() == Some(if want { 6.0 } else { 0.0 }) =>
                 {
-                    return true
+                    return true;
                 }
                 _ => std::thread::sleep(Duration::from_millis(50)),
             }
         }
         false
     };
-    assert!(saved(true), "eq 应落盘为 enabled+低音增强: {:?}", saved_eq());
+    assert!(
+        saved(true),
+        "eq 应落盘为 enabled+低音增强: {:?}",
+        saved_eq()
+    );
     // 共享全局配置，用例结束前恢复：回平直、关开关。
     app.press("label:重置").unwrap();
     app.press("label:启用均衡器").unwrap();
@@ -572,7 +576,11 @@ fn list_rows_drop_the_cover_column_when_covers_are_off() {
     .unwrap();
     assert_eq!(app.screen().count(img).unwrap(), 0);
     assert_eq!(app.screen().count(letter).unwrap(), 0);
-    assert_eq!(app.screen().count(bar_img).unwrap(), 1, "播放条封面应一直显示");
+    assert_eq!(
+        app.screen().count(bar_img).unwrap(),
+        1,
+        "播放条封面应一直显示"
+    );
     // 队列弹层的行也没有封面位了（行在，封面槽被移除）。
     app.press("label:播放队列").unwrap();
     app.wait_for("label:关闭播放队列").unwrap();

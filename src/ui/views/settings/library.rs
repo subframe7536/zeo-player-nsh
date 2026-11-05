@@ -410,7 +410,9 @@ fn watch_row() -> View {
                         .text_size(px(12.0))
                         .line_height(px(12.0))
                         .text_color(move || {
-                            if s.library.with(|l| l.config.watch && l.watcher.error.is_some()) {
+                            if s.library
+                                .with(|l| l.config.watch && l.watcher.error.is_some())
+                            {
                                 nsh_base::theme().destructive
                             } else {
                                 muted_fg()

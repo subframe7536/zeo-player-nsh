@@ -106,16 +106,20 @@ pub(super) fn avatar(
                 .text_color(muted_fg()),
         )
         .child(when(
-            move || cover().and_then(|p| cover_for(&p, size.unwrap_or(168.0))).is_some(),
+            move || {
+                cover()
+                    .and_then(|p| cover_for(&p, size.unwrap_or(168.0)))
+                    .is_some()
+            },
             move || {
                 image(move || {
                     cover()
                         .and_then(|p| cover_for(&p, size.unwrap_or(168.0)))
                         .unwrap_or_default()
                 })
-                    .absolute()
-                    .inset(px(0.0))
-                    .object_fit(ResizeMode::Cover)
+                .absolute()
+                .inset(px(0.0))
+                .object_fit(ResizeMode::Cover)
             },
         ))
 }
@@ -151,8 +155,12 @@ pub fn Artists() -> impl IntoElement {
                 let header = hero(
                     "歌手",
                     when(covers_on, move || {
-                        avatar(move || cover_path.get(), move || art_name.get(), Some(168.0))
-                            .shadow_xl()
+                        avatar(
+                            move || cover_path.get(),
+                            move || art_name.get(),
+                            Some(168.0),
+                        )
+                        .shadow_xl()
                     }),
                     group.title.clone(),
                     format!("{} 首 · {} 张专辑", group.tracks.len(), group.albums()),
@@ -284,8 +292,14 @@ pub fn Albums() -> impl IntoElement {
                 .flatten()
                 .collect::<Vec<_>>()
                 .join(" · ");
-                let first =
-                    stored(group.title.chars().next().map(String::from).unwrap_or_default());
+                let first = stored(
+                    group
+                        .title
+                        .chars()
+                        .next()
+                        .map(String::from)
+                        .unwrap_or_default(),
+                );
                 let header = hero(
                     "专辑",
                     when(covers_on, move || {
@@ -335,11 +349,7 @@ pub fn Albums() -> impl IntoElement {
                             cover_initial(
                                 move || cover_path().and_then(|p| cover_for(&p, 184.0)),
                                 move || {
-                                    title()
-                                        .chars()
-                                        .next()
-                                        .map(String::from)
-                                        .unwrap_or_default()
+                                    title().chars().next().map(String::from).unwrap_or_default()
                                 },
                                 None,
                                 10.0,

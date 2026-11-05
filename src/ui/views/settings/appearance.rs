@@ -275,9 +275,10 @@ fn font_select() -> AnyElement {
                         .line_height(px(14.0))
                         .text_color(fg()),
                 )
-                .child(when(move || selected(), || {
-                    icon(Icon::Check, 14.0, primary)
-                }))
+                .child(when(
+                    move || selected(),
+                    || icon(Icon::Check, 14.0, primary),
+                ))
         })
         .popup_style(|st| {
             st.w(px(300.0))

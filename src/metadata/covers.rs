@@ -369,7 +369,10 @@ fn art_data_uri(path: &Path) -> Option<String> {
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 85)
                 .encode_image(&rgb)
                 .ok()?;
-            Some(format!("data:image/jpeg;base64,{}", base64(&bytes.into_inner())))
+            Some(format!(
+                "data:image/jpeg;base64,{}",
+                base64(&bytes.into_inner())
+            ))
         }
         CoverSrc::Raw(bytes) => {
             let mime = crate::metadata::read_artwork(path)

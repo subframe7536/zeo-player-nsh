@@ -212,10 +212,7 @@ impl Default for ReplayGainConfig {
 /// 回退：专辑模式没有专辑增益 → 曲目增益；曲目模式没有曲目增益 →
 /// 专辑增益；都没有 → `fallback_db`（peak 视为无）。`clip_protect` 且
 /// 有峰值时，增益不超过 `1 / peak`；结果钳到 `0.0..=4.0`（+12 dB）。
-pub(crate) fn replaygain_factor(
-    cfg: &ReplayGainConfig,
-    rg: &crate::metadata::ReplayGain,
-) -> f32 {
+pub(crate) fn replaygain_factor(cfg: &ReplayGainConfig, rg: &crate::metadata::ReplayGain) -> f32 {
     if cfg.mode == ReplayGainMode::Off {
         return 1.0;
     }
@@ -881,9 +878,7 @@ fn run(
                     l.counted = true;
                     if let Some(path) = t.path.clone() {
                         let at = crate::config::unix_now();
-                        crate::db::later(move || {
-                            crate::db::record_play(&path, at, listened)
-                        });
+                        crate::db::later(move || crate::db::record_play(&path, at, listened));
                         shared.plays_gen.fetch_add(1, Ordering::Relaxed);
                     }
                 }
@@ -1175,10 +1170,9 @@ fn handle_cmd(
             *shared.rg_config.lock().unwrap_or_else(|e| e.into_inner()) = cfg;
             // 当前曲目立即生效（下一首装载时也会按新配置算）。
             if let Some(l) = loaded.as_ref() {
-                shared.rg_factor.store(
-                    replaygain_factor(&cfg, &l.rg).to_bits(),
-                    Ordering::Relaxed,
-                );
+                shared
+                    .rg_factor
+                    .store(replaygain_factor(&cfg, &l.rg).to_bits(), Ordering::Relaxed);
             }
         }
     }
@@ -1219,9 +1213,8 @@ fn counts_as_play(listened: f64, duration: f64, min_percent: u32, min_secs: u32)
     if min_percent == 0 && min_secs == 0 {
         return true;
     }
-    let by_percent = min_percent > 0
-        && duration > 0.0
-        && listened >= duration * f64::from(min_percent) / 100.0;
+    let by_percent =
+        min_percent > 0 && duration > 0.0 && listened >= duration * f64::from(min_percent) / 100.0;
     let by_seconds = min_secs > 0 && listened >= f64::from(min_secs);
     by_percent || by_seconds
 }
@@ -1778,7 +1771,11 @@ mod tests {
         let capacity = 48_000 * 3 * 2;
         let target = target_for(&out, capacity);
         assert!(target > 0);
-        assert!(target <= capacity * 2 / 3, "{target} > {}", capacity * 2 / 3);
+        assert!(
+            target <= capacity * 2 / 3,
+            "{target} > {}",
+            capacity * 2 / 3
+        );
     }
 
     /// ReplayGain 增益：模式回退、预放大叠加、峰值限幅与上限钳制。
@@ -1807,19 +1804,28 @@ mod tests {
             1.0
         );
         near(
-            replaygain_factor(&cfg(Track, 0.0, 0.0, true), &rg(Some(-6.02), None, None, None)),
+            replaygain_factor(
+                &cfg(Track, 0.0, 0.0, true),
+                &rg(Some(-6.02), None, None, None),
+            ),
             0.5,
             "track -6.02dB",
         );
         // 专辑模式没有专辑增益 → 回退曲目增益。
         near(
-            replaygain_factor(&cfg(Album, 0.0, 0.0, true), &rg(Some(-6.02), None, None, None)),
+            replaygain_factor(
+                &cfg(Album, 0.0, 0.0, true),
+                &rg(Some(-6.02), None, None, None),
+            ),
             0.5,
             "album 回退 track",
         );
         // 专辑模式有专辑增益 → 用专辑的。
         near(
-            replaygain_factor(&cfg(Album, 0.0, 0.0, true), &rg(Some(-6.0), None, Some(-12.0), None)),
+            replaygain_factor(
+                &cfg(Album, 0.0, 0.0, true),
+                &rg(Some(-6.0), None, Some(-12.0), None),
+            ),
             10f32.powf(-12.0 / 20.0),
             "album gain",
         );
@@ -1831,25 +1837,37 @@ mod tests {
         );
         // 预放大 +6 dB 与曲目 −6 dB 抵消 → ≈1。
         near(
-            replaygain_factor(&cfg(Track, 6.0, 0.0, true), &rg(Some(-6.0), None, None, None)),
+            replaygain_factor(
+                &cfg(Track, 6.0, 0.0, true),
+                &rg(Some(-6.0), None, None, None),
+            ),
             1.0,
             "preamp 叠加",
         );
         // 防削波：+6 dB 增益但峰值 0.8 → 钳到 1/0.8。
         near(
-            replaygain_factor(&cfg(Track, 0.0, 0.0, true), &rg(Some(6.0), Some(0.8), None, None)),
+            replaygain_factor(
+                &cfg(Track, 0.0, 0.0, true),
+                &rg(Some(6.0), Some(0.8), None, None),
+            ),
             1.0 / 0.8,
             "clip protect",
         );
         // 关掉防削波 → 全额 +6 dB。
         near(
-            replaygain_factor(&cfg(Track, 0.0, 0.0, false), &rg(Some(6.0), Some(0.8), None, None)),
+            replaygain_factor(
+                &cfg(Track, 0.0, 0.0, false),
+                &rg(Some(6.0), Some(0.8), None, None),
+            ),
             10f32.powf(6.0 / 20.0),
             "no clip protect",
         );
         // 上限钳到 4.0（+12 dB）。
         assert_eq!(
-            replaygain_factor(&cfg(Track, 0.0, 0.0, false), &rg(Some(30.0), None, None, None)),
+            replaygain_factor(
+                &cfg(Track, 0.0, 0.0, false),
+                &rg(Some(30.0), None, None, None)
+            ),
             4.0
         );
     }
@@ -1869,7 +1887,11 @@ mod tests {
             ..Default::default()
         };
         let factor = replaygain_factor(&cfg, &rg);
-        assert!((factor - 1.0 / 0.8).abs() < 1e-3, "{factor} != {}", 1.0 / 0.8);
+        assert!(
+            (factor - 1.0 / 0.8).abs() < 1e-3,
+            "{factor} != {}",
+            1.0 / 0.8
+        );
         assert!(factor <= 4.0);
     }
 }

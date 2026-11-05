@@ -39,9 +39,7 @@ fn e2e_env() {
     ONCE.call_once(|| {
         // SAFETY(测试): 进程内只有这一次环境变量写（在 Once 里），且所有
         // 读它的路径都先过同一个 Once——写完之后才对各线程可见。
-        unsafe {
-            std::env::set_var("ZEO_PLAYER_DATA_DIR", "/tmp/zeo-player-test-data-e2e")
-        };
+        unsafe { std::env::set_var("ZEO_PLAYER_DATA_DIR", "/tmp/zeo-player-test-data-e2e") };
     });
 }
 
@@ -236,11 +234,7 @@ fn device_invalidated_rebuilds_and_resumes() {
     player.simulate_device_event(crate::engine::audio::DeviceEvent::Invalidated);
     std::thread::sleep(Duration::from_millis(1500));
     let state = player.state();
-    assert!(
-        state.is_playing,
-        "重建后仍在播放: {:?}",
-        state.track.error
-    );
+    assert!(state.is_playing, "重建后仍在播放: {:?}", state.track.error);
     let after = state.current_time;
     assert!(
         after > before && after - before < 2.5,

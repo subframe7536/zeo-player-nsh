@@ -386,7 +386,8 @@ fn move_meta_on(conn: &Connection, rows: &[(String, String, u64, u64)]) -> rusql
     }
     {
         // 每曲歌词偏移跟随文件移动 / 改名。
-        let mut stmt = conn.prepare_cached("UPDATE lyrics_offsets SET path = ?1 WHERE path = ?2")?;
+        let mut stmt =
+            conn.prepare_cached("UPDATE lyrics_offsets SET path = ?1 WHERE path = ?2")?;
         for (old, new, ..) in rows {
             stmt.execute(params![new, old])?;
         }
@@ -519,9 +520,8 @@ pub fn remove_like(path: &str) {
 /// 把升级前已存在的收藏路径补进表（`liked_at = 0`：有记录但不计新增）。
 pub fn backfill_likes(paths: &[String]) {
     with("补收藏时间", |conn| {
-        let mut stmt = conn.prepare_cached(
-            "INSERT OR IGNORE INTO likes (path, liked_at) VALUES (?1, 0)",
-        )?;
+        let mut stmt =
+            conn.prepare_cached("INSERT OR IGNORE INTO likes (path, liked_at) VALUES (?1, 0)")?;
         for p in paths {
             stmt.execute(params![p])?;
         }
@@ -545,9 +545,8 @@ pub fn reconcile_added(paths: &[String], now: u64) {
     let done = with("对账入库时间", |conn| {
         let tx = conn.transaction()?;
         {
-            let mut ins = tx.prepare_cached(
-                "INSERT OR IGNORE INTO added (path, added_at) VALUES (?1, ?2)",
-            )?;
+            let mut ins =
+                tx.prepare_cached("INSERT OR IGNORE INTO added (path, added_at) VALUES (?1, ?2)")?;
             for p in paths {
                 ins.execute(params![p, now as i64])?;
             }
@@ -578,9 +577,8 @@ pub fn reconcile_added(paths: &[String], now: u64) {
 /// IGNORE`——已经记过的不动）。`entries = (路径, 文件修改时间)`。
 pub fn backfill_added(entries: &[(String, u64)]) {
     let done = with("补入库时间", |conn| {
-        let mut stmt = conn.prepare_cached(
-            "INSERT OR IGNORE INTO added (path, added_at) VALUES (?1, ?2)",
-        )?;
+        let mut stmt =
+            conn.prepare_cached("INSERT OR IGNORE INTO added (path, added_at) VALUES (?1, ?2)")?;
         for (p, modified) in entries {
             stmt.execute(params![p, *modified as i64])?;
         }
@@ -648,9 +646,7 @@ fn play_stats_on(
     limit: usize,
 ) -> rusqlite::Result<PlayStats> {
     let limit = limit as i64;
-    let total = conn.query_row("SELECT COUNT(*) FROM plays", [], |r| {
-        r.get::<_, i64>(0)
-    })? as u64;
+    let total = conn.query_row("SELECT COUNT(*) FROM plays", [], |r| r.get::<_, i64>(0))? as u64;
     let recent_n = conn.query_row(
         "SELECT COUNT(*) FROM plays WHERE played_at > ?1",
         [since as i64],
@@ -914,9 +910,17 @@ mod tests {
     fn lyric_offset_removed_under_folder() {
         let conn = Connection::open_in_memory().unwrap();
         migrate(&conn).unwrap();
-        let dir = format!("{}m{}x", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR);
+        let dir = format!(
+            "{}m{}x",
+            std::path::MAIN_SEPARATOR,
+            std::path::MAIN_SEPARATOR
+        );
         let inside = format!("{dir}{}a.flac", std::path::MAIN_SEPARATOR);
-        let outside = format!("{}m{}y.flac", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR);
+        let outside = format!(
+            "{}m{}y.flac",
+            std::path::MAIN_SEPARATOR,
+            std::path::MAIN_SEPARATOR
+        );
         set_lyrics_offset_on(&conn, &inside, 300).unwrap();
         set_lyrics_offset_on(&conn, &outside, 400).unwrap();
         remove_meta_under_on(&conn, &dir).unwrap();
@@ -1052,7 +1056,8 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute("DELETE FROM likes WHERE path = 'b'", []).unwrap();
+        conn.execute("DELETE FROM likes WHERE path = 'b'", [])
+            .unwrap();
         // week_start=150：a(100) 不计、old(0) 不计。
         let s = play_stats_on(&conn, 0, 150, 0, 10).unwrap();
         assert_eq!(s.week_likes, 0);

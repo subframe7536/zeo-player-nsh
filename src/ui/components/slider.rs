@@ -71,9 +71,7 @@ impl SliderStyle {
 }
 
 /// nsh-base `slider` 的单值回调换算（本模块的滑块都是 `Single`）。
-fn on_single(
-    f: impl Fn(f64) + 'static,
-) -> impl Fn(&SliderValue) + 'static {
+fn on_single(f: impl Fn(f64) + 'static) -> impl Fn(&SliderValue) + 'static {
     move |v: &SliderValue| {
         if let SliderValue::Single(v) = v {
             f(*v)
@@ -124,13 +122,11 @@ pub fn scrub(
     // 标签只标在 thumb 上（`accessibility_label`）：外层的 `label:` 选中后，
     // 测试拖动走的是命中视图的「自身 + 祖先」链，盖在上面的滑块是外层视图
     // 的子级、不在链里，收不到手势。
-    view()
-        .child(area)
-        .child(
-            overlay_slider(vertical, 0.01, a11y, fraction, on_move, on_release)
-                .absolute()
-                .inset_0(),
-        )
+    view().child(area).child(
+        overlay_slider(vertical, 0.01, a11y, fraction, on_move, on_release)
+            .absolute()
+            .inset_0(),
+    )
 }
 
 /// 通用滑块：`style` 定方向与外观（[`SliderStyle::HORIZONTAL`] /
@@ -149,7 +145,9 @@ pub fn slider(
     on_release: impl Fn(f64) + 'static,
 ) -> View {
     if style.bipolar {
-        return fader(style, a11y, fraction, track, fill, thumb, on_move, on_release);
+        return fader(
+            style, a11y, fraction, track, fill, thumb, on_move, on_release,
+        );
     }
     let thumb_class = match style.thumb {
         // 轨道是 `group`：悬停 / 按下 / 内部有焦点时才显出 thumb。
@@ -251,26 +249,22 @@ fn fader(
         .mb(px(-style.thumb_d / 2.0));
     let on_move = Rc::new(on_move);
     let m = on_move.clone();
-    view()
-        .items_center()
-        .child(rail)
-        .child(knob)
-        .child(
-            overlay_slider(
-                true,
-                style.step,
-                a11y,
-                fraction,
-                move |f| {
-                    drag.set(Some(f));
-                    m(f);
-                },
-                move |f| {
-                    on_release(f);
-                    drag.set(None);
-                },
-            )
-            .absolute()
-            .inset_0(),
+    view().items_center().child(rail).child(knob).child(
+        overlay_slider(
+            true,
+            style.step,
+            a11y,
+            fraction,
+            move |f| {
+                drag.set(Some(f));
+                m(f);
+            },
+            move |f| {
+                on_release(f);
+                drag.set(None);
+            },
         )
+        .absolute()
+        .inset_0(),
+    )
 }

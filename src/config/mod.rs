@@ -317,9 +317,7 @@ pub fn local_offset_seconds() -> i64 {
         // GetTimeZoneInformation 的 Bias 是「本地 + N 分钟 = UTC」——
         // 偏移取负；夏令时时段叠 DaylightBias。返回值是裸 u32
         // （windows-sys 0.61 只导出 INVALID 常量）：1=STANDARD 2=DAYLIGHT。
-        use windows_sys::Win32::System::Time::{
-            GetTimeZoneInformation, TIME_ZONE_INFORMATION,
-        };
+        use windows_sys::Win32::System::Time::{GetTimeZoneInformation, TIME_ZONE_INFORMATION};
         unsafe {
             let mut info: TIME_ZONE_INFORMATION = std::mem::zeroed();
             let id = GetTimeZoneInformation(&mut info);
@@ -943,8 +941,7 @@ mod tests {
     #[test]
     fn move_path_rekeys_index_and_roots() {
         let sep = std::path::MAIN_SEPARATOR;
-        let base =
-            std::env::temp_dir().join(format!("zeo-move-path-test-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("zeo-move-path-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let sub = base.join("music/sub");
         std::fs::create_dir_all(&sub).unwrap();

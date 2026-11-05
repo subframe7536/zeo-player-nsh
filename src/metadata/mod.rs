@@ -178,9 +178,9 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
 
     let mut codec = codec_of(file_type).map(|s| s.to_owned());
     let quality = match file_type {
-        lofty::file::FileType::Flac
-        | lofty::file::FileType::Wav
-        | lofty::file::FileType::Aiff => Some("Lossless".to_owned()),
+        lofty::file::FileType::Flac | lofty::file::FileType::Wav | lofty::file::FileType::Aiff => {
+            Some("Lossless".to_owned())
+        }
         lofty::file::FileType::Mpeg
         | lofty::file::FileType::Vorbis
         | lofty::file::FileType::Aac => Some("Lossy".to_owned()),
@@ -553,8 +553,8 @@ mod tests {
     /// read_meta 与 read_replaygain 都读出相同的值。
     #[test]
     fn replaygain_reads_flac_tags() {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join(".nsh/tmp/zeo-player-test-formats/rg.flac");
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(".nsh/tmp/zeo-player-test-formats/rg.flac");
         if !path.is_file() {
             eprintln!("跳过：没有 zeo-player-test-formats 测试语料");
             return;

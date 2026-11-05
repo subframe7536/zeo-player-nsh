@@ -71,9 +71,8 @@ fn offset_rail() -> AnyElement {
     };
     // ±30 秒折成 0..1，吸附到 0.1 秒。
     let fraction = move || (s.lyrics_offset.get() as f64 + 30000.0) / 60000.0;
-    let apply = move |f: f64| {
-        set_lyrics_offset(((f * 60000.0 - 30000.0) / 100.0).round() as i64 * 100)
-    };
+    let apply =
+        move |f: f64| set_lyrics_offset(((f * 60000.0 - 30000.0) / 100.0).round() as i64 * 100);
     // 触发器用普通 view（nsh-base 的 button 会吃掉按压，popover 收不到，
     // 同队列 / 音量按钮）。
     let trigger = view()
@@ -146,9 +145,7 @@ fn offset_rail() -> AnyElement {
                                         .text_color(fg()),
                                 )
                                 .child(dynamic(move || {
-                                    let g = s
-                                        .library
-                                        .with(|l| l.config.global_lyrics_offset_ms);
+                                    let g = s.library.with(|l| l.config.global_lyrics_offset_ms);
                                     (g != 0).then(|| {
                                         text(format!("全局 {}", fmt_offset(g)))
                                             .text_size(px(11.0))
@@ -172,9 +169,7 @@ fn offset_rail() -> AnyElement {
                                             .hover(|st| st.bg(hover()))
                                             .active(|st| st.opacity(0.7))
                                             .accessibility_label("重置歌词偏移")
-                                            .on_press(|_: &()| {
-                                                nudge_lyrics_offset(None)
-                                            })
+                                            .on_press(|_: &()| nudge_lyrics_offset(None))
                                             .child(
                                                 text("重置")
                                                     .text_size(px(11.0))
@@ -251,28 +246,22 @@ pub(super) fn lyrics_column(swap: &Swap) -> View {
         .flex_row()
         .bind_opacity(&swap.content)
         .bind_translate_x(&swap.lyrics_shift)
-        .child(
-            view()
-                .flex_1()
-                .h_full()
-                .min_w(px(0.0))
-                .child(when(has_lines, lyrics_scroller).otherwise(move || {
-                    view().flex_1().items_center().justify_center().child(
-                        text(move || {
-                            if s.lyrics.with(Option::is_none)
-                                && s.track.with(|t| t.path.is_some())
-                            {
-                                "正在载入歌词…"
-                            } else {
-                                "暂无歌词"
-                            }
-                        })
-                        .text_size(px(15.0))
-                        .line_height(px(15.0))
-                        .text_color(white_a(0.4)),
-                    )
-                })),
-        )
+        .child(view().flex_1().h_full().min_w(px(0.0)).child(
+            when(has_lines, lyrics_scroller).otherwise(move || {
+                view().flex_1().items_center().justify_center().child(
+                    text(move || {
+                        if s.lyrics.with(Option::is_none) && s.track.with(|t| t.path.is_some()) {
+                            "正在载入歌词…"
+                        } else {
+                            "暂无歌词"
+                        }
+                    })
+                    .text_size(px(15.0))
+                    .line_height(px(15.0))
+                    .text_color(white_a(0.4)),
+                )
+            }),
+        ))
         .child(when(timed, offset_rail))
 }
 

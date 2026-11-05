@@ -145,8 +145,7 @@ mod tests {
     /// 标题与 quality 对、波形生成成功。
     #[test]
     fn decodes_every_supported_format() {
-        let dir =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join(".nsh/tmp/zeo-player-test-formats");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".nsh/tmp/zeo-player-test-formats");
         if !dir.is_dir() {
             eprintln!("跳过：没有 {} 测试语料", dir.display());
             return;
@@ -166,8 +165,9 @@ mod tests {
                 Source::open(&path).unwrap_or_else(|e| panic!("{name}: Source::open: {e}"));
             let channels = src.channels;
             let mut frames = 0usize;
-            while let Some(block) =
-                src.next_block().unwrap_or_else(|e| panic!("{name}: next_block: {e}"))
+            while let Some(block) = src
+                .next_block()
+                .unwrap_or_else(|e| panic!("{name}: next_block: {e}"))
             {
                 frames += block.len() / channels;
             }
@@ -182,10 +182,14 @@ mod tests {
                 Err(_) if name == "raw.aac" => {}
                 Err(e) => panic!("{name}: seek(1.0): {e}"),
             }
-            let meta =
-                crate::metadata::read_meta(&path).unwrap_or_else(|e| panic!("{name}: read_meta: {e}"));
+            let meta = crate::metadata::read_meta(&path)
+                .unwrap_or_else(|e| panic!("{name}: read_meta: {e}"));
             assert_eq!(meta.title, title, "{name}: 标题不符");
-            assert_eq!(meta.quality.as_deref(), Some(quality), "{name}: quality 不符");
+            assert_eq!(
+                meta.quality.as_deref(),
+                Some(quality),
+                "{name}: quality 不符"
+            );
             crate::metadata::waveform::waveform(&path)
                 .unwrap_or_else(|e| panic!("{name}: waveform: {e}"));
         }

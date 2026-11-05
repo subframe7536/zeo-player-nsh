@@ -13,8 +13,7 @@ use super::super::components::button::{
 };
 use super::super::components::form::{
     SELECT_POPUP_H, dialog_content, dialog_footer, dialog_header, input_field, modal, select,
-    select_trigger, tab_list,
-    tab_trigger,
+    select_trigger, tab_list, tab_trigger,
 };
 use super::super::components::icons::{Icon, icon};
 use super::super::components::page::{empty_state, page_header};
@@ -91,14 +90,7 @@ pub fn track_menu(
     play: impl Fn() + 'static,
     rename: Option<Rc<dyn Fn(&str)>>,
 ) -> AnyElement {
-    track_menu_with(
-        store::menu_control(),
-        row,
-        track,
-        from,
-        play,
-        rename,
-    )
+    track_menu_with(store::menu_control(), row, track, from, play, rename)
 }
 
 /// 同 [`track_menu`]，但弹层门由调用方持有——行内的「⋯」按钮可以用
@@ -877,22 +869,18 @@ fn tag_select(
                 .text_color(fg())
         })
         .empty(
-            view()
-                .h(px(48.0))
-                .items_center()
-                .justify_center()
-                .child(
-                    text(move || {
-                        if no_tags() {
-                            "曲库里还没有标签"
-                        } else {
-                            "没有匹配的标签"
-                        }
-                    })
-                    .text_size(px(13.0))
-                    .line_height(px(13.0))
-                    .text_color(muted_fg()),
-                ),
+            view().h(px(48.0)).items_center().justify_center().child(
+                text(move || {
+                    if no_tags() {
+                        "曲库里还没有标签"
+                    } else {
+                        "没有匹配的标签"
+                    }
+                })
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .text_color(muted_fg()),
+            ),
         )
         .trigger(trigger)
         .into_element()

@@ -304,7 +304,9 @@ fn bench(open_full: Rc<dyn Fn()>) {
     if std::env::var("ZEO_PLAYER_BENCH").as_deref() == Ok("hidden") {
         spawn(async move {
             let wait = |s: u64| timer(std::time::Duration::from_secs(s));
-            while store::store().library.with_untracked(|l| l.progress.scanning)
+            while store::store()
+                .library
+                .with_untracked(|l| l.progress.scanning)
                 || store::store().tracks.with_untracked(|t| t.is_empty())
             {
                 wait(1).await;
@@ -316,7 +318,11 @@ fn bench(open_full: Rc<dyn Fn()>) {
             eprintln!("ZEO_PLAYER_BENCH step hidden");
             let mem = || {
                 let (priv_bytes, ws) = crate::window::memory_usage();
-                format!("priv={:.1}MB ws={:.1}MB", priv_bytes as f64 / 1048576.0, ws as f64 / 1048576.0)
+                format!(
+                    "priv={:.1}MB ws={:.1}MB",
+                    priv_bytes as f64 / 1048576.0,
+                    ws as f64 / 1048576.0
+                )
             };
             loop {
                 wait(30).await;
@@ -339,7 +345,9 @@ fn bench(open_full: Rc<dyn Fn()>) {
         let step = |name: &str| eprintln!("ZEO_PLAYER_BENCH step {name}");
         let wait = |s: u64| timer(std::time::Duration::from_secs(s));
         // 等扫描结束。
-        while store::store().library.with_untracked(|l| l.progress.scanning)
+        while store::store()
+            .library
+            .with_untracked(|l| l.progress.scanning)
             || store::store().tracks.with_untracked(|t| t.is_empty())
         {
             wait(1).await;

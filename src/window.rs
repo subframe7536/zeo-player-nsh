@@ -369,14 +369,12 @@ mod tray {
     /// 画布归一化坐标（0..1）。
     pub(super) fn in_glyph(pause: bool, u: f32, v: f32) -> bool {
         if pause {
-            (0.26..=0.74).contains(&v)
-                && ((0.30..=0.42).contains(&u) || (0.58..=0.70).contains(&u))
+            (0.26..=0.74).contains(&v) && ((0.30..=0.42).contains(&u) || (0.58..=0.70).contains(&u))
         } else {
             // 三角（略右移做视觉居中）：左竖边 + 右尖。
             let (ax, ay, bx, by, cx, cy) = (0.36, 0.25, 0.36, 0.75, 0.74, 0.50);
-            let s = |x0: f32, y0: f32, x1: f32, y1: f32| {
-                (u - x0) * (y1 - y0) - (v - y0) * (x1 - x0)
-            };
+            let s =
+                |x0: f32, y0: f32, x1: f32, y1: f32| (u - x0) * (y1 - y0) - (v - y0) * (x1 - x0);
             let (d1, d2, d3) = (s(ax, ay, bx, by), s(bx, by, cx, cy), s(cx, cy, ax, ay));
             (d1 >= 0.0 && d2 >= 0.0 && d3 >= 0.0) || (d1 <= 0.0 && d2 <= 0.0 && d3 <= 0.0)
         }
@@ -470,9 +468,9 @@ mod tray {
                 };
                 let o = i * 4;
                 for c in 0..3 {
-                    rgba[o + c] =
-                        (fg[c] as f32 * fa / alpha + bg[c] as f32 * ba * (1.0 - fa) / alpha)
-                            .round() as u8;
+                    rgba[o + c] = (fg[c] as f32 * fa / alpha
+                        + bg[c] as f32 * ba * (1.0 - fa) / alpha)
+                        .round() as u8;
                 }
                 rgba[o + 3] = (alpha * 255.0).round() as u8;
             }
@@ -553,7 +551,8 @@ mod tray {
             } else {
                 "未在播放".to_string()
             });
-            t.toggle.set_text(if state.playing { "暂停" } else { "播放" });
+            t.toggle
+                .set_text(if state.playing { "暂停" } else { "播放" });
             for item in [&t.toggle, &t.prev, &t.next] {
                 item.set_enabled(state.has_track);
             }
@@ -837,14 +836,15 @@ mod platform {
         BringWindowToTop, CallNextHookEx, CallWindowProcW, DefWindowProcW, DispatchMessageW,
         EnumWindows, GW_OWNER, GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect,
         GetForegroundWindow, GetMessageW, GetWindow, GetWindowLongPtrW, GetWindowPlacement,
-        GetWindowThreadProcessId, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsIconic, IsWindowVisible, IsZoomed,
-        KBDLLHOOKSTRUCT, MINMAXINFO, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW, PostMessageW,
-        PostThreadMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME,
-        SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE, SetForegroundWindow,
-        SetWindowLongPtrW, SetWindowPlacement, SetWindowsHookExW, ShowWindowAsync, TranslateMessage,
-        UnhookWindowsHookEx, WH_KEYBOARD_LL, WINDOWPLACEMENT, WM_ACTIVATE, WM_CLOSE, WM_DESTROY,
-        WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_KEYDOWN, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST,
-        WM_SHOWWINDOW, WM_SYSCOMMAND, WM_SYSKEYDOWN, WNDPROC, WS_CAPTION, WS_THICKFRAME,
+        GetWindowThreadProcessId, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsIconic, IsWindowVisible,
+        IsZoomed, KBDLLHOOKSTRUCT, MINMAXINFO, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW,
+        PostMessageW, PostThreadMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER,
+        SM_CYFRAME, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWMAXIMIZED, SW_SHOWNOACTIVATE,
+        SetForegroundWindow, SetWindowLongPtrW, SetWindowPlacement, SetWindowsHookExW,
+        ShowWindowAsync, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WINDOWPLACEMENT,
+        WM_ACTIVATE, WM_CLOSE, WM_DESTROY, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_KEYDOWN,
+        WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW, WM_SYSCOMMAND, WM_SYSKEYDOWN,
+        WNDPROC, WS_CAPTION, WS_THICKFRAME,
     };
 
     use super::TrayState;
@@ -873,8 +873,9 @@ mod platform {
             let vk = unsafe { (*(l as *const KBDLLHOOKSTRUCT)).vkCode } as u16;
             // 先判 vk 再取 player：每次击键都会过钩子，别在热路径上取全局。
             let player = match vk {
-                VK_MEDIA_PLAY_PAUSE | VK_MEDIA_NEXT_TRACK | VK_MEDIA_PREV_TRACK
-                | VK_MEDIA_STOP => crate::engine::Player::global(),
+                VK_MEDIA_PLAY_PAUSE | VK_MEDIA_NEXT_TRACK | VK_MEDIA_PREV_TRACK | VK_MEDIA_STOP => {
+                    crate::engine::Player::global()
+                }
                 // SAFETY: 放行其余输入。
                 _ => return unsafe { CallNextHookEx(std::ptr::null_mut(), code, w, l) },
             };
@@ -896,7 +897,8 @@ mod platform {
         let tid = unsafe { GetCurrentThreadId() };
         HOOK_TID.store(tid, Ordering::Relaxed);
         // SAFETY: 全局低级键盘钩子；回调在本线程消息循环里执行。
-        let mut hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(media_hook), std::ptr::null_mut(), 0) };
+        let mut hook =
+            unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(media_hook), std::ptr::null_mut(), 0) };
         let mut msg = MSG::default();
         // SAFETY: 标准消息循环；钩子句柄由本线程持有。
         unsafe {
@@ -905,7 +907,12 @@ mod platform {
                     if !hook.is_null() {
                         UnhookWindowsHookEx(hook);
                     }
-                    hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(media_hook), std::ptr::null_mut(), 0);
+                    hook = SetWindowsHookExW(
+                        WH_KEYBOARD_LL,
+                        Some(media_hook),
+                        std::ptr::null_mut(),
+                        0,
+                    );
                     continue;
                 }
                 TranslateMessage(&msg);
@@ -1372,13 +1379,15 @@ mod platform {
         let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
         counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
         // SAFETY: 伪句柄 + 已按 cb 填好大小的本进程结构体。
-        let ok = unsafe {
-            K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb)
-        };
+        let ok =
+            unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) };
         if ok == 0 {
             return (0, 0);
         }
-        (counters.PagefileUsage as u64, counters.WorkingSetSize as u64)
+        (
+            counters.PagefileUsage as u64,
+            counters.WorkingSetSize as u64,
+        )
     }
 }
 

@@ -219,12 +219,9 @@ pub fn install() -> Store {
     let active_line = computed(move || {
         let time = playback.with(|p| p.time);
         // 生效偏移 = 每曲手动偏移 + 全局偏移（正值 = 提前）。
-        let offset =
-            lyrics_offset.get() + library.with(|l| l.config.global_lyrics_offset_ms);
+        let offset = lyrics_offset.get() + library.with(|l| l.config.global_lyrics_offset_ms);
         lyrics.with(|l| match l {
-            Some(l) if l.output.timed => {
-                active_index(&l.output, time + offset as f64 / 1000.0)
-            }
+            Some(l) if l.output.timed => active_index(&l.output, time + offset as f64 / 1000.0),
             _ => -1,
         })
     });
@@ -342,8 +339,9 @@ pub fn install() -> Store {
     // playback 信号会让 effect 每 100ms 都跑一次 format! + 通道 +
     // SetMenuItemInfoW；平台侧 apply 还有一层按 TrayState 的重复过滤）。
     let tray_key = computed(move || {
-        let (title, artist, has_track) =
-            s.track.with(|t| (t.title.clone(), t.artist.clone(), t.path.is_some()));
+        let (title, artist, has_track) = s
+            .track
+            .with(|t| (t.title.clone(), t.artist.clone(), t.path.is_some()));
         (title, artist, s.playback.with(|p| p.playing), has_track)
     });
     effect(move || {
@@ -757,12 +755,14 @@ pub fn set_eq(cfg: crate::engine::eq::EqConfig) {
     // 上百次调用，不能每动一下都起一个线程。
     static GEN: AtomicU64 = AtomicU64::new(0);
     if GEN.fetch_add(1, Ordering::Relaxed) == 0 {
-        std::thread::spawn(|| loop {
-            std::thread::sleep(Duration::from_millis(400));
-            // 400ms 内没人再调（GEN 仍是 0）：落盘并收工。
-            if GEN.swap(0, Ordering::Relaxed) == 0 {
-                library_store().save();
-                return;
+        std::thread::spawn(|| {
+            loop {
+                std::thread::sleep(Duration::from_millis(400));
+                // 400ms 内没人再调（GEN 仍是 0）：落盘并收工。
+                if GEN.swap(0, Ordering::Relaxed) == 0 {
+                    library_store().save();
+                    return;
+                }
             }
         });
     }
@@ -1485,8 +1485,7 @@ pub fn covers_on() -> bool {
 /// 与 [`cover_for`] 相同但不受「列表显示封面」开关影响：播放条的当前
 /// 曲目封面一直显示（开关只管列表渲染）。
 pub fn cover_for_always(path: &str, pt: f32) -> Option<SharedString> {
-    if cfg!(any(debug_assertions, test))
-        && std::env::var_os("ZEO_PLAYER_BENCH_NO_COVERS").is_some()
+    if cfg!(any(debug_assertions, test)) && std::env::var_os("ZEO_PLAYER_BENCH_NO_COVERS").is_some()
     {
         return None;
     }

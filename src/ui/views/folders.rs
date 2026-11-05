@@ -1130,7 +1130,11 @@ pub fn Folders() -> impl IntoElement {
         .on_file_drag_leave(move || dropping.set(false))
         .on_file_drop(on_drop)
         .child(
-            when(move || s.library.with(|l| l.config.roots.is_empty()), no_library).otherwise(move || {
+            when(
+                move || s.library.with(|l| l.config.roots.is_empty()),
+                no_library,
+            )
+            .otherwise(move || {
                 let (select, toggle, ctx, ops) =
                     (select.clone(), toggle.clone(), ctx.clone(), ops.clone());
                 let cell_ctx = ctx.clone();
@@ -1626,8 +1630,7 @@ mod tests {
 
     #[test]
     fn move_into_renames_and_reports_collisions() {
-        let base =
-            std::env::temp_dir().join(format!("zeo-move-into-test-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("zeo-move-into-test-{}", std::process::id()));
         let src = base.join("src");
         let dst = base.join("dst");
         std::fs::create_dir_all(&src).unwrap();

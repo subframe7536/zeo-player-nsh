@@ -175,12 +175,7 @@ pub(super) fn stats_section() -> View {
 /// 输出设备：拔下耳机或切换系统默认输出设备时的行为。
 pub(super) fn device_section() -> View {
     let s = store();
-    setting_section(
-        "输出设备",
-        "拔下耳机或切换系统默认输出设备时的行为。",
-        None,
-    )
-    .child(pref_row(
+    setting_section("输出设备", "拔下耳机或切换系统默认输出设备时的行为。", None).child(pref_row(
         "设备变化时暂停",
         "关闭后会在新的默认设备上继续播放。设备全部断开时总会暂停。",
         move || s.library.with(|l| l.config.pause_on_device_change),
@@ -313,8 +308,9 @@ pub(super) fn replaygain_section() -> View {
 // --- 均衡器 -----------------------------------------------------------------
 
 /// 段名（与 `engine::eq::BANDS` 顺序一致）。
-const EQ_LABELS: [&str; 10] =
-    ["31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
+const EQ_LABELS: [&str; 10] = [
+    "31", "62", "125", "250", "500", "1k", "2k", "4k", "8k", "16k",
+];
 /// 各段滑块的无障碍标签（与 `EQ_LABELS` 同序）。
 const EQ_A11Y: [&str; 10] = [
     "均衡器 31",
@@ -460,75 +456,73 @@ pub(super) fn eq_section() -> View {
     let s = store();
     let cfg = move || s.library.with(|l| l.config.eq);
     let on = move || cfg().enabled;
-    setting_section(
-        "均衡器",
-        "按频段提升或衰减音量。拖动立即生效。",
-        None,
-    )
-    .child(pref_row(
-        "启用均衡器",
-        "对正在播放的音频实时应用下面的频段增益。",
-        move || s.library.with(|l| l.config.eq.enabled),
-        eq_enabled_set,
-    ))
-    .child(when(on, move || {
-        let mut faders = view().flex_1().flex_row().child(eq_fader(
-            "前级",
-            "均衡器 前级",
-            move || s.library.with(|l| l.config.eq.preamp_db),
-            |c, db| c.preamp_db = db,
-        ));
-        for (i, label) in EQ_LABELS.iter().enumerate() {
-            faders = faders.child(eq_fader(
-                label,
-                EQ_A11Y[i],
-                move || s.library.with(|l| l.config.eq.bands[i]),
-                move |c, db| c.bands[i] = db,
+    setting_section("均衡器", "按频段提升或衰减音量。拖动立即生效。", None)
+        .child(pref_row(
+            "启用均衡器",
+            "对正在播放的音频实时应用下面的频段增益。",
+            move || s.library.with(|l| l.config.eq.enabled),
+            eq_enabled_set,
+        ))
+        .child(when(on, move || {
+            let mut faders = view().flex_1().flex_row().child(eq_fader(
+                "前级",
+                "均衡器 前级",
+                move || s.library.with(|l| l.config.eq.preamp_db),
+                |c, db| c.preamp_db = db,
             ));
-        }
-        let options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)> =
-            crate::engine::eq::PRESETS
-                .iter()
-                .map(|&(name, bands)| {
-                    (
-                        None,
-                        name,
-                        Box::new(move || edit_eq(|c| c.bands = bands)) as Box<dyn Fn()>,
-                    )
-                })
-                .collect();
-        view()
-            .gap(px(16.0))
-            .child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(10.0))
-                    .child(select(
-                        move || eq_preset_name(&s.library.with(|l| l.config.eq.bands)),
-                        "预设",
-                        options,
-                        160.0,
-                    ))
-                    .child(view().flex_1())
-                    .child(text_button(
-                        Variant::Ghost,
-                        Size::Sm,
-                        None,
-                        "重置",
-                        || edit_eq(|c| {
-                            c.preamp_db = 0.0;
-                            c.bands = [0.0; 10];
-                        }),
-                    )),
-            )
-            .child(
-                view()
-                    .flex_row()
-                    .w_full()
-                    .gap(px(10.0))
-                    .child(db_scale())
-                    .child(faders),
-            )
-    }))
+            for (i, label) in EQ_LABELS.iter().enumerate() {
+                faders = faders.child(eq_fader(
+                    label,
+                    EQ_A11Y[i],
+                    move || s.library.with(|l| l.config.eq.bands[i]),
+                    move |c, db| c.bands[i] = db,
+                ));
+            }
+            let options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)> =
+                crate::engine::eq::PRESETS
+                    .iter()
+                    .map(|&(name, bands)| {
+                        (
+                            None,
+                            name,
+                            Box::new(move || edit_eq(|c| c.bands = bands)) as Box<dyn Fn()>,
+                        )
+                    })
+                    .collect();
+            view()
+                .gap(px(16.0))
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(10.0))
+                        .child(select(
+                            move || eq_preset_name(&s.library.with(|l| l.config.eq.bands)),
+                            "预设",
+                            options,
+                            160.0,
+                        ))
+                        .child(view().flex_1())
+                        .child(text_button(
+                            Variant::Ghost,
+                            Size::Sm,
+                            None,
+                            "重置",
+                            || {
+                                edit_eq(|c| {
+                                    c.preamp_db = 0.0;
+                                    c.bands = [0.0; 10];
+                                })
+                            },
+                        )),
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .w_full()
+                        .gap(px(10.0))
+                        .child(db_scale())
+                        .child(faders),
+                )
+        }))
 }

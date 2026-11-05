@@ -10,6 +10,7 @@ use std::time::Duration;
 use nsh_base::{ButtonElement, button};
 use nsh_core::prelude::*;
 
+use super::super::Nav;
 use super::super::components::button::icon_button;
 use super::super::components::cover::{cover, cover_initial, initial_letter};
 use super::super::components::icons::{Icon, icon};
@@ -17,7 +18,6 @@ use super::super::components::page::empty_state;
 use super::super::components::tracks::content_width;
 use super::super::store::{cover_for, covers_on, play_list, player, queue_add, store};
 use super::super::theme::*;
-use super::super::Nav;
 use super::{browse::avatar, no_library, playlists::track_menu_with};
 use crate::config::TrackEntry;
 
@@ -77,11 +77,7 @@ fn tagline(hour: u32) -> &'static str {
 }
 
 /// 头部指标：大数字 + 小单位，下面一行 muted 标签。
-fn metric(
-    value: impl Fn() -> String + 'static,
-    unit: &'static str,
-    label: &'static str,
-) -> View {
+fn metric(value: impl Fn() -> String + 'static, unit: &'static str, label: &'static str) -> View {
     view()
         .gap(px(4.0))
         .child(
@@ -115,9 +111,7 @@ fn metric(
 /// 头部：时段问候 + 本周时长 / 新增收藏 / 连续收听。原 page_header
 /// 兼任窗口拖动区，这里带上 `window_drag`。
 fn hero(stats: Signal<crate::db::PlayStats>, now: Signal<u64>) -> View {
-    let hour = move || {
-        crate::config::local_hour(now.get(), crate::config::local_offset_seconds())
-    };
+    let hour = move || crate::config::local_hour(now.get(), crate::config::local_offset_seconds());
     view()
         .window_drag(true)
         .flex_row()
@@ -194,7 +188,9 @@ fn card(t: &TrackEntry, index: usize, five: Rc<Vec<TrackEntry>>) -> ButtonElemen
         .hover(|st| st.bg(hover()))
         .active(|st| st.opacity(0.75))
         .on_press(move |_: &()| play_list(&five, index))
-        .child(when(covers_on, move || cover_initial(src, letter, Some(140.0), 12.0)))
+        .child(when(covers_on, move || {
+            cover_initial(src, letter, Some(140.0), 12.0)
+        }))
         .child(
             view()
                 .px(px(2.0))
@@ -365,9 +361,7 @@ fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement {
                                     .bg(move || nsh_base::theme().secondary)
                                     .hover(|st| st.opacity(0.85))
                                     .accessibility_label("添加到队列")
-                                    .on_press(move |_: &()| {
-                                        queue_add(&featured.get_untracked())
-                                    })
+                                    .on_press(move |_: &()| queue_add(&featured.get_untracked()))
                                     .child(icon(Icon::Plus, 14.0, move || fg()))
                                     .child(
                                         text("添加到队列")
@@ -398,7 +392,11 @@ fn hot_artists(stats: Signal<crate::db::PlayStats>) -> AnyElement {
     let s = store();
     dynamic(move || {
         let names: Vec<String> = stats.with(|v| {
-            v.top_artists.iter().map(|(n, _)| n.clone()).take(8).collect()
+            v.top_artists
+                .iter()
+                .map(|(n, _)| n.clone())
+                .take(8)
+                .collect()
         });
         if names.is_empty() {
             return view().into_element();
@@ -433,7 +431,11 @@ fn hot_artists(stats: Signal<crate::db::PlayStats>) -> AnyElement {
                         nav.set(Nav::Artists);
                     })
                     .child(when(covers_on, move || {
-                        avatar(move || cover_path.get(), move || art_name.get(), Some(140.0))
+                        avatar(
+                            move || cover_path.get(),
+                            move || art_name.get(),
+                            Some(140.0),
+                        )
                     }))
                     .child(
                         text(name.clone())
@@ -463,8 +465,14 @@ fn added_card(t: &TrackEntry, index: usize, list: Rc<Vec<TrackEntry>>) -> AnyEle
     let letter = move || initial_letter(&title.get(), &path.get());
     let hovering = signal(false);
     let gate = super::super::store::menu_control();
-    let play_row = { let list = list.clone(); move || play_list(&list, index) };
-    let play_btn = { let list = list.clone(); move || play_list(&list, index) };
+    let play_row = {
+        let list = list.clone();
+        move || play_list(&list, index)
+    };
+    let play_btn = {
+        let list = list.clone();
+        move || play_list(&list, index)
+    };
     let play_menu = { move || play_list(&list, index) };
     let row = view()
         .w_full()
@@ -481,7 +489,9 @@ fn added_card(t: &TrackEntry, index: usize, list: Rc<Vec<TrackEntry>>) -> AnyEle
         .on_mouse_enter(move |_: &MouseEvent| hovering.set(true))
         .on_mouse_leave(move |_: &MouseEvent| hovering.set(false))
         .on_press(move |_: &()| play_row())
-        .child(when(covers_on, move || cover_initial(src, letter, Some(64.0), 0.0)))
+        .child(when(covers_on, move || {
+            cover_initial(src, letter, Some(64.0), 0.0)
+        }))
         .child(
             view()
                 .flex_1()
@@ -506,40 +516,43 @@ fn added_card(t: &TrackEntry, index: usize, list: Rc<Vec<TrackEntry>>) -> AnyEle
                 ),
         )
         // 按钮浮在右侧不占位：插 flex 子项会改卡的固有宽、引起网格回流。
-        .child(when(move || hovering.get(), move || {
-            view()
-                .absolute()
-                .top(px(0.0))
-                .bottom(px(0.0))
-                .right(px(10.0))
-                .flex_row()
-                .items_center()
-                .gap(px(4.0))
-                .child(
-                    button()
-                        .size(px(36.0))
-                        .flex_shrink_0()
-                        .items_center()
-                        .justify_center()
-                        .rounded_full()
-                        .accessibility_label("播放")
-                        .bg(move || nsh_base::theme().secondary)
-                        .hover(|st| st.opacity(0.85))
-                        .on_press({
-                            let play = play_btn.clone();
-                            move |_: &()| play()
-                        })
-                        .child(icon(Icon::Play, 16.0, fg)),
-                )
-                .child(icon_button(
-                    || Icon::More,
-                    16.0,
-                    "更多",
-                    muted_fg,
-                    move || gate.request_open(),
-                ))
-                .into_element()
-        }));
+        .child(when(
+            move || hovering.get(),
+            move || {
+                view()
+                    .absolute()
+                    .top(px(0.0))
+                    .bottom(px(0.0))
+                    .right(px(10.0))
+                    .flex_row()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(
+                        button()
+                            .size(px(36.0))
+                            .flex_shrink_0()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .accessibility_label("播放")
+                            .bg(move || nsh_base::theme().secondary)
+                            .hover(|st| st.opacity(0.85))
+                            .on_press({
+                                let play = play_btn.clone();
+                                move |_: &()| play()
+                            })
+                            .child(icon(Icon::Play, 16.0, fg)),
+                    )
+                    .child(icon_button(
+                        || Icon::More,
+                        16.0,
+                        "更多",
+                        muted_fg,
+                        move || gate.request_open(),
+                    ))
+                    .into_element()
+            },
+        ));
     let track = computed(move || Some(t.clone()));
     // flex 尺寸挂在外层：context_menu 的根是包住 trigger 的 view，网格
     // 直接排的是它——尺寸写在卡上会被菜单包装吞掉，行宽乱掉。
@@ -648,10 +661,8 @@ pub fn Home() -> impl IntoElement {
             let offset = crate::config::local_offset_seconds();
             let since = now.saturating_sub(7 * 86400);
             let week_start = crate::config::local_week_start(now, offset);
-            if let Ok(v) = blocking(move || {
-                crate::db::play_stats(since, week_start, offset, 10)
-            })
-            .await
+            if let Ok(v) =
+                blocking(move || crate::db::play_stats(since, week_start, offset, 10)).await
             {
                 stats.set(v);
             }
@@ -680,16 +691,18 @@ pub fn Home() -> impl IntoElement {
         view()
             .flex_1()
             .child(hero(stats, now))
-            .child(scroll().flex_1().child(
-                view()
-                    .px(px(32.0))
-                    .pb(px(BAR_SPACE))
-                    .gap(px(28.0))
-                    .child(featured_card(featured))
-                    .child(recent(stats))
-                    .child(hot_artists(stats))
-                    .child(new_added(stats)),
-            ))
+            .child(
+                scroll().flex_1().child(
+                    view()
+                        .px(px(32.0))
+                        .pb(px(BAR_SPACE))
+                        .gap(px(28.0))
+                        .child(featured_card(featured))
+                        .child(recent(stats))
+                        .child(hot_artists(stats))
+                        .child(new_added(stats)),
+                ),
+            )
             .into_element()
     }))
 }

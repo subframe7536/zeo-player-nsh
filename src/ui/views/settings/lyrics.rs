@@ -63,7 +63,11 @@ pub(super) fn lyrics_timestamps_section() -> View {
 /// 全局歌词偏移：所有曲目统一提前 / 延后（毫秒；与每首曲目的手动偏移相加生效）。
 pub(super) fn lyrics_offset_section() -> View {
     let s = store();
-    let draft = signal(s.library.with(|l| l.config.global_lyrics_offset_ms).to_string());
+    let draft = signal(
+        s.library
+            .with(|l| l.config.global_lyrics_offset_ms)
+            .to_string(),
+    );
     // 外部改了配置（另一个实例、测试）时同步草稿；computed 只在值变了
     // 才触发——无关的 s.library 写不能把输入中的草稿顶掉。
     let lib_ms = computed(move || s.library.with(|l| l.config.global_lyrics_offset_ms));
@@ -81,9 +85,11 @@ pub(super) fn lyrics_offset_section() -> View {
                 super::super::super::store::set_global_lyrics_offset(ms);
                 draft.set(ms.to_string());
             }
-            Err(_) => {
-                draft.set(s.library.with(|l| l.config.global_lyrics_offset_ms).to_string())
-            }
+            Err(_) => draft.set(
+                s.library
+                    .with(|l| l.config.global_lyrics_offset_ms)
+                    .to_string(),
+            ),
         }
     };
     let field = input_field(true)

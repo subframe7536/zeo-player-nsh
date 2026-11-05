@@ -138,7 +138,11 @@ fn file_url(path: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let path = path.replace('\\', "/");
     let mut out = String::with_capacity(path.len() + 8);
-    out.push_str(if path.starts_with('/') { "file://" } else { "file:///" });
+    out.push_str(if path.starts_with('/') {
+        "file://"
+    } else {
+        "file:///"
+    });
     for &b in path.as_bytes() {
         match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
@@ -182,9 +186,10 @@ mod smtc_thumbnail {
 
     impl Thumbnail {
         pub fn new(hwnd: u64) -> Option<Thumbnail> {
-            let interop = factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>()
-                .map_err(|err| eprintln!("zeo-player: SMTC interop: {err}"))
-                .ok()?;
+            let interop =
+                factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>()
+                    .map_err(|err| eprintln!("zeo-player: SMTC interop: {err}"))
+                    .ok()?;
             let controls: SystemMediaTransportControls =
                 unsafe { interop.GetForWindow(HWND(hwnd as usize as *mut core::ffi::c_void)) }
                     .map_err(|err| eprintln!("zeo-player: SMTC GetForWindow: {err}"))
@@ -193,7 +198,10 @@ mod smtc_thumbnail {
                 .DisplayUpdater()
                 .map_err(|err| eprintln!("zeo-player: SMTC DisplayUpdater: {err}"))
                 .ok()?;
-            Some(Thumbnail { updater, last: None })
+            Some(Thumbnail {
+                updater,
+                last: None,
+            })
         }
 
         /// `set_state` 之后调：封面文件变了才重投，None 则清空缩略图。
@@ -204,12 +212,12 @@ mod smtc_thumbnail {
                 return;
             }
             let set = match &new {
-                Some(path) => StorageFile::GetFileFromPathAsync(&HSTRING::from(
-                    &*path.to_string_lossy(),
-                ))
-                .and_then(|op| op.join())
-                .and_then(|file| RandomAccessStreamReference::CreateFromFile(&file))
-                .and_then(|stream| self.updater.SetThumbnail(&stream)),
+                Some(path) => {
+                    StorageFile::GetFileFromPathAsync(&HSTRING::from(&*path.to_string_lossy()))
+                        .and_then(|op| op.join())
+                        .and_then(|file| RandomAccessStreamReference::CreateFromFile(&file))
+                        .and_then(|stream| self.updater.SetThumbnail(&stream))
+                }
                 None => self.updater.SetThumbnail(None),
             };
             match set.and_then(|()| self.updater.Update()) {
