@@ -1075,6 +1075,49 @@ fn home_counts_a_play() {
     app.press("label:关闭设置").unwrap();
 }
 
+/// 「最近播放」单行横排：窄窗放不下时标题行出翻页钮、条子沿横轴滚
+/// 得动、到边的钮禁用；窗口拉宽全放下后钮消失。（语料只有几首
+/// 歌、一两个歌手：「最近播放」一定溢出，「热门艺术家」没有播放
+/// 记录时整节不渲染，也不会溢出，所以翻页钮恰有一对。）
+#[test]
+fn home_recent_shelf_scrolls_horizontally() {
+    let mut app = start(760.0, 600.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.wait_for_within("label:立即播放", Duration::from_secs(20))
+        .unwrap();
+    app.wait_for("最近播放").unwrap();
+    // 卡按 200pt 排不下 → 翻页钮挂出来；起点处「往前翻」禁用。
+    assert_eq!(
+        app.screen().count("label:往后翻"),
+        Ok(1),
+        "{:?}",
+        texts(&app)
+    );
+    assert_eq!(app.screen().enabled("label:往前翻"), Ok(false));
+    // 条子本体沿横轴滚（视口若被内容撑到 max-content 宽，这里报错）。
+    app.scroll("id:home-recent-shelf", px(300.0))
+        .expect("卡条应能横向滚动");
+    // 翻页钮一次滚近一屏：右翻后左翻解禁，回到起点再禁用。
+    app.press("label:往后翻").unwrap();
+    app.wait_until("右翻后「往前翻」应解禁", Duration::from_secs(5), |s| {
+        s.enabled("label:往前翻") == Ok(true)
+    })
+    .unwrap();
+    app.press("label:往前翻").unwrap();
+    app.wait_until("回翻后「往前翻」应禁用", Duration::from_secs(5), |s| {
+        s.enabled("label:往前翻") == Ok(false)
+    })
+    .unwrap();
+    // 拉宽到全放下 → 翻页钮消失。
+    app.set_viewport(size(px(2200.0), px(900.0))).unwrap();
+    app.wait_until("放宽后翻页钮应收起", Duration::from_secs(5), |s| {
+        s.count("label:往后翻") == Ok(0)
+    })
+    .unwrap();
+}
+
 /// 测试语料根文件夹在文件夹页里的名字。
 fn root_name() -> String {
     dunce::canonicalize(CORPUS)

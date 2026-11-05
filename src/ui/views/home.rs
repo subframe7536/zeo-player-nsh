@@ -169,8 +169,91 @@ fn section_title(title: &'static str) -> Text {
         .text_color(fg())
 }
 
+/// 卡条统一的最小卡宽与间距（翻页范围按它算）。
+const STRIP_MIN_W: f32 = 200.0;
+const STRIP_GAP: f32 = 14.0;
+
+/// 横向卡条的翻页状态：`el` 指到条子本体，`offset` 随 `on_scroll`、
+/// `viewport` 随 `on_layout` 刷新。`min_content` 是所有卡都按
+/// `min_w` 排开的内容宽——它比视口窄时卡被 `flex_1` 摊满整行、
+/// 条子不滚。
+#[derive(Clone, Copy)]
+struct Shelf {
+    el: ElementRef,
+    offset: Signal<f32>,
+    viewport: Signal<f32>,
+    min_content: f32,
+    id: &'static str,
+}
+
+impl Shelf {
+    fn new(id: &'static str, cards: usize) -> Self {
+        Self {
+            el: element_ref(),
+            offset: signal(0.0),
+            viewport: signal(0.0),
+            min_content: cards as f32 * (STRIP_MIN_W + STRIP_GAP) - STRIP_GAP,
+            id,
+        }
+    }
+
+    /// 滚得到的最大 offset；≤ 0 即整行放得下。
+    fn max(&self) -> f32 {
+        (self.min_content - self.viewport.get()).max(0.0)
+    }
+
+    /// 节标题行：左标题，右侧 ◀ ▶ 翻页钮（只在滚得动时出现，到边
+    /// 禁用）；点一下滚近一屏、留一截衔接。竖向滚轮不归它——嵌套
+    /// 滚动按轴选，滚轮仍是整页滚动，翻页钮是鼠标够到后半截的
+    /// 唯一入口（横向手势 / 触控板横滑也能滚）。
+    fn title(&self, title: &'static str) -> View {
+        let this = *self;
+        view()
+            .flex_row()
+            .items_center()
+            .child(section_title(title))
+            .child(view().flex_1())
+            .child(when(move || this.max() > 0.5, move || {
+                let page = move || this.viewport.get() * 0.9;
+                view()
+                    .flex_row()
+                    .gap(px(2.0))
+                    .child(
+                        icon_button(|| Icon::ChevronLeft, 14.0, "往前翻", muted_fg, move || {
+                            let x = (this.offset.get() - page()).max(0.0);
+                            this.el.scroll_to(point(Points(x), Points::ZERO), true);
+                        })
+                        .disabled(move || this.offset.get() <= 0.5),
+                    )
+                    .child(
+                        icon_button(|| Icon::ChevronRight, 14.0, "往后翻", muted_fg, move || {
+                            let x = (this.offset.get() + page()).min(this.max());
+                            this.el.scroll_to(point(Points(x), Points::ZERO), true);
+                        })
+                        .disabled(move || this.offset.get() >= this.max() - 0.5),
+                    )
+            }))
+    }
+
+    /// 横向 Scroll：一行横排、藏滚动条（横排卡子项 `flex_1` 够宽摊满、
+    /// `min_w` 顶出滚动区）。`fill` 把卡塞进来。
+    fn strip(&self, fill: impl FnOnce(Scroll) -> Scroll) -> Scroll {
+        let this = *self;
+        fill(
+            scroll()
+                .horizontal()
+                .scrollbar(false)
+                .gap(px(STRIP_GAP))
+                .element_ref(&this.el)
+                .test_id(this.id)
+                .on_layout(move |b: &Bounds<Points>| this.viewport.set(b.size.width.0))
+                .on_scroll(move |e: &ScrollEvent| this.offset.set(e.offset.x.0)),
+        )
+    }
+}
+
 /// 推荐卡：封面 + 曲名 + 歌手；按下以这一批为队列从本卡开始播。
-/// `min_w` 给换行点、`max_w` 防末行独苗卡被 `flex_1` 拉成整行宽。
+/// `flex_1` + `min_w`：横排卡条里够宽摊满整行、放不下时顶出滚动区。
 fn card(t: &TrackEntry, index: usize, five: Rc<Vec<TrackEntry>>) -> ButtonElement {
     // `src` / `letter` 进 `when` 的响应闭包：要 `Copy`，用 `stored` 持有。
     let path = stored(t.path.clone());
@@ -386,8 +469,8 @@ fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement {
     .into_element()
 }
 
-/// 热门艺术家：播放次数前 8 的歌手，大圆头像 + 名；一行四个（宽度不
-/// 够 `min_w` 自动换行收列）；点到「歌手」页详情。
+/// 热门艺术家：播放次数前 8 的歌手，大圆头像 + 名；单行横排、放不
+/// 下横向滚动（够宽时 `flex_1` 仍摊满整行）；点到「歌手」页详情。
 fn hot_artists(stats: Signal<crate::db::PlayStats>) -> AnyElement {
     let s = store();
     dynamic(move || {
@@ -404,52 +487,55 @@ fn hot_artists(stats: Signal<crate::db::PlayStats>) -> AnyElement {
         let tracks = s.tracks.get();
         let nav = global::<Nav>();
         let sel = s.artist_sel;
-        let mut row = view().flex_row().flex_wrap().gap(px(14.0));
-        for name in names {
-            // 头像取该歌手第一张有封面的曲目（没有则首字占位）。
-            let cover_path = stored(
-                tracks
-                    .iter()
-                    .find(|t| t.artist == name && t.has_art)
-                    .map(|t| t.path.clone()),
-            );
-            let art_name = stored(name.clone());
-            row = row.child(
-                button()
-                    .flex_1()
-                    .min_w(px(200.0))
-                    .gap(px(8.0))
-                    .items_center()
-                    .p(px(10.0))
-                    .rounded(px(14.0))
-                    .accessibility_label(SharedString::from(name.clone()))
-                    .hover(|st| st.bg(hover()))
-                    .active(|st| st.opacity(0.75))
-                    .on_press(move |_: &()| {
-                        // 深链进「歌手」详情：选好后切导航，Artists 直接开详情。
-                        sel.set(Some(art_name.get()));
-                        nav.set(Nav::Artists);
-                    })
-                    .child(when(covers_on, move || {
-                        avatar(
-                            move || cover_path.get(),
-                            move || art_name.get(),
-                            Some(140.0),
-                        )
-                    }))
-                    .child(
-                        text(name.clone())
-                            .number_of_lines(1)
-                            .text_size(px(13.0))
-                            .line_height(px(13.0))
-                            .text_color(muted_fg()),
-                    ),
-            );
-        }
+        let shelf = Shelf::new("home-artists-shelf", names.len());
+        let strip = shelf.strip(|mut strip| {
+            for name in names {
+                // 头像取该歌手第一张有封面的曲目（没有则首字占位）。
+                let cover_path = stored(
+                    tracks
+                        .iter()
+                        .find(|t| t.artist == name && t.has_art)
+                        .map(|t| t.path.clone()),
+                );
+                let art_name = stored(name.clone());
+                strip = strip.child(
+                    button()
+                        .flex_1()
+                        .min_w(px(200.0))
+                        .gap(px(8.0))
+                        .items_center()
+                        .p(px(10.0))
+                        .rounded(px(14.0))
+                        .accessibility_label(SharedString::from(name.clone()))
+                        .hover(|st| st.bg(hover()))
+                        .active(|st| st.opacity(0.75))
+                        .on_press(move |_: &()| {
+                            // 深链进「歌手」详情：选好后切导航，Artists 直接开详情。
+                            sel.set(Some(art_name.get()));
+                            nav.set(Nav::Artists);
+                        })
+                        .child(when(covers_on, move || {
+                            avatar(
+                                move || cover_path.get(),
+                                move || art_name.get(),
+                                Some(140.0),
+                            )
+                        }))
+                        .child(
+                            text(name.clone())
+                                .number_of_lines(1)
+                                .text_size(px(13.0))
+                                .line_height(px(13.0))
+                                .text_color(muted_fg()),
+                        ),
+                );
+            }
+            strip
+        });
         view()
             .gap(px(12.0))
-            .child(section_title("热门艺术家"))
-            .child(row)
+            .child(shelf.title("热门艺术家"))
+            .child(strip)
             .into_element()
     })
     .into_element()
@@ -593,8 +679,9 @@ fn new_added(stats: Signal<crate::db::PlayStats>) -> AnyElement {
     .into_element()
 }
 
-/// 最近播放：随机推荐同款卡，多行 grid；按播放时间倒序（零播放的按
-/// 入库时间排在末）。整节同一个队列，点卡从本卡开始播。空榜出空态。
+/// 最近播放：随机推荐同款卡，单行横排、放不下横向滚动；按播放时间
+/// 倒序（零播放的按入库时间排在末）。整节同一个队列，点卡从本卡开
+/// 始播。空榜出空态。
 fn recent(stats: Signal<crate::db::PlayStats>) -> AnyElement {
     let s = store();
     dynamic(move || {
@@ -619,14 +706,17 @@ fn recent(stats: Signal<crate::db::PlayStats>) -> AnyElement {
                 .into_element();
         }
         let queue = Rc::new(list);
-        let mut grid = view().flex_row().flex_wrap().gap(px(14.0));
-        for (i, t) in queue.iter().enumerate() {
-            grid = grid.child(card(t, i, queue.clone()));
-        }
+        let shelf = Shelf::new("home-recent-shelf", queue.len());
+        let strip = shelf.strip(|mut strip| {
+            for (i, t) in queue.iter().enumerate() {
+                strip = strip.child(card(t, i, queue.clone()));
+            }
+            strip
+        });
         view()
             .gap(px(12.0))
-            .child(section_title("最近播放"))
-            .child(grid)
+            .child(shelf.title("最近播放"))
+            .child(strip)
             .into_element()
     })
     .into_element()
