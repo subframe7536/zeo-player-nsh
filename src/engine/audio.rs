@@ -34,6 +34,10 @@ const MAX_PACKETS_PER_TICK: usize = 64;
 const PLAYING_TICK: Duration = Duration::from_millis(10);
 /// 停着时两轮之间最多等多久。
 const IDLE_TICK: Duration = Duration::from_millis(100);
+/// 输出设备缓冲的目标时长（毫秒）：不少设备的默认缓冲只有 ~10ms——系统
+/// CPU 忙时回调线程稍一排队就欠载（环形缓冲再大也救不了设备侧的空窗）。
+/// 40ms 把调度余量放大几倍，对交互延迟仍无感。
+const OUTPUT_BUFFER_MS: u32 = 40;
 
 /// 解码线程 → 输出回调的样本环：单生产者（引擎线程）单消费者（cpal 回调），
 /// 无锁。
@@ -611,42 +615,14 @@ fn open_output(
             Ok(config) => {
                 rate = config.sample_rate();
                 channels = config.channels() as usize;
-                let stream_config: cpal::StreamConfig = config.into();
-                let build = device.build_output_stream(
-                    stream_config,
-                    {
-                        let shared = shared.clone();
-                        let mut eq = crate::engine::eq::Equalizer::new();
-                        // 代次哨兵：强制首块读取配置（真代次不可能到 MAX）。
-                        let mut eq_seen = u64::MAX;
-                        // 上一块结尾欠载：下一块的头端要软化（硬零沿爆音）。
-                        let mut starved = false;
-                        move |data: &mut [f32], _| {
-                            let g = shared.eq_gen.load(Ordering::Acquire);
-                            if g != eq_seen
-                                && let Ok(cfg) = shared.eq_config.try_lock()
-                            {
-                                eq.configure(&cfg, rate);
-                                eq_seen = g;
-                            }
-                            output_callback(&shared, &mut eq, &mut starved, data, channels)
-                        }
-                    },
-                    {
-                        let tx = tx.clone();
-                        move |err| {
-                            eprintln!("zeo-player cpal: {err}");
-                            let event = match err.kind() {
-                                cpal::ErrorKind::DeviceChanged => DeviceEvent::Rerouted,
-                                cpal::ErrorKind::StreamInvalidated => DeviceEvent::Invalidated,
-                                cpal::ErrorKind::DeviceNotAvailable => DeviceEvent::Lost,
-                                _ => return,
-                            };
-                            let _ = tx.send(EngineCmd::Device(event));
-                        }
-                    },
-                    None,
-                );
+                let mut stream_config = config.config();
+                stream_config.buffer_size = desired_buffer_size(config.buffer_size(), rate);
+                let build = build_stream(&device, stream_config, shared, tx, rate, channels)
+                    .or_else(|first| {
+                        // 设备不接受指定缓冲：退回系统默认（能响，只是调度余量小）。
+                        eprintln!("zeo-player cpal: {first}（退回默认缓冲）");
+                        build_stream(&device, config.config(), shared, tx, rate, channels)
+                    });
                 match build {
                     Ok(s) => {
                         running = s.play().is_ok();
@@ -665,6 +641,67 @@ fn open_output(
         channels,
         running,
     }
+}
+
+/// 想要的设备缓冲（`StreamConfig::buffer_size`）：目标是 [`OUTPUT_BUFFER_MS`]
+/// 毫秒的设备缓冲——默认缓冲在不少设备上只有 ~10ms，CPU 忙时回调线程稍一
+/// 排队就欠载爆音。声明了支持范围的钳进范围；范围未知（WASAPI 软栈的常态）
+/// 也按固定值要——`open_output` 在建流失败时退回 `Default`。
+fn desired_buffer_size(range: &cpal::SupportedBufferSize, rate: u32) -> cpal::BufferSize {
+    let want = (rate * OUTPUT_BUFFER_MS / 1000).max(1);
+    match range {
+        // `clamp` 在 min > max 时 panic：坏驱动报了颠倒范围也别死在引擎线程。
+        cpal::SupportedBufferSize::Range { min, max } => {
+            cpal::BufferSize::Fixed(want.clamp(*min, (*max).max(*min)))
+        }
+        cpal::SupportedBufferSize::Unknown => cpal::BufferSize::Fixed(want),
+    }
+}
+
+/// 建一条输出流（`open_output` 两次尝试共用：先指定缓冲，失败退默认）。
+fn build_stream(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    shared: &Arc<Shared>,
+    tx: &std::sync::mpsc::Sender<EngineCmd>,
+    rate: u32,
+    channels: usize,
+) -> Result<cpal::Stream, cpal::Error> {
+    device.build_output_stream(
+        config,
+        {
+            let shared = shared.clone();
+            let mut eq = crate::engine::eq::Equalizer::new();
+            // 代次哨兵：强制首块读取配置（真代次不可能到 MAX）。
+            let mut eq_seen = u64::MAX;
+            // 上一块结尾欠载：下一块的头端要软化（硬零沿爆音）。
+            let mut starved = false;
+            move |data: &mut [f32], _| {
+                let g = shared.eq_gen.load(Ordering::Acquire);
+                if g != eq_seen
+                    && let Ok(cfg) = shared.eq_config.try_lock()
+                {
+                    eq.configure(&cfg, rate);
+                    eq_seen = g;
+                }
+                output_callback(&shared, &mut eq, &mut starved, data, channels)
+            }
+        },
+        {
+            let tx = tx.clone();
+            move |err| {
+                eprintln!("zeo-player cpal: {err}");
+                let event = match err.kind() {
+                    cpal::ErrorKind::DeviceChanged => DeviceEvent::Rerouted,
+                    cpal::ErrorKind::StreamInvalidated => DeviceEvent::Invalidated,
+                    cpal::ErrorKind::DeviceNotAvailable => DeviceEvent::Lost,
+                    _ => return,
+                };
+                let _ = tx.send(EngineCmd::Device(event));
+            }
+        },
+        None,
+    )
 }
 
 /// 让输出流的运行状态跟随播放状态：停着时暂停流（省空闲 CPU，也让
@@ -1008,7 +1045,9 @@ fn run(
 }
 
 /// 提高引擎线程的调度优先级：CPU 忙时解码线程也能按时把缓冲填上。
-/// （输出回调所在的线程由 cpal / 系统设成实时优先级，这里是喂它的线程。）
+/// （输出回调所在的线程由 cpal / 系统设成实时优先级——WASAPI 上靠 cpal
+/// 的 `realtime` feature 上 MMCSS「Pro Audio」，macOS 由 HAL 的 IO 线程
+/// 自带实时调度；这里是喂它的线程。）
 fn raise_thread_priority() {
     #[cfg(target_os = "macos")]
     {
@@ -1024,11 +1063,11 @@ fn raise_thread_priority() {
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::System::Threading::{
-            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
         };
         // SAFETY: GetCurrentThread 返回当前线程的伪句柄，无需关闭。
         unsafe {
-            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
         }
     }
 }
@@ -2128,6 +2167,31 @@ mod tests {
                 &rg(Some(30.0), None, None, None)
             ),
             4.0
+        );
+    }
+
+    /// 设备缓冲请求：目标 ~40ms；声明了范围的钳进范围，未知的直接要固定值。
+    #[test]
+    fn output_buffer_size_targets_forty_ms() {
+        use cpal::{BufferSize, SupportedBufferSize};
+        // 48 kHz → 1920 帧（40ms），落在范围内不动。
+        assert_eq!(
+            desired_buffer_size(&SupportedBufferSize::Range { min: 15, max: 4096 }, 48_000),
+            BufferSize::Fixed(1920)
+        );
+        // 上限更小 / 下限更高时分别钳到端点。
+        assert_eq!(
+            desired_buffer_size(&SupportedBufferSize::Range { min: 128, max: 1024 }, 48_000),
+            BufferSize::Fixed(1024)
+        );
+        assert_eq!(
+            desired_buffer_size(&SupportedBufferSize::Range { min: 4096, max: 8192 }, 44_100),
+            BufferSize::Fixed(4096)
+        );
+        // 范围未知（WASAPI 软栈常态）也要固定值——失败由调用方退默认。
+        assert_eq!(
+            desired_buffer_size(&SupportedBufferSize::Unknown, 48_000),
+            BufferSize::Fixed(1920)
         );
     }
 
