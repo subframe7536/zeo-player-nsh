@@ -277,6 +277,17 @@ pub enum EngineCmd {
     Device(DeviceEvent),
     /// ReplayGain 设置变了：存进 `rg_config`，当前曲目立即重算增益。
     SetReplayGain(ReplayGainConfig),
+    /// 文件马上要写回标签（原子替换）前释放解码器：丢掉 `Loaded` 让
+    /// 文件句柄关闭——Windows 上打开中的文件不能改名。`done` 通知
+    /// 发送方句柄真的放下了（写文件必须等它）。位置与播放态由发送方
+    /// 记好，`Reload` 传回来。
+    Release {
+        done: std::sync::mpsc::Sender<()>,
+    },
+    /// `Release` 之后、文件已替换：按 `MetaCache` 里的新元数据重载
+    /// 当前曲目（标题 / 封面刷新），seek 回 `position` 秒，恢复
+    /// `playing`。没有当前曲目就不做。
+    Reload { position: f64, playing: bool },
 }
 
 /// 曲目公开状态（跨线程读）：冷字段——换曲 / 封面就绪 / 队列 / 出错
@@ -1174,6 +1185,42 @@ fn handle_cmd(
                     .rg_factor
                     .store(replaygain_factor(&cfg, &l.rg).to_bits(), Ordering::Relaxed);
             }
+        }
+        EngineCmd::Release { done } => {
+            // 暂停输出、丢掉解码器（`Source` 的 drop 关文件）——写回
+            // 标签的原子替换要文件没被打开（Windows 强制）。`track`
+            // 快照不动，界面仍显示当前曲目。
+            shared.playing.store(false, Ordering::Relaxed);
+            *loaded = None;
+            shared.ready.store(false, Ordering::Relaxed);
+            shared.ring.clear();
+            publish_media(shared, media, true);
+            let _ = done.send(());
+        }
+        EngineCmd::Reload { position, playing } => {
+            let Some((path, queue, index)) = ({
+                let t = shared.track.lock().unwrap();
+                t.path
+                    .clone()
+                    .map(|p| (PathBuf::from(p), t.queue.clone(), t.queue_index))
+            }) else {
+                return;
+            };
+            load_track(
+                shared, media, loaded, path, queue, index, dev_rate, dev_channels,
+            );
+            if let Some(l) = loaded.as_mut()
+                && position > 0.0
+                && let Ok(actual) = l.source.seek(position)
+            {
+                reset_ring(shared, actual, dev_rate);
+                l.reset_buffers();
+            }
+            // 装载失败（文件写坏了之类）时保持停止，报出错误。
+            shared
+                .playing
+                .store(playing && loaded.is_some(), Ordering::Relaxed);
+            publish_media(shared, media, true);
         }
     }
 }

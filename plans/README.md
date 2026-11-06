@@ -34,7 +34,7 @@
 | 008 | [Windows 争抢硬件媒体键](008-media-session-preempt.md) | #11 | P1 | M | 004 | DONE（实机验证：LL 键盘钩子争抢生效，激活窗口后媒体键归 Zeo） |
 | 009 | [托盘实时播放状态](009-tray-live-status.md) | #4 | P3 | S | 001 | DONE（按用户调整：托盘图标即播放/暂停按钮；macOS 菜单栏图标旁带曲名） |
 | 010 | [播放统计 + 首页](010-home-and-play-stats.md) | #1 | P2 | L | 001, 005, 007（db 版本顺序） | DONE |
-| 011 | [标签写回核心 + 单曲编辑弹窗](011-tag-write-and-edit-dialog.md) | #8 | P2 | M–L | 003 | TODO |
+| 011 | [标签写回核心 + 单曲编辑弹窗](011-tag-write-and-edit-dialog.md) | #8 | P2 | M–L | 003 | DONE |
 | 012 | [文件夹视图改为标签表格 + 批量编辑](012-folders-tag-table.md) | #8 | P2 | L | 011 | TODO |
 | 013 | [i18n：简中 + 英文](013-i18n.md) | #10 | P2 | L | 全部前序计划 | TODO |
 

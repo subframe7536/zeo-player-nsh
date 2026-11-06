@@ -2,6 +2,7 @@
 //! （曲目列表、详情页头、空曲库、路径工具、搜索结果）在本文件。
 
 mod browse;
+mod edit_info;
 mod folders;
 mod home;
 pub(super) mod playlists;
@@ -21,6 +22,7 @@ use super::theme::*;
 use crate::config::{TrackEntry, library_store};
 
 pub(super) use self::browse::{albums, artists, genres};
+pub(super) use self::edit_info::edit_info_dialog;
 pub(super) use self::folders::folders;
 pub(super) use self::home::home;
 pub(super) use self::settings::dialog as settings_dialog;

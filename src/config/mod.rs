@@ -831,6 +831,38 @@ impl LibraryStore {
         crate::db::later(move || crate::db::move_meta(&rows));
     }
 
+    /// 标签刚被写过的路径：按新文件指纹重读元数据（`MetaCache::entry`
+    /// 指纹变了自动重读并把新条目排进数据库待写队列）、原地换索引
+    /// 条目并重排。读不出来 / 文件没了的路径从索引里摘走（同扫描
+    /// 语义）；不在索引里的路径不加（可能在根目录外或被过滤）。
+    /// 不触发整库重扫。
+    pub fn refresh_paths(&self, paths: &[String]) {
+        let mut tracks = (*self.tracks()).as_slice().to_vec();
+        let mut touched = false;
+        for path in paths {
+            if !tracks.iter().any(|t| t.path == *path) {
+                continue;
+            }
+            match crate::provider::local::read_entry(
+                std::path::Path::new(path),
+                &self.config().genre_separators,
+            ) {
+                Some(entry) => {
+                    if let Some(slot) = tracks.iter_mut().find(|t| t.path == *path) {
+                        *slot = entry;
+                    }
+                }
+                None => tracks.retain(|t| t.path != *path),
+            }
+            touched = true;
+        }
+        if !touched {
+            return;
+        }
+        crate::provider::local::sort_tracks(&mut tracks);
+        *self.tracks.write().unwrap() = Arc::new(tracks);
+    }
+
     pub fn is_scanning(&self) -> bool {
         self.scanning.load(Ordering::Relaxed)
     }

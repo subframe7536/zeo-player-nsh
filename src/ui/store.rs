@@ -150,6 +150,8 @@ pub struct Store {
     pub settings: Signal<bool>,
     /// 「删除文件」的确认弹窗（`Some` 时打开）。
     pub delete_ask: Signal<Option<DeleteAsk>>,
+    /// 「编辑元数据」弹窗打开的曲目路径（`Some` 时打开）。
+    pub edit_info: Signal<Option<String>>,
     /// 主题色覆盖的强调色（`None`：主题默认黑白）；`theme::primary` 读它。
     pub accent: Signal<Option<AdaptiveColor>>,
     /// 「跟随封面」时封面的原始主色调（色相圈、饱和度）——界面底色向它
@@ -251,6 +253,7 @@ pub fn install() -> Store {
         search_open: signal(false),
         settings: signal(false),
         delete_ask: signal(None),
+        edit_info: signal(None),
         accent: signal(None),
         tint: signal(None),
         artist_sel: signal(None),
@@ -1196,6 +1199,21 @@ impl MenuGate {
         }
     }
 
+    /// `combobox` 的 `.on_open_change(..)`：开关请求写回令牌（同
+    /// `select_change`，配 `.open(gate.open())` 用）。
+    pub fn combobox_change(self) -> impl Fn(&nsh_base::ComboboxEvent) + 'static {
+        let (id, open) = (self.id, self.open);
+        move |e| {
+            if let nsh_base::ComboboxEvent::OpenChange(next, _) = e {
+                if *next {
+                    open.set(Some(id));
+                } else if open.get_untracked() == Some(id) {
+                    open.set(None);
+                }
+            }
+        }
+    }
+
     /// `popover` 的 `.open(..)`：它另有自己的开关信号 `local`，弹层开着
     /// 且令牌还在时才显示（令牌被夺走即被挤掉）。
     pub fn open_with(self, local: Signal<bool>) -> impl Fn() -> Option<bool> + 'static {
@@ -1574,6 +1592,55 @@ pub fn progress_fraction() -> f64 {
     } else {
         0.0
     }
+}
+
+// --- 标签写回 ------------------------------------------------------------------
+
+/// 打开「编辑元数据」弹窗（曲目右键菜单 / 全屏「⋯」菜单）。
+pub fn open_edit_info(path: &str) {
+    store().edit_info.set(Some(path.to_owned()));
+}
+
+/// 「编辑元数据」→「保存」：后台线程把 `edits` 原子写回 `path`；成败都经
+/// `done`（回界面侧执行）回报。正在播放的文件先释放解码器再替换、写完
+/// 重载并恢复位置 / 播放态；索引与元数据缓存随后单路径刷新（曲库信号
+/// 由轮询带上，不另外推）。写失败时原文件没动，照常恢复播放。
+pub fn save_tags(
+    path: String,
+    edits: crate::metadata::write::TagEdits,
+    done: impl FnOnce(Result<(), String>) + Send + 'static,
+) {
+    let post = poster();
+    std::thread::spawn(move || {
+        let is_current = player().state().track.path.as_deref() == Some(path.as_str());
+        // Release 同步等待解码器真的放下文件句柄，再开始写。
+        let (position, playing) = if is_current {
+            player().release_current()
+        } else {
+            (0.0, false)
+        };
+        let file = Path::new(&path);
+        let result = crate::metadata::write::write_tags(file, &edits);
+        if result.is_ok() {
+            // 指纹变了：MetaCache 重读并把新条目排进待写队列；索引条目
+            // 原地换新并重排。
+            library_store().refresh_paths(std::slice::from_ref(&path));
+        }
+        if is_current {
+            player().reload_current(position, playing);
+        }
+        post.post(move || {
+            // 当前曲目的详情元数据（`s.meta`）只在换曲时重读——保存后
+            // 同一路径不触发，这里手动刷。
+            if result.is_ok()
+                && store().track.with(|t| t.path.as_deref() == Some(path.as_str()))
+                && let Ok(meta) = MetaCache::global().get(Path::new(&path))
+            {
+                store().meta.set(Some(Same(meta)));
+            }
+            done(result);
+        });
+    });
 }
 
 /// 总时长：1 小时 5 分钟 / 42 分钟。

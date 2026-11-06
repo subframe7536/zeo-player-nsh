@@ -6,6 +6,7 @@
 pub(crate) mod covers;
 pub(crate) mod lyrics;
 pub(crate) mod waveform;
+pub(crate) mod write;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -244,10 +245,10 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
         info.year = number(tag, ItemKey::Year).or_else(|| number(tag, ItemKey::RecordingDate));
         let (track, track_total) = pair(tag, ItemKey::TrackNumber);
         info.track = track;
-        info.track_total = track_total;
+        info.track_total = track_total.or_else(|| number(tag, ItemKey::TrackTotal));
         let (disk, disk_total) = pair(tag, ItemKey::DiscNumber);
         info.disk = disk;
-        info.disk_total = disk_total;
+        info.disk_total = disk_total.or_else(|| number(tag, ItemKey::DiscTotal));
         info.album_artists = strings(tag, ItemKey::AlbumArtist);
         info.composers = strings(tag, ItemKey::Composer);
         info.has_art = !tag.pictures().is_empty();

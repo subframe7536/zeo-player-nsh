@@ -69,6 +69,24 @@ impl Player {
         });
     }
 
+    /// 写回当前曲目文件前释放解码器：阻塞到引擎线程真的丢掉文件句柄
+    /// （Windows 上打开中的文件不能原子替换），返回当时的 `(播放位置, 是否在播)`，
+    /// 由 [`Self::reload`] 传回恢复。当前没有曲目时返回 `(0.0, false)`。
+    pub fn release_current(&self) -> (f64, bool) {
+        let snap = self.state();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.engine.send(EngineCmd::Release { done: tx });
+        let _ = rx.recv();
+        (snap.current_time, snap.is_playing)
+    }
+
+    /// `release_current` 之后、文件已原子替换：重载当前曲目（快照换
+    /// `MetaCache` 里的新元数据，标题 / 封面刷新），seek 回 `position`，
+    /// 恢复 `playing`。写失败了也要调——原文件没动，照常恢复。
+    pub fn reload_current(&self, position: f64, playing: bool) {
+        self.engine.send(EngineCmd::Reload { position, playing });
+    }
+
     /// 恢复上次播放的曲目（暂停在上次的位置）：还没有曲目、文件还在时才做。
     /// 返回是否恢复了。
     pub fn restore_last(&self) -> bool {

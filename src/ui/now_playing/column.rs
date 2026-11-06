@@ -8,7 +8,8 @@ use super::super::components::button::{on_dark, tipped};
 use super::super::components::icons::{Icon, icon, icon_dyn};
 use super::super::components::slider::{SliderStyle, scrub, slider};
 use super::super::store::{
-    format_time, player, progress_fraction, seek_to, set_volume, shown_time, store, toggle_mute,
+    format_time, open_edit_info, player, progress_fraction, seek_to, set_volume, shown_time, store,
+    toggle_mute,
 };
 use super::super::theme::*;
 use super::super::views::playlists;
@@ -342,6 +343,15 @@ fn more_menu() -> AnyElement {
             path().into_iter().collect()
         }))
         .child(menu_separator().h(px(1.0)).my(px(4.0)).bg(border()))
+        .child(item(
+            "编辑元数据…",
+            Icon::Edit,
+            Box::new(move || {
+                if let Some(path) = path() {
+                    open_edit_info(&path);
+                }
+            }),
+        ))
         .child(item(
             REVEAL_LABEL,
             Icon::Reveal,

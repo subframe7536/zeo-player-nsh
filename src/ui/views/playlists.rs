@@ -122,6 +122,11 @@ pub fn track_menu_with(
             })
         }))
         .child(separator())
+        .child(item("编辑元数据…", Some(Icon::Edit), move || {
+            if let Some(p) = path() {
+                store::open_edit_info(&p);
+            }
+        }))
         .child(item(
             super::super::now_playing::REVEAL_LABEL,
             Some(Icon::Reveal),

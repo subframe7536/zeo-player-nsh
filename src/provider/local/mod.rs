@@ -129,7 +129,7 @@ fn passes(duration: f64, size_bytes: u64, config: &LibraryConfig) -> bool {
 }
 
 /// 读一个文件的索引条目；读不出标签/属性的文件跳过。
-fn read_entry(path: &Path, separators: &[String]) -> Option<TrackEntry> {
+pub(crate) fn read_entry(path: &Path, separators: &[String]) -> Option<TrackEntry> {
     let entry = MetaCache::global().entry(path).ok()?;
     Some(track_entry(
         path.to_string_lossy().into_owned(),
@@ -165,7 +165,7 @@ fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> Track
 }
 
 /// 索引顺序：歌手、专辑、碟号、音轨号、标题。
-fn sort_tracks(entries: &mut [TrackEntry]) {
+pub(crate) fn sort_tracks(entries: &mut [TrackEntry]) {
     entries.sort_by(|a, b| {
         a.artist
             .cmp(&b.artist)

@@ -184,14 +184,19 @@ pub fn tab_list() -> TabsElement {
 }
 
 /// shadcn TabsTrigger：`rounded-md px-2 py-1 text-sm font-medium`，选中时
-/// `bg-background shadow-sm`（深色时背景色本身就比 `bg-muted` 暗，不另加描边）。
-/// `glyph` 为前置图标（可无）；图标与文字颜色一样，选中变深。
+/// `bg-background shadow-sm`（深色里 background 与 muted 几乎同亮、白底浮不
+/// 起来，选中片改用亮一档的 `input` 表面）。`glyph` 为前置图标（可无）；
+/// 图标与文字颜色一样，选中变深。
 pub fn tab_trigger(
     on: impl Fn() -> bool + Copy + 'static,
     glyph: Option<Icon>,
     label: &'static str,
     press: impl Fn() + 'static,
 ) -> TabElement {
+    let active_bg = AdaptiveColor {
+        light: bg().light,
+        dark: nsh_base::theme().input.dark,
+    };
     tab()
         .selected(on)
         .accessibility_label(label)
@@ -207,7 +212,13 @@ pub fn tab_trigger(
         .border_color(AdaptiveColor::TRANSPARENT)
         .transition_colors()
         .duration(150.0)
-        .style_with(move |st| if on() { st.bg(bg()).shadow_sm() } else { st })
+        .style_with(move |st| {
+            if on() {
+                st.bg(active_bg).shadow_sm()
+            } else {
+                st
+            }
+        })
         .child(glyph.map(|g| icon(g, 14.0, move || if on() { fg() } else { muted_fg() })))
         .child(
             text(label)

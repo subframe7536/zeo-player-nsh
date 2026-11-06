@@ -747,6 +747,72 @@ fn context_menus_replace_each_other() {
     assert_eq!(app.screen().count("role:menu").unwrap(), 0);
 }
 
+/// 「编辑元数据…」：曲目行右键菜单打开弹窗，「基础元数据」栏各输入框
+/// 预填当前标签值，流派渲染成标签 chip；切「封面」「歌词」栏各见其控件。
+/// 只开不保存（不动共享语料）。
+#[test]
+fn edit_info_dialog_opens_with_current_tags() {
+    let mut app = start(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("文件夹").unwrap();
+    app.wait_for_within("text:测试歌曲", Duration::from_secs(20))
+        .unwrap();
+    app.right_click("label:测试歌曲").unwrap();
+    app.wait_for("role:menuitem[编辑元数据…]").unwrap();
+    app.press("role:menuitem[编辑元数据…]").unwrap();
+    // 弹窗打开：标题行与预填的标签值（语料 sine.flac 的已知标签）。
+    app.wait_for("text:编辑元数据").unwrap();
+    for (label, expect) in [
+        ("标题", "测试歌曲"),
+        ("歌手", "测试歌手 A; 测试歌手 B"),
+        ("专辑", "测试专辑"),
+        ("音轨号", "1"),
+    ] {
+        assert_eq!(
+            app.screen().input_text(&format!("label:{label}")).unwrap(),
+            Some(expect),
+            "{label} 应预填当前标签值"
+        );
+    }
+    // 流派是标签输入器：语料的三个流派各成一个 chip。
+    for chip in ["Rock", "Indie", "Dream Pop"] {
+        assert!(
+            app.screen().count(&format!("text:{chip}")).unwrap() >= 1,
+            "流派 chip {chip} 应预填"
+        );
+    }
+    // 下拉：输入即过滤，首项「添加“…”」自由新增，回车收下成一个 chip。
+    app.type_text("label:流派", "r").unwrap();
+    app.wait_for("role:option").unwrap();
+    app.wait_for("text:添加“r”").unwrap();
+    assert!(app.screen().count("role:option").unwrap() >= 2);
+    // 回车走 keymap（listbox 的 enter 绑定收高亮项）；`submit` 只发输入框
+    // 级 KeyPress 事件、不过 keymap，模拟不了它。
+    app.press_key("enter").unwrap();
+    app.wait_for("text:r").unwrap();
+    assert_eq!(
+        app.screen().input_text("label:流派").unwrap(),
+        Some(""),
+        "新增后查询应清空"
+    );
+    // 「封面」栏有更换按钮；「歌词」栏默认写同名 .lrc（语料有
+    // sine.lrc），多行输入预填文件内容。
+    app.press("label:封面").unwrap();
+    app.wait_for("label:更换图片…").unwrap();
+    app.press("label:歌词").unwrap();
+    app.wait_for("text:保存到").unwrap();
+    let lyrics = app.screen().input_text("label:歌词").unwrap();
+    assert!(
+        lyrics.is_some_and(|t| t.contains("第一句歌词")),
+        "歌词应预填 .lrc 内容，得到 {lyrics:?}"
+    );
+    app.press("label:取消").unwrap();
+    app.wait_for_gone("text:编辑元数据", Duration::from_secs(2))
+        .unwrap();
+}
+
 #[test]
 fn narrow_windows_drop_album_and_size_columns() {
     let mut app = start(1200.0, 800.0);

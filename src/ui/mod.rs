@@ -154,6 +154,10 @@ pub fn App() -> impl IntoElement {
             views::playlists::editor_dialog,
         ))
         .child(when(
+            move || s.edit_info.with(Option::is_some),
+            views::edit_info_dialog,
+        ))
+        .child(when(
             move || s.delete_ask.with(Option::is_some) && !s.hidden.get(),
             delete_prompt,
         ))
