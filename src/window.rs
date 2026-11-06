@@ -260,17 +260,131 @@ fn install_tray_handlers() {
     tray_icon::TrayIconEvent::set_event_handler(Some(
         |event: tray_icon::TrayIconEvent| match event {
             // 左键点图标 = 播放 / 暂停（两平台一致；右键出菜单，
-            // `menu_on_right_click` 默认开）。
+            // `menu_on_right_click` 默认开）。双击序列里也带 Click(Up)
+            // （Windows：Up → DblClk → Up；macOS 不发 DoubleClick，是
+            // 两个 Up），所以 Toggle 先挂起一个系统双击时长——期内来了
+            // 第二击改判双击：发 Show（两平台一致）并吞掉尾巴上的 Up。
             tray_icon::TrayIconEvent::Click {
                 button: tray_icon::MouseButton::Left,
                 button_state: tray_icon::MouseButtonState::Up,
                 ..
-            } => push_tray(TrayAction::Toggle),
-            // Windows：双击 = 打开窗口。
-            tray_icon::TrayIconEvent::DoubleClick { .. } => push_tray(TrayAction::Show),
+            } => left_click_up(),
+            tray_icon::TrayIconEvent::DoubleClick {
+                button: tray_icon::MouseButton::Left,
+                ..
+            } => double_click(),
             _ => {}
         },
     ));
+}
+
+/// 单击 / 双击判别（纯状态机，可单测）。
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[derive(Default)]
+struct ClickDebounce {
+    /// 已派单未发的单击代次。
+    armed: Option<u64>,
+    /// 吞掉 Click(Up) 的截止时刻（双击尾巴；单调递增代次让晚到的
+    /// 计时器不会误发新派的单击）。
+    swallow_until: Option<std::time::Instant>,
+    seq: u64,
+}
+
+/// `on_up` 的裁决。
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[derive(Debug, PartialEq, Eq)]
+enum UpDecision {
+    /// 派一个延时单击：到点无第二击发 Toggle。
+    Arm(u64),
+    /// 双击尾巴上的 Up：吞掉。
+    Swallow,
+    /// 双击（第二个 Up）：发 Show。
+    Double,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+impl ClickDebounce {
+    fn on_up(&mut self, now: std::time::Instant, window: std::time::Duration) -> UpDecision {
+        if self.swallow_until.is_some_and(|t| now < t) {
+            return UpDecision::Swallow;
+        }
+        if self.armed.take().is_some() {
+            self.swallow_until = Some(now + window);
+            return UpDecision::Double;
+        }
+        self.seq += 1;
+        self.armed = Some(self.seq);
+        UpDecision::Arm(self.seq)
+    }
+
+    fn on_double(&mut self, now: std::time::Instant, window: std::time::Duration) {
+        self.armed = None;
+        self.swallow_until = Some(now + window);
+    }
+
+    /// 延时到点：仍是当前代次才发（`true`）。
+    fn disarm(&mut self, seq: u64) -> bool {
+        if self.armed == Some(seq) {
+            self.armed = None;
+            return true;
+        }
+        false
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+static CLICK: std::sync::Mutex<ClickDebounce> = std::sync::Mutex::new(ClickDebounce {
+    armed: None,
+    swallow_until: None,
+    seq: 0,
+});
+
+/// 系统双击时长（Windows 控制面板 / macOS 辅助功能里可调）。
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn dbl_click_time() -> std::time::Duration {
+    #[cfg(target_os = "windows")]
+    {
+        // SAFETY: 无参系统查询。
+        let ms =
+            unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
+        return std::time::Duration::from_millis(u64::from(ms.max(1)));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let secs = objc2_app_kit::NSEvent::doubleClickInterval();
+        return std::time::Duration::from_secs_f64(secs.clamp(0.05, 2.0));
+    }
+    #[allow(unreachable_code)]
+    std::time::Duration::from_millis(400)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn left_click_up() {
+    let window = dbl_click_time();
+    let seq = match CLICK
+        .lock()
+        .unwrap()
+        .on_up(std::time::Instant::now(), window)
+    {
+        UpDecision::Swallow => return,
+        UpDecision::Double => return push_tray(TrayAction::Show),
+        UpDecision::Arm(seq) => seq,
+    };
+    std::thread::spawn(move || {
+        std::thread::sleep(window);
+        if CLICK.lock().unwrap().disarm(seq) {
+            push_tray(TrayAction::Toggle);
+        }
+    });
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn double_click() {
+    CLICK
+        .lock()
+        .unwrap()
+        .on_double(std::time::Instant::now(), dbl_click_time());
+    push_tray(TrayAction::Show);
 }
 
 /// 启动：挂上关闭拦截、创建托盘图标。可以多次调用（只做一次）。
@@ -1459,6 +1573,49 @@ mod tests {
         assert_eq!(truncate_width("short", 10), "short");
         assert_eq!(truncate_width("abcdefghijkl", 10), "abcdefghi…");
         assert_eq!(truncate_width("一二三四五六", 5), "一二…");
+    }
+
+    /// 单击 / 双击判别：单 Up 派延时单击、到点可发；双击序列
+    /// （Windows Up→DblClk→Up、macOS Up→Up）里第二击改判 Show、
+    /// 尾巴上的 Up 被吞。
+    #[test]
+    fn click_debounce_single_vs_double() {
+        let w = std::time::Duration::from_millis(400);
+        let t0 = std::time::Instant::now();
+        // 单击：Arm → 到点 disarm 成功。
+        let mut d = ClickDebounce::default();
+        let UpDecision::Arm(seq) = d.on_up(t0, w) else {
+            panic!("单击应派单")
+        };
+        assert!(d.disarm(seq));
+        // Windows 双击：Up(Arm) → DblClk → Up(Swallow)。
+        let mut d = ClickDebounce::default();
+        assert!(matches!(d.on_up(t0, w), UpDecision::Arm(_)));
+        d.on_double(t0 + w / 2, w);
+        assert_eq!(
+            d.on_up(t0 + w / 2 + std::time::Duration::from_millis(20), w),
+            UpDecision::Swallow
+        );
+        // macOS 双击：Up(Arm) → Up(Double) → 再来的 Up 仍吞。
+        let mut d = ClickDebounce::default();
+        assert!(matches!(d.on_up(t0, w), UpDecision::Arm(_)));
+        assert_eq!(d.on_up(t0 + w / 2, w), UpDecision::Double);
+        assert_eq!(
+            d.on_up(t0 + w / 2 + std::time::Duration::from_millis(20), w),
+            UpDecision::Swallow
+        );
+        // 晚到的单击计时器不会误发新派的单击（代次校验）。
+        let mut d = ClickDebounce::default();
+        let UpDecision::Arm(seq1) = d.on_up(t0, w) else {
+            panic!()
+        };
+        d.on_double(t0 + w / 2, w);
+        assert!(!d.disarm(seq1), "旧代次不得再发");
+        let UpDecision::Arm(seq2) = d.on_up(t0 + w * 2, w) else {
+            panic!("窗口期外的 Up 应重新派单")
+        };
+        assert_ne!(seq1, seq2);
+        assert!(d.disarm(seq2));
     }
 
     #[test]

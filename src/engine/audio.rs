@@ -287,7 +287,10 @@ pub enum EngineCmd {
     /// `Release` 之后、文件已替换：按 `MetaCache` 里的新元数据重载
     /// 当前曲目（标题 / 封面刷新），seek 回 `position` 秒，恢复
     /// `playing`。没有当前曲目就不做。
-    Reload { position: f64, playing: bool },
+    Reload {
+        position: f64,
+        playing: bool,
+    },
 }
 
 /// 曲目公开状态（跨线程读）：冷字段——换曲 / 封面就绪 / 队列 / 出错
@@ -463,7 +466,7 @@ struct Loaded {
     /// 缓冲放不下的已解码样本（下一轮先送这些）。
     backlog: Vec<f32>,
     src_channels: usize,
-    /// 解码到了文件末尾：等缓冲里的尾巴播完再换下一首。
+    /// 解码到了文件末尾且没预取到下一首：等缓冲里的尾巴播完再换。
     drain: Option<Drain>,
     /// 封面还没生成（缓冲先填起来再做，免得开头卡住）。
     cover_pending: bool,
@@ -471,6 +474,25 @@ struct Loaded {
     rg: crate::metadata::ReplayGain,
     /// 本次装载已记过播放统计（每次装载最多记一次）。
     counted: bool,
+    /// 本曲已解完、正在推 `next` 的样本（换曲边界还没播到）。
+    eof: bool,
+    /// 换曲边界在 `played` 计数里的下标：本曲最后一样本的输出位置。
+    /// 播到它时 `next` 转正（无缝换曲——尾巴还没播完下一首的样本
+    /// 就已经排进缓冲了）。
+    boundary: Option<u64>,
+    /// 已预取的下一首：本曲解码到尾时立刻打开，样本直接接着推进
+    /// 同一环形缓冲——曲间不再有排空再装载的空档。
+    next: Option<NextTrack>,
+}
+
+/// 预取的下一首：源、重采样、RG 标签与要发布的曲目快照都先备好，
+/// 边界一到只需换指针。
+struct NextTrack {
+    source: Source,
+    resampler: Option<ResamplerState>,
+    src_channels: usize,
+    rg: crate::metadata::ReplayGain,
+    public: TrackPublic,
 }
 
 /// 文件解码完、等缓冲播空的状态（`len` 最近的缓冲长度，`since` 它最后
@@ -481,11 +503,15 @@ struct Drain {
 }
 
 impl Loaded {
-    /// 作废暂存（seek / 停止后）。
+    /// 作废暂存（seek / 停止后）：预取的下一首一并丢掉——位置变了
+    /// 边界就不算了，下一首要按新位置重新预取。
     fn reset_buffers(&mut self) {
         self.carry.clear();
         self.backlog.clear();
         self.drain = None;
+        self.next = None;
+        self.eof = false;
+        self.boundary = None;
         if let Some(r) = self.resampler.as_mut() {
             // 清空延迟线与暂存，跳转点之前的样本不再输出。
             r.reset();
@@ -593,6 +619,8 @@ fn open_output(
                         let mut eq = crate::engine::eq::Equalizer::new();
                         // 代次哨兵：强制首块读取配置（真代次不可能到 MAX）。
                         let mut eq_seen = u64::MAX;
+                        // 上一块结尾欠载：下一块的头端要软化（硬零沿爆音）。
+                        let mut starved = false;
                         move |data: &mut [f32], _| {
                             let g = shared.eq_gen.load(Ordering::Acquire);
                             if g != eq_seen
@@ -601,7 +629,7 @@ fn open_output(
                                 eq.configure(&cfg, rate);
                                 eq_seen = g;
                             }
-                            output_callback(&shared, &mut eq, data, channels)
+                            output_callback(&shared, &mut eq, &mut starved, data, channels)
                         }
                     },
                     {
@@ -835,23 +863,50 @@ fn run(
                         break;
                     }
                     result = fill_ring(l, &shared, out.channels);
-                    if !matches!(result, Ok(false)) {
-                        break;
+                    match result {
+                        Ok(false) => continue,
+                        Err(_) => break,
+                        Ok(true) => {
+                            if l.eof {
+                                // 预取源也到尾了（曲目极短）：边界转正
+                                // 后下一轮再预取下下一首。
+                                l.drain = Some(Drain {
+                                    len: shared.ring.len(),
+                                    since: Instant::now(),
+                                });
+                            } else if let Some(next) =
+                                prefetch_next(&shared, out.rate, out.channels)
+                            {
+                                // 本曲到尾：下一首已备好，边界记下后接着
+                                // 推进同一缓冲——尾巴播完自然换曲。
+                                let left = (shared.ring.len() / out.channels.max(1)) as u64;
+                                l.boundary = Some(shared.played.load(Ordering::Relaxed) + left);
+                                l.next = Some(next);
+                                l.eof = true;
+                                continue;
+                            } else {
+                                // 没有下一首 / 打不开：退回排空再换的老路。
+                                l.drain = Some(Drain {
+                                    len: shared.ring.len(),
+                                    since: Instant::now(),
+                                });
+                            }
+                            break;
+                        }
                     }
                 }
-                match result {
-                    Ok(true) => {
-                        l.drain = Some(Drain {
-                            len: shared.ring.len(),
-                            since: Instant::now(),
-                        })
-                    }
-                    Ok(false) => {}
-                    Err(err) => {
-                        set_error(&shared, &err);
-                        shared.playing.store(false, Ordering::Relaxed);
-                    }
+                if let Err(err) = result {
+                    set_error(&shared, &err);
+                    shared.playing.store(false, Ordering::Relaxed);
                 }
+            }
+            // 无缝换曲边界：本曲尾巴播到，`next` 转正（输出停摆时立即
+            // 转正——反正也播不出位置偏差）。
+            if l.boundary.is_some()
+                && (out.stream.is_none()
+                    || shared.played.load(Ordering::Relaxed) >= l.boundary.unwrap_or(0))
+            {
+                complete_switch(l, &shared, &media);
             }
             // 封面等缓冲有了一半再生成（第一次要读标签、缩放、模糊，CPU 忙时
             // 可能要几百毫秒）。
@@ -1155,6 +1210,12 @@ fn handle_cmd(
             }
             t.queue = queue;
             *slot = Arc::new(t);
+            // 顺序变了：预取的「下一首」可能已不是它，丢掉重预取。
+            if let Some(l) = loaded.as_mut() {
+                l.next = None;
+                l.eof = false;
+                l.boundary = None;
+            }
         }
         EngineCmd::QueueAdd(paths) => {
             // 追加进原始队列后按当前循环模式重算顺序；当前曲目挪到它在
@@ -1174,6 +1235,12 @@ fn handle_cmd(
             }
             t.queue = queue;
             *slot = Arc::new(t);
+            // 队列变了：预取的「下一首」可能已不是它，丢掉重预取。
+            if let Some(l) = loaded.as_mut() {
+                l.next = None;
+                l.eof = false;
+                l.boundary = None;
+            }
         }
         // 设备事件在主循环里先拦截（见 run），不会走到这里。
         EngineCmd::Device(_) => {}
@@ -1207,7 +1274,14 @@ fn handle_cmd(
                 return;
             };
             load_track(
-                shared, media, loaded, path, queue, index, dev_rate, dev_channels,
+                shared,
+                media,
+                loaded,
+                path,
+                queue,
+                index,
+                dev_rate,
+                dev_channels,
             );
             if let Some(l) = loaded.as_mut()
                 && position > 0.0
@@ -1342,6 +1416,9 @@ fn load_track(
                 cover_pending: true,
                 rg,
                 counted: false,
+                eof: false,
+                boundary: None,
+                next: None,
             });
 
             let actual_index = if queue_index_hint >= 0 {
@@ -1356,20 +1433,8 @@ fn load_track(
             // 封面已在内存（队尾预载 / 播过的大图 URI）就直接进快照：
             // 同一帧里曲目信息与封面一起换，界面不会闪占位符；后台
             // `load_covers` 照旧跑（色调补算、媒体会话、冷缓存生成）。
-            let artwork = crate::metadata::covers::cached_artwork(&path);
-            // 大图是按需读元数据生成的 data URI，不落盘。
-            *shared.track.lock().unwrap() = Arc::new(TrackPublic {
-                path: Some(path.to_string_lossy().into_owned()),
-                title: meta.title.clone(),
-                artist: meta.artist.clone(),
-                album: meta.album.clone(),
-                covers_ready: artwork.is_some(),
-                artwork,
-                duration: meta.duration,
-                queue,
-                queue_index: actual_index,
-                error: None,
-            });
+            *shared.track.lock().unwrap() =
+                Arc::new(track_public(&path, &meta, queue, actual_index));
             shared.ready.store(true, Ordering::Relaxed);
             // 封面由引擎循环在缓冲填起来之后生成（`load_covers`）；媒体
             // 会话的封面在 `publish` 里现查缓存，不用单独喂。
@@ -1378,6 +1443,120 @@ fn load_track(
         Err(err) => set_error(shared, &err),
     }
     shared.loading.store(false, Ordering::Relaxed);
+}
+
+/// 曲目的公开快照（装载与无缝换曲共用）：封面现查大图缓存——在内存
+/// （队尾预载 / 预热 / 播过）就直接带上，没有由 cover 线程后补；
+/// 大图是按需读元数据生成的 data URI，不落盘。
+fn track_public(
+    path: &std::path::Path,
+    meta: &crate::metadata::MetaInfo,
+    queue: Arc<Vec<String>>,
+    queue_index: i64,
+) -> TrackPublic {
+    let artwork = crate::metadata::covers::cached_artwork(path);
+    TrackPublic {
+        path: Some(path.to_string_lossy().into_owned()),
+        title: meta.title.clone(),
+        artist: meta.artist.clone(),
+        album: meta.album.clone(),
+        covers_ready: artwork.is_some(),
+        artwork,
+        duration: meta.duration,
+        queue,
+        queue_index,
+        error: None,
+    }
+}
+
+/// 预取下一首（引擎线程，本曲尾巴还在播时调）：按循环模式定目标，
+/// 读元数据、打开解码器、备好重采样器与曲目快照；封面另起线程预热，
+/// 边界转正时 `cached_artwork` 多半已经命中。`None` = 没法定或打
+/// 不开（走 `drain` 老路，`load_track` 会原样报错）。
+fn prefetch_next(shared: &Arc<Shared>, dev_rate: u32, dev_channels: usize) -> Option<NextTrack> {
+    let (queue, index) = {
+        let t = shared.track.lock().unwrap();
+        (t.queue.clone(), t.queue_index)
+    };
+    let next_index = advance(index, queue.len(), shared.loop_mode(), true)?;
+    let path = PathBuf::from(queue.get(next_index as usize)?.clone());
+    let meta = MetaCache::global().get(&path).ok()?;
+    let source = Source::open(&path).ok()?;
+    let resampler = if source.sample_rate != dev_rate {
+        match ResamplerState::new(source.sample_rate, dev_rate, dev_channels) {
+            Ok(r) => Some(r),
+            Err(_) => return None,
+        }
+    } else {
+        None
+    };
+    let rg = if meta.replaygain.is_empty() {
+        crate::metadata::read_replaygain(&path)
+    } else {
+        meta.replaygain
+    };
+    warm_covers(&path);
+    let src_channels = source.channels;
+    Some(NextTrack {
+        source,
+        resampler,
+        src_channels,
+        rg,
+        public: track_public(&path, &meta, queue, next_index),
+    })
+}
+
+/// 给下一首预热封面：大图 URI 与列表封面文件都生成好（纯生成、不碰
+/// 共享状态）——边界转正时快照就能带上封面，少一帧占位符。
+fn warm_covers(path: &std::path::Path) {
+    let path = path.to_path_buf();
+    std::thread::spawn(move || {
+        let _ = crate::metadata::covers::artwork_uri(&path);
+        let _ = crate::metadata::covers::list_cover_pub(&path);
+    });
+}
+
+/// 无缝换曲的边界到了：预取的 `next` 转正。`played` 是「本曲播出位置」
+/// 的累计帧计数——原子减去边界，回调在边界后推过的帧数正好续成新曲
+/// 位置；`listened` 同理归零（多播出的尾巴帧直接继承成新曲收听量）。
+fn complete_switch(l: &mut Loaded, shared: &Arc<Shared>, media: &MediaSession) {
+    let Some(next) = l.next.take() else {
+        l.eof = false;
+        l.boundary = None;
+        return;
+    };
+    // 输出停摆时立即转正的边界可能还没播到：按当前位置钳一下再减。
+    let boundary = l
+        .boundary
+        .take()
+        .unwrap_or(0)
+        .min(shared.played.load(Ordering::Relaxed));
+    let prev = shared.played.fetch_sub(boundary, Ordering::Relaxed);
+    shared
+        .listened
+        .store(prev.saturating_sub(boundary), Ordering::Relaxed);
+    l.source = next.source;
+    l.resampler = next.resampler;
+    l.src_channels = next.src_channels;
+    l.rg = next.rg;
+    let cfg = *shared.rg_config.lock().unwrap_or_else(|e| e.into_inner());
+    shared
+        .rg_factor
+        .store(replaygain_factor(&cfg, &l.rg).to_bits(), Ordering::Relaxed);
+    l.eof = false;
+    l.drain = None;
+    l.counted = false;
+    l.cover_pending = true;
+    let mut public = next.public;
+    // 预热多半已把大图做进缓存：转正时再查一次，少一帧占位符。
+    if public.artwork.is_none()
+        && let Some(path) = public.path.as_deref().map(PathBuf::from)
+    {
+        public.artwork = crate::metadata::covers::cached_artwork(&path);
+        public.covers_ready = public.artwork.is_some();
+    }
+    *shared.track.lock().unwrap() = Arc::new(public);
+    publish_media(shared, media, true);
 }
 
 /// 给当前曲目生成封面：720 px 的 JPEG `data:` URI（界面显示用，实时读
@@ -1438,8 +1617,9 @@ fn set_error(shared: &Arc<Shared>, message: &str) {
     *slot = Arc::new(t);
 }
 
-/// 解码一块并写入环形缓冲；返回 Ok(true) 表示自然结束。缓冲放不下的部分
-/// 留在 `backlog`，下次先送；`backlog` 还没送完时不解码新包。
+/// 解码一块并写入环形缓冲；返回 Ok(true) 表示当前数据源到尾。缓冲
+/// 放不下的部分留在 `backlog`，下次先送；`backlog` 还没送完时不解码
+/// 新包。`l.eof` 后数据源换成预取的 `next`（同一缓冲接着推，无缝）。
 fn fill_ring(l: &mut Loaded, shared: &Arc<Shared>, dev_channels: usize) -> Result<bool, String> {
     if !l.backlog.is_empty() {
         let n = shared.ring.push(&l.backlog, dev_channels);
@@ -1448,16 +1628,22 @@ fn fill_ring(l: &mut Loaded, shared: &Arc<Shared>, dev_channels: usize) -> Resul
             return Ok(false);
         }
     }
-    let Some(block) = l.source.next_block()? else {
+    let (src, src_channels, resampler) = if l.eof {
+        let next = l.next.as_mut().expect("eof 时 next 必在");
+        (&mut next.source, next.src_channels, &mut next.resampler)
+    } else {
+        (&mut l.source, l.src_channels, &mut l.resampler)
+    };
+    let Some(block) = src.next_block()? else {
         return Ok(true);
     };
-    if block.len() / l.src_channels.max(1) == 0 {
+    if block.len() / src_channels.max(1) == 0 {
         return Ok(false);
     }
     // 1) 声道数转换 → dev_channels
-    convert_channels(block, l.src_channels, dev_channels, &mut l.carry);
+    convert_channels(block, src_channels, dev_channels, &mut l.carry);
     // 2) 重采样或直通
-    let samples = if let Some(r) = l.resampler.as_mut() {
+    let samples = if let Some(r) = resampler.as_mut() {
         l.out.clear();
         r.push(&l.carry, &mut l.out)?;
         &l.out
@@ -1543,6 +1729,7 @@ fn fade_step(ms: u32, rate: u32) -> f32 {
 fn output_callback(
     shared: &Shared,
     eq: &mut crate::engine::eq::Equalizer,
+    starved: &mut bool,
     data: &mut [f32],
     channels: usize,
 ) {
@@ -1573,6 +1760,30 @@ fn output_callback(
             }
             *x = (*x * rg * volume * fade_curve(gain)).clamp(-1.0, 1.0);
         }
+        // 欠载沿软化（~2ms）：缓冲没填满时给尾巴拉到 0、续播头端从 0
+        // 拉回——硬零沿会咔哒。只在欠载边界动数据，正常播放无感。
+        if take > 0 {
+            let edge =
+                ((shared.dev_rate.load(Ordering::Relaxed) / 500).max(1) as usize).min(take / ch);
+            if *starved {
+                for f in 0..edge {
+                    let g = fade_curve(f as f32 / edge as f32);
+                    for c in 0..ch {
+                        data[f * ch + c] *= g;
+                    }
+                }
+            }
+            if take < data.len() {
+                let last = take / ch;
+                for f in 0..edge {
+                    let g = fade_curve(1.0 - f as f32 / edge as f32);
+                    for c in 0..ch {
+                        data[(last - 1 - f) * ch + c] *= g;
+                    }
+                }
+            }
+        }
+        *starved = take < data.len();
         // 缓冲空了（还没解出来）也照样推进淡出，不让引擎干等。
         if take == 0 && target < gain {
             gain = (gain - step * (data.len() / ch) as f32).max(target);
@@ -1642,20 +1853,21 @@ mod tests {
         };
         // 100 ms 后到一半（smoothstep(0.5) = 0.5），200 ms 后满。
         let mut eq = crate::engine::eq::Equalizer::new();
+        let mut starved = false;
         let mut buf = vec![0.0_f32; 4800 * 2];
-        output_callback(&shared, &mut eq, &mut buf, 2);
+        output_callback(&shared, &mut eq, &mut starved, &mut buf, 2);
         assert!(
             (buf[buf.len() - 1] - 0.5).abs() < 0.01,
             "{}",
             buf[buf.len() - 1]
         );
         assert!(buf.windows(2).all(|w| w[1] >= w[0] - 1e-6), "淡入单调");
-        output_callback(&shared, &mut eq, &mut buf, 2);
+        output_callback(&shared, &mut eq, &mut starved, &mut buf, 2);
         assert!((buf[buf.len() - 1] - 1.0).abs() < 1e-3);
         // 淡出：目标 0，200 ms 后静音。
         shared.fade_target.store(0f32.to_bits(), Ordering::Relaxed);
         let mut long = vec![0.0_f32; 9600 * 2];
-        output_callback(&shared, &mut eq, &mut long, 2);
+        output_callback(&shared, &mut eq, &mut starved, &mut long, 2);
         assert!(
             long[long.len() - 1].abs() < 1e-6
                 && f32::from_bits(shared.gain.load(Ordering::Relaxed)) == 0.0

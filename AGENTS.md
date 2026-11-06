@@ -41,6 +41,9 @@ ZeoPlayer is a local-first desktop music player written as a pure-Rust NSH (Nati
   ```
   标题栏 logo 直接嵌 `icon.svg`（`ui::components::icons::logo_svg`）。换图标改 `icon.svg` 并重渲染两张 PNG。
 - 引擎停着时把 cpal 输出流也停下（`audio.rs` 的 `sync_stream` 让 `Output.running` 跟随 `playing`）：省空闲 CPU，且让 Windows 音频会话如实呈非活动态。改动输出流生命周期（`open_output`、重建、重试）时保持这个跟随——重建出的流若在暂停态要立即 `pause()`。
+- 曲间无缝：本曲解码到尾时引擎立刻 `prefetch_next`（打开下一首的解码器 / 重采样 / 元数据快照），记下「当前已播帧数 + 缓冲余量」为 `boundary`，接着把下一首的样本推进同一环形缓冲；`played` 数到边界时 `complete_switch` 把 `next` 转正（`played`/`listened` 原子减去边界续成新曲位置）。seek / 停止 / 队列变更 / 循环模式变更一律 `reset_buffers` 丢预取（位置或顺序变了边界就不算）。预取失败退回 `drain` 排空再 `load_track` 的老路，错误 UX 不变。输出回调另有一条 `starved` 欠载沿软化（~2ms 淡入 / 淡出），缓冲断档时不再出硬零沿爆音。
+- EQ（`engine/eq.rs`）：RBJ peaking biquad ×10，`configure` 不直接换系数——系数朝目标 ~5ms 线性渐变、滤波器状态不清零，拖推子 / 换预设不爆音；`headroom_db` 按各段合成幅频响应峰值折算进前级，纯提升配置不再无谓削波；输入侧做非规格化数冲刷。回调侧靠 `eq_gen` 代次发现配置变更，`try_lock` 读配置（拿不到就下一块再读），实时路径不阻塞。
+- 托盘双击（`window.rs`）：`tray-icon` 的 `DoubleClick` 只在 Windows 发（序列是 `Up→DblClk→Up`，两个 Up 都会误触播放/暂停），macOS 双击就是两个 `Up`。应用在 `ClickDebounce` 里自己分类：左键 `Up` 先挂起一个系统双击时长的延迟 Toggle（macOS `NSEvent::doubleClickInterval` / Windows `GetDoubleClickTime`），期间再来 `DblClk` 或第二个 `Up` 改判双击 → 发 `Show` 并吞掉尾巴的 `Up`；`seq` 单调递增令牌防定时器串扰（`click_debounce_single_vs_double` 单测覆盖）。
 - Windows 媒体键争抢（issue #11）：实机取证证明症状**不是 SMTC 会话选择问题**——`GetCurrentSession` 已正确指回 `dev.subf.zeo-player`，但 AIMP 用 `WH_KEYBOARD_LL` 钩子吞掉了硬件媒体键（`RegisterHotKey` 这一层争不过吞键钩子）。Zeo 在同一层对抗：`window.rs` 的 `media_hook_thread`（线程 `zeo-player-kbhook`）装自己的 LL 钩子，截下 4 个媒体 VK 转 `Player` 命令并吞键（不碰 SMTC，不会与 playwire 回调双触发）；`proc` 的 `WM_ACTIVATE` 给钩子线程投 `WM_REHOOK_MEDIA` 重挂钩子回链首（LL 钩子后装先调）——语义是「最后聚焦的播放器拿键」。音量浮层未取证（本机注入音量键不弹层）。
 
 ## Commands

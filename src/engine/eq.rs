@@ -67,15 +67,79 @@ pub const PRESETS: &[(&str, [f32; 10])] = &[
     ),
 ];
 
-/// 一段的系数与逐声道状态（Transposed Direct Form II）。
+/// 直通系数（b0=1，其余 0）：段的「关」不是不处理，而是渐变成恒等，
+/// 渐变走完才置 `on=false`——开 / 关段、开关 EQ、拖推子都没有系数突变。
+const IDENTITY: [f32; 5] = [1.0, 0.0, 0.0, 0.0, 0.0];
+
+/// 系数渐变的时长占比（≈5 ms）：够盖掉爆音，又短到拖推子跟手。
+const RAMP_DIVISOR: u32 = 200;
+
+/// RBJ cookbook peaking EQ；返回已除 a0 的系数（b0,b1,b2,a1,a2）。
+fn peaking(f0: f32, rate: f32, db: f32) -> [f32; 5] {
+    let a = 10f32.powf(db / 40.0);
+    let w0 = 2.0 * std::f32::consts::PI * f0 / rate;
+    let alpha = w0.sin() / (2.0 * Q);
+    let cos = w0.cos();
+    let a0 = 1.0 + alpha / a;
+    [
+        (1.0 + alpha * a) / a0,
+        -2.0 * cos / a0,
+        (1.0 - alpha * a) / a0,
+        -2.0 * cos / a0,
+        (1.0 - alpha / a) / a0,
+    ]
+}
+
+/// 一组双二阶在 `rate` 下的合成幅频响应峰值（dB）：采样各段中心、
+/// 相邻几何中点与频带两端。前级按它下压，让 EQ 的提升不会把输出
+/// 推过满幅——不然推子只要往上，响处就被 ±1 硬削出失真。
+fn combined_headroom_db(tgts: &[[f32; 5]; 10], rate: f32) -> f32 {
+    let mut freqs: Vec<f32> = Vec::with_capacity(22);
+    freqs.push(20.0f32.min(0.45 * rate));
+    for (i, &f0) in BANDS.iter().enumerate() {
+        freqs.push(f0.min(0.45 * rate));
+        if let Some(&next) = BANDS.get(i + 1) {
+            freqs.push((f0 * next).sqrt().min(0.45 * rate));
+        }
+    }
+    freqs.push(20_000.0f32.min(0.45 * rate));
+    let mut max_db = 0.0_f64;
+    for f in freqs {
+        let w = f64::from(2.0 * std::f32::consts::PI * f / rate);
+        let (c1, c2) = (w.cos(), (2.0 * w).cos());
+        let mut mag2 = 1.0_f64;
+        for c in tgts {
+            if *c == IDENTITY {
+                continue;
+            }
+            let (b0, b1, b2, a1, a2) = (
+                f64::from(c[0]),
+                f64::from(c[1]),
+                f64::from(c[2]),
+                f64::from(c[3]),
+                f64::from(c[4]),
+            );
+            let num =
+                b0 * b0 + b1 * b1 + b2 * b2 + 2.0 * (b0 * b1 + b1 * b2) * c1 + 2.0 * b0 * b2 * c2;
+            let den = 1.0 + a1 * a1 + a2 * a2 + 2.0 * (a1 + a1 * a2) * c1 + 2.0 * a2 * c2;
+            mag2 *= num / den.max(1e-12);
+        }
+        max_db = max_db.max(10.0 * mag2.log10());
+    }
+    (max_db.max(0.0)) as f32
+}
+
+/// 一段的系数与逐声道状态（Transposed Direct Form II）。系数朝 `tgt`
+/// 逐帧渐变（`Equalizer::ramp_left` 计帧），滤波器状态 z1/z2 改参数
+/// 时不清零——渐变期间的瞬态远小于状态清零 + 系数突变。
 #[derive(Clone, Copy)]
 struct Band {
+    /// 是否参与处理（渐变成恒等的过程中保持 true）。
     on: bool,
-    b0: f32,
-    b1: f32,
-    b2: f32,
-    a1: f32,
-    a2: f32,
+    /// 当前系数（b0,b1,b2,a1,a2，已除 a0）；`on=false` 时恒为 `IDENTITY`。
+    coef: [f32; 5],
+    tgt: [f32; 5],
+    step: [f32; 5],
     z1: [f32; MAX_CHANNELS],
     z2: [f32; MAX_CHANNELS],
 }
@@ -84,30 +148,9 @@ impl Band {
     fn off() -> Band {
         Band {
             on: false,
-            b0: 0.0,
-            b1: 0.0,
-            b2: 0.0,
-            a1: 0.0,
-            a2: 0.0,
-            z1: [0.0; MAX_CHANNELS],
-            z2: [0.0; MAX_CHANNELS],
-        }
-    }
-
-    /// RBJ cookbook peaking EQ；返回已除 a0 的系数。
-    fn peaking(f0: f32, rate: f32, db: f32) -> Band {
-        let a = 10f32.powf(db / 40.0);
-        let w0 = 2.0 * std::f32::consts::PI * f0 / rate;
-        let alpha = w0.sin() / (2.0 * Q);
-        let cos = w0.cos();
-        let a0 = 1.0 + alpha / a;
-        Band {
-            on: true,
-            b0: (1.0 + alpha * a) / a0,
-            b1: -2.0 * cos / a0,
-            b2: (1.0 - alpha * a) / a0,
-            a1: -2.0 * cos / a0,
-            a2: (1.0 - alpha / a) / a0,
+            coef: IDENTITY,
+            tgt: IDENTITY,
+            step: [0.0; 5],
             z1: [0.0; MAX_CHANNELS],
             z2: [0.0; MAX_CHANNELS],
         }
@@ -116,10 +159,16 @@ impl Band {
 
 /// 回调侧的 EQ 实例：随输出流创建，按该流的采样率配置。
 pub struct Equalizer {
-    /// 前级线性增益。
+    /// 前级线性增益（渐变中逐帧逼近 `preamp_tgt`）。
     preamp: f32,
+    preamp_tgt: f32,
+    preamp_step: f32,
     bands: [Band; 10],
-    /// `false` = 完全旁路（配置为平直或关闭）。
+    /// 剩余渐变帧数（0 = 系数已在目标上）。
+    ramp_left: u32,
+    /// 渐变收尾后回到旁路（关闭 / 平直配置的过渡）。
+    deactivating: bool,
+    /// `false` = 完全旁路（配置为平直或关闭，且过渡已走完）。
     active: bool,
 }
 
@@ -128,29 +177,89 @@ impl Equalizer {
     pub fn new() -> Equalizer {
         Equalizer {
             preamp: 1.0,
+            preamp_tgt: 1.0,
+            preamp_step: 0.0,
             bands: [Band::off(); 10],
+            ramp_left: 0,
+            deactivating: false,
             active: false,
         }
     }
 
-    /// 按 `rate` 重算系数并清零状态；增益为 0 或频点 ≥ 0.45·rate 的段跳过。
+    /// 按 `rate` 算目标系数：增益为 0 或频点 ≥ 0.45·rate 的段目标是恒等。
+    /// 已激活时朝新目标渐变（保留滤波器状态），未激活且配置平直时保持旁路。
     pub fn configure(&mut self, cfg: &EqConfig, rate: u32) {
-        self.bands = [Band::off(); 10];
-        self.preamp = 1.0;
-        self.active = !cfg.is_flat();
-        if !self.active {
+        let rate_f = rate as f32;
+        let enabled = cfg.enabled;
+        let mut tgts = [IDENTITY; 10];
+        if enabled {
+            for (tgt, (&f0, &db)) in tgts.iter_mut().zip(BANDS.iter().zip(cfg.bands.iter())) {
+                if db != 0.0 && f0 < 0.45 * rate_f {
+                    *tgt = peaking(f0, rate_f, db.clamp(-MAX_DB, MAX_DB));
+                }
+            }
+        }
+        // 前级先扣除合成响应的峰值：推子往上推多少，整体就压多少，
+        // EQ 的净提升不会超过用户的前级设置——提升不再削波。
+        let headroom = if enabled {
+            combined_headroom_db(&tgts, rate_f)
+        } else {
+            0.0
+        };
+        let preamp_tgt = if enabled {
+            10f32.powf((cfg.preamp_db.clamp(-MAX_DB, MAX_DB) - headroom) / 20.0)
+        } else {
+            1.0
+        };
+        if !self.active && cfg.is_flat() {
             return;
         }
-        self.preamp = 10f32.powf(cfg.preamp_db.clamp(-MAX_DB, MAX_DB) / 20.0);
-        let rate = rate as f32;
-        for (band, (&f0, &db)) in self
-            .bands
-            .iter_mut()
-            .zip(BANDS.iter().zip(cfg.bands.iter()))
-        {
-            if db != 0.0 && f0 < 0.45 * rate {
-                *band = Band::peaking(f0, rate, db.clamp(-MAX_DB, MAX_DB));
+        // 旁路 → 激活也走同一渐变：系数从恒等起步推到目标约 5 ms——
+        // 直接落目标的话，非零系数配零状态首样本就有 (b0−1)·x 的台阶。
+        self.active = true;
+        // 已激活：全部段朝目标渐变（含正在关掉的段——目标恒等）。
+        let ramp = (rate / RAMP_DIVISOR).max(64);
+        self.ramp_left = ramp;
+        self.deactivating = cfg.is_flat();
+        self.preamp_tgt = preamp_tgt;
+        self.preamp_step = (preamp_tgt - self.preamp) / ramp as f32;
+        for (band, &t) in self.bands.iter_mut().zip(tgts.iter()) {
+            if !band.on && t == IDENTITY {
+                continue;
             }
+            band.on = true;
+            band.tgt = t;
+            for k in 0..5 {
+                band.step[k] = (t[k] - band.coef[k]) / ramp as f32;
+            }
+        }
+    }
+
+    /// 渐变推进一帧；收尾时系数落目标、直通段撤 `on`、按 `deactivating`
+    /// 关旁路（关闭 EQ 是淡出到直通，不是瞬时断）。
+    fn advance(&mut self) {
+        self.ramp_left -= 1;
+        if self.ramp_left > 0 {
+            self.preamp += self.preamp_step;
+            for band in self.bands.iter_mut() {
+                if band.on {
+                    for k in 0..5 {
+                        band.coef[k] += band.step[k];
+                    }
+                }
+            }
+            return;
+        }
+        self.preamp = self.preamp_tgt;
+        for band in self.bands.iter_mut() {
+            band.coef = band.tgt;
+            if band.on && band.coef == IDENTITY {
+                band.on = false;
+            }
+        }
+        if self.deactivating {
+            self.deactivating = false;
+            self.active = false;
         }
     }
 
@@ -161,18 +270,26 @@ impl Equalizer {
         }
         let nch = channels.min(MAX_CHANNELS);
         let frames = data.len() / channels;
-        let preamp = self.preamp;
         for f in 0..frames {
+            if self.ramp_left > 0 {
+                self.advance();
+            }
             let base = f * channels;
+            let preamp = self.preamp;
             for ch in 0..nch {
                 let mut x = data[base + ch] * preamp;
                 for band in self.bands.iter_mut() {
-                    if band.on {
-                        let y = band.b0 * x + band.z1[ch];
-                        band.z1[ch] = band.b1 * x - band.a1 * y + band.z2[ch];
-                        band.z2[ch] = band.b2 * x - band.a2 * y;
-                        x = y;
+                    if !band.on {
+                        continue;
                     }
+                    let c = &band.coef;
+                    let y = c[0] * x + band.z1[ch];
+                    band.z1[ch] = c[1] * x - c[3] * y + band.z2[ch];
+                    band.z2[ch] = c[2] * x - c[4] * y;
+                    // 静默期的滤波器尾端会衰减进非规格化数（x86 上非规格
+                    // 数运算慢几十倍，占实时回调的时间）：过小直接冲零，
+                    // 归零后整链对零输入恒出零。
+                    x = if y.abs() < 1e-15 { 0.0 } else { y };
                 }
                 data[base + ch] = x;
             }
@@ -227,34 +344,33 @@ mod tests {
         assert_eq!(data, input);
     }
 
-    /// 仅 1 kHz 段 +6 dB：1 kHz 正弦 RMS ≈ ×1.995，100 Hz 几乎不变。
+    /// 仅 1 kHz 段 +6 dB：1 kHz 相对 100 Hz 的增益差 ≈ ×1.995。合成
+    /// 响应的削波 headroom 会把绝对电平压回前级以内，所以按两频点的
+    /// 相对比验证；顺带断言绝对电平不超输入（不削波）。
     #[test]
     fn eq_boost_at_center_frequency() {
         let mut bands = [0.0; 10];
         bands[5] = 6.0; // 1 kHz
         let rate = 48_000;
-
-        let input = sine(1000.0, rate, 2.0, 2);
-        let mut data = input.clone();
-        let mut eq = Equalizer::new();
-        eq.configure(&cfg(true, 0.0, bands), rate);
-        eq.process(&mut data, 2);
         let skip = (rate as f32 * 0.2) as usize;
-        let ratio = rms(&data, 2, skip) / rms(&input, 2, skip);
+        let run = |freq: f32| {
+            let input = sine(freq, rate, 2.0, 2);
+            let mut data = input.clone();
+            let mut eq = Equalizer::new();
+            eq.configure(&cfg(true, 0.0, bands), rate);
+            eq.process(&mut data, 2);
+            rms(&data, 2, skip) / rms(&input, 2, skip)
+        };
+        let at_1k = run(1000.0);
+        let at_100 = run(100.0);
+        let ratio = at_1k / at_100;
         assert!(
-            (ratio - 1.995).abs() / 1.995 < 0.03,
-            "1kHz RMS 比 {ratio}（期望 ≈1.995）"
+            (ratio - 1.995).abs() / 1.995 < 0.05,
+            "1k/100Hz 相对增益 {ratio}（期望 ≈1.995）"
         );
-
-        let input = sine(100.0, rate, 2.0, 2);
-        let mut data = input.clone();
-        let mut eq = Equalizer::new();
-        eq.configure(&cfg(true, 0.0, bands), rate);
-        eq.process(&mut data, 2);
-        let ratio = rms(&data, 2, skip) / rms(&input, 2, skip);
         assert!(
-            (0.95..=1.08).contains(&ratio),
-            "100Hz RMS 比 {ratio}（期望 0.95–1.08）"
+            at_1k <= 1.05 && at_100 <= 1.05,
+            "绝对电平应被 headroom 压回：1k {at_1k} / 100 {at_100}"
         );
     }
 
@@ -309,7 +425,8 @@ mod tests {
         eq.configure(&cfg(true, -6.0, [0.0; 10]), 48_000);
         eq.process(&mut data, 2);
         let want = 10f32.powf(-6.0 / 20.0);
-        for (i, (got, src)) in data.iter().zip(input.iter()).enumerate().skip(96) {
+        // 跳过前 ~10ms（前级也在渐变区里，走完了才到目标值）。
+        for (i, (got, src)) in data.iter().zip(input.iter()).enumerate().skip(960) {
             assert!(
                 (got - src * want).abs() < 1e-6,
                 "样本 {i}: {got} != {} * {want}",
@@ -338,8 +455,69 @@ mod tests {
             "右声道应仍为 0"
         );
         assert!(
-            data.iter().step_by(2).skip(96).any(|x| x.abs() > 0.3),
+            data.iter().step_by(2).skip(960).any(|x| x.abs() > 0.3),
             "左声道应有 +6dB 提升"
+        );
+    }
+
+    /// 改参数不清零滤波器状态、系数渐变：1 kHz 正弦中途把 31 Hz 段
+    /// 推满 +12 dB，相邻样本不出现爆音级跳变（系数突变会让输出瞬时
+    /// 放大数倍）。
+    #[test]
+    fn eq_reconfigure_does_not_click() {
+        let rate = 48_000;
+        let input = sine(1000.0, rate, 0.2, 2);
+        let mut data = input.clone();
+        let mut eq = Equalizer::new();
+        let mut bands = [0.0; 10];
+        bands[5] = 6.0;
+        eq.configure(&cfg(true, 0.0, bands), rate);
+        let half = data.len() / 4 * 2;
+        eq.process(&mut data[..half], 2);
+        bands[0] = 12.0;
+        eq.configure(&cfg(true, 0.0, bands), rate);
+        eq.process(&mut data[half..], 2);
+        // 0.25 幅 1 kHz 的正常相邻样本差 ≈0.033；留六倍余量。
+        let max_step = data
+            .windows(2)
+            .fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+        assert!(max_step < 0.2, "改配置后样本跳变 {max_step}");
+    }
+
+    /// 关闭 EQ：渐变到直通后旁路——输出回到与输入逐样本一致
+    /// （恒等系数下残存状态两帧内归零，不留滤波痕迹）。
+    #[test]
+    fn eq_disable_returns_to_bypass() {
+        let rate = 48_000;
+        let input = sine(500.0, rate, 0.2, 2);
+        let mut data = input.clone();
+        let mut eq = Equalizer::new();
+        let mut bands = [0.0; 10];
+        bands[2] = 8.0;
+        eq.configure(&cfg(true, 0.0, bands), rate);
+        eq.process(&mut data[..960], 2); // 10ms：激活渐变走完
+        eq.configure(&cfg(false, 0.0, bands), rate);
+        eq.process(&mut data[960..], 2);
+        assert_eq!(&data[4800..], &input[4800..], "关 EQ 后应逐样本直通");
+    }
+
+    /// 推满提升也不削波：+12 dB 段推近满幅的 31 Hz 正弦，峰值仍
+    /// ≤ 输入峰值（headroom 前级把净提升压回 0 dB 内）。
+    #[test]
+    fn eq_headroom_prevents_clip() {
+        let rate = 48_000;
+        let input = sine(31.0, rate, 1.0, 2);
+        let in_peak = input.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        let mut data = input.clone();
+        let mut eq = Equalizer::new();
+        let mut bands = [0.0; 10];
+        bands[0] = 12.0;
+        eq.configure(&cfg(true, 0.0, bands), rate);
+        eq.process(&mut data, 2);
+        let out_peak = data[4800 * 2..].iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(
+            out_peak <= in_peak * 1.05,
+            "输出峰值 {out_peak} 应 ≤ 输入 {in_peak}"
         );
     }
 }

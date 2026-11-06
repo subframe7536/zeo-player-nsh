@@ -301,3 +301,50 @@ fn paused_engine_resumes_after_stream_pause() {
     player.pause();
     player.stop();
 }
+
+/// 自然播完无缝接下一首：尾巴还在播时下一首已预取好、样本直接接进
+/// 同一缓冲，边界处转正——换曲后位置从 ~0 续走，引擎不停（`drain`
+/// 排空再装载的老路会让位置卡在原曲末尾一拍）。
+#[test]
+fn gapless_natural_track_transition() {
+    let Some(root) = corpus() else {
+        eprintln!("跳过：没有 .nsh/tmp/zeo-player-test-music 测试语料");
+        return;
+    };
+    // SAFETY(测试): 同上——先过 e2e_env。
+    e2e_env();
+    let player = Player::new();
+    player.set_volume(0.0);
+    // 两首 1s 的语料：第一首自然播完，应无缝接到第二首。
+    let a = root.join("sub/short.flac");
+    let b = root.join("sub/mono.mp3");
+    player.open(
+        a.to_string_lossy().into_owned(),
+        vec![
+            a.to_string_lossy().into_owned(),
+            b.to_string_lossy().into_owned(),
+        ],
+    );
+    assert!(
+        wait_for(3000, || player.state().is_ready
+            && player.state().is_playing),
+        "short.flac 播放中: {:?}",
+        player.state().track.error
+    );
+    assert!(
+        wait_for(6000, || player.state().track.path.as_deref()
+            == Some(b.to_str().unwrap())),
+        "自然播完应接到 mono.mp3: {:?}",
+        player.state().track.path
+    );
+    // 边界转正后位置从 ~0 续走；超过 ~1s 说明换曲卡在排空老路。
+    let t = player.state().current_time;
+    assert!(t < 1.5, "换曲后位置应接近 0: {t}");
+    assert!(player.state().is_playing, "换曲后仍在播放");
+    assert!(
+        wait_for(1500, || player.state().current_time > t + 0.2),
+        "换曲后位置继续走: {t}"
+    );
+    player.pause();
+    player.stop();
+}
