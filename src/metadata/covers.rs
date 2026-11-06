@@ -4,6 +4,7 @@
 //! 后台线程池处理请求，结果由 UI 轮询取走。
 
 use std::collections::{HashSet, VecDeque};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
@@ -29,12 +30,36 @@ const SIDE_EXTS: [&str; 8] = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG"
 
 /// `path` 的本地同名图片文件（存在与否只按文件名，不解码）。
 pub(crate) fn find_sidecar(path: &Path) -> Option<PathBuf> {
-    let stem = path.file_stem()?.to_string_lossy();
-    let dir = path.parent()?;
-    SIDE_EXTS
-        .iter()
-        .map(|ext| dir.join(format!("{stem}.{ext}")))
-        .find(|candidate| candidate.is_file())
+    sidecar_files(path).into_iter().next()
+}
+
+/// `path` 的全部同名图片文件。`find_sidecar` 只回读取序的第一张；
+/// 写侧车时删掉旧后缀的侧车要枚举全部，免得旧图遮住新写的。
+/// 大小写不敏感的文件系统（macOS / Windows 默认）上 `sine.png` 和
+/// `sine.PNG` 是同一个文件——`is_file` 两种写法都命中，按规范路径
+/// 去重，不然枚举出别名会把同一文件当多份删/找。
+pub(crate) fn sidecar_files(path: &Path) -> Vec<PathBuf> {
+    let Some(stem) = path.file_stem().map(|s| s.to_string_lossy()) else {
+        return Vec::new();
+    };
+    let Some(dir) = path.parent() else {
+        return Vec::new();
+    };
+    let mut seen = Vec::new();
+    let mut out = Vec::new();
+    for ext in SIDE_EXTS {
+        let candidate = dir.join(format!("{stem}.{ext}"));
+        if !candidate.is_file() {
+            continue;
+        }
+        let canon = fs::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
+        if seen.contains(&canon) {
+            continue;
+        }
+        seen.push(canon);
+        out.push(candidate);
+    }
+    out
 }
 
 /// 工作任务：`Thumb` 只生成列表缩略图（第二元是需要的尺寸，已有
@@ -469,19 +494,21 @@ fn cover_source_for(path: &Path, prefer: bool) -> Option<CoverSrc> {
             .and_then(|p| image::open(p).ok())
             .map(CoverSrc::Img)
     };
-    let mut embedded = || {
-        MetaCache::global().get(path).ok()?.has_art.then_some(())?;
-        let (bytes, _) = crate::metadata::read_artwork(path)?;
-        Some(match image::load_from_memory(&bytes) {
-            Ok(img) => CoverSrc::Img(img),
-            Err(_) => CoverSrc::Raw(bytes),
-        })
-    };
     if prefer {
-        local().or_else(&mut embedded)
+        local().or_else(|| embedded_source(path))
     } else {
-        embedded().or_else(&mut local)
+        embedded_source(path).or_else(&mut local)
     }
+}
+
+/// 只看内嵌封面（`MetaCache` 记了无图直接 `None`，不解码）。
+fn embedded_source(path: &Path) -> Option<CoverSrc> {
+    MetaCache::global().get(path).ok()?.has_art.then_some(())?;
+    let (bytes, _) = crate::metadata::read_artwork(path)?;
+    Some(match image::load_from_memory(&bytes) {
+        Ok(img) => CoverSrc::Img(img),
+        Err(_) => CoverSrc::Raw(bytes),
+    })
 }
 
 fn cover_source(path: &Path) -> Option<CoverSrc> {
@@ -498,20 +525,53 @@ fn decode_cover(path: &Path) -> Option<image::DynamicImage> {
 
 /// `path` 的封面缩到 `side` 像素以内、存为 JPEG（已缓存则直接返回）。
 fn cover_file(path: &Path, side: u32) -> Option<PathBuf> {
-    let key = cache_key(path)?;
+    cover_file_keyed(path, cache_key(path)?, side, cover_source, true)
+}
+
+/// 只看内嵌封面的缩略图：「编辑元数据」弹窗「内嵌标签」目标的预览——
+/// 有效封面按「本地优先」开关可能落到同名图片，内嵌目标得预览内嵌
+/// 自己。键里混 `emb` 与偏好解析的缓存封面区分开；不写色调——色调
+/// 要跟有效封面源走，内嵌图不一定是它。
+pub(crate) fn embedded_cover_file(path: &Path, side: u32) -> Option<PathBuf> {
+    cover_file_keyed(path, embedded_key(path)?, side, embedded_source, false)
+}
+
+/// `embedded_cover_file` 的缓存键：只跟音频内容指纹走——侧车出现 /
+/// 变化不该让内嵌缩略图重算。
+fn embedded_key(path: &Path) -> Option<u64> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some(fnv(
+        format!(
+            "{}|{}|emb",
+            path.display(),
+            crate::metadata::file_stamp(&meta)
+        )
+        .as_bytes(),
+    ))
+}
+
+fn cover_file_keyed(
+    path: &Path,
+    key: u64,
+    side: u32,
+    src: impl FnOnce(&Path) -> Option<CoverSrc>,
+    record_hue: bool,
+) -> Option<PathBuf> {
     let dir = cache_dir();
     let out = dir.join(format!("{key:016x}-{side}.jpg"));
     if out.is_file() {
-        // 缩略图已在但色调未算（老库 / 灰封面）：补算一次写库。
-        ensure_hue(path, &out);
+        if record_hue {
+            // 缩略图已在但色调未算（老库 / 灰封面）：补算一次写库。
+            ensure_hue(path, &out);
+        }
         return Some(out);
     }
-    let src = cover_source(path)?;
+    let src = src(path)?;
     std::fs::create_dir_all(&dir).ok()?;
     let tmp = out.with_extension("tmp");
     match src {
         CoverSrc::Img(img) => {
-            if MetaCache::global().art_hue(path).is_none() {
+            if record_hue && MetaCache::global().art_hue(path).is_none() {
                 store_hue(path, palette_hue(&img));
             }
             let img = if img.width() > side || img.height() > side {

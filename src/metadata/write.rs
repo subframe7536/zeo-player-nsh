@@ -122,7 +122,12 @@ pub enum CoverEdit {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TagEdits {
     pub fields: Vec<(TagField, Edit)>,
+    /// 内嵌封面的改动（`None` 不动）。
     pub cover: Option<CoverEdit>,
+    /// 同名图片侧车文件的改动（`None` 不动；它不是标签，是旁边的
+    /// 图片文件，跟标签分开写——`.lrc` 同款）。`Replace` 的 `mime`
+    /// 决定后缀，bmp / gif 转码成 PNG 再写。
+    pub cover_file: Option<CoverEdit>,
     /// 同名 `.lrc` 侧车歌词文件的改动（`None` 不动；`.lrc` 不是标签，
     /// 是旁边的文本文件，跟标签分开写）。
     pub lrc: Option<Edit>,
@@ -137,7 +142,7 @@ impl TagEdits {
     /// 没有任何改动（批量编辑逐条跳过空改动用——plan 012）。
     #[allow(dead_code, reason = "批量编辑逐条跳过空改动（plan 012）")]
     pub fn is_empty(&self) -> bool {
-        !self.has_tag_changes() && self.lrc.is_none()
+        !self.has_tag_changes() && self.cover_file.is_none() && self.lrc.is_none()
     }
 }
 
@@ -262,6 +267,9 @@ pub fn write_tags(path: &Path, edits: &TagEdits) -> Result<(), String> {
     if let Some(lrc) = &edits.lrc {
         write_lrc_sidecar(&target, lrc)?;
     }
+    if let Some(cover_file) = &edits.cover_file {
+        write_cover_sidecar(&target, cover_file)?;
+    }
     Ok(())
 }
 
@@ -302,6 +310,74 @@ fn write_lrc_sidecar(audio: &Path, edit: &Edit) -> Result<(), String> {
                 let _ = fs::remove_file(&tmp);
             }
             result
+        }
+    }
+}
+
+/// 同名图片侧车：`Replace` 原子写 `<曲名>.<后缀>`（`mime` → `jpg` /
+/// `png` / `webp`；bmp / gif 读取侧车不认，转 PNG 再写），已有同后缀
+/// （大小写变体）的就更新它；写完删掉其它后缀的旧侧车——jpg 在读
+/// 取序最前，旧 `.jpg` 留着会遮住新写的 `.png`。`Remove` 删掉同名
+/// 图片文件（没有就不动）。都不碰音频文件。
+fn write_cover_sidecar(audio: &Path, edit: &CoverEdit) -> Result<(), String> {
+    let Some(stem) = audio.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+        return Err(format!("音频文件没有文件名 {}", audio.display()));
+    };
+    let Some(dir) = audio.parent() else {
+        return Err(format!("音频文件没有父目录 {}", audio.display()));
+    };
+    match edit {
+        CoverEdit::Remove => {
+            for old in crate::metadata::covers::sidecar_files(audio) {
+                fs::remove_file(&old)
+                    .map_err(|e| format!("删除 {} 失败: {e}", old.display()))?;
+            }
+            Ok(())
+        }
+        CoverEdit::Replace { data, mime } => {
+            let (data, ext) = match mime.as_str() {
+                "image/jpeg" => (data.clone(), "jpg"),
+                "image/png" => (data.clone(), "png"),
+                "image/webp" => (data.clone(), "webp"),
+                _ => {
+                    let img = image::load_from_memory(data)
+                        .map_err(|e| format!("解码封面图片失败: {e}"))?;
+                    let mut png = std::io::Cursor::new(Vec::new());
+                    img.write_to(&mut png, image::ImageFormat::Png)
+                        .map_err(|e| format!("封面转码 PNG 失败: {e}"))?;
+                    (png.into_inner(), "png")
+                }
+            };
+            // 已有同后缀（大小写变体）的侧车就更新它（`.lrc` 同款策略）。
+            let target = crate::metadata::covers::sidecar_files(audio)
+                .into_iter()
+                .find(|p| {
+                    p.extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+                })
+                .unwrap_or_else(|| dir.join(format!("{stem}.{ext}")));
+            let name = target
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let tmp = dir.join(format!(".{name}.zeo-tmp"));
+            let result = fs::write(&tmp, &data)
+                .map_err(|e| format!("写临时封面文件失败: {e}"))
+                .and_then(|()| {
+                    fs::rename(&tmp, &target).map_err(|e| format!("替换封面文件失败: {e}"))
+                });
+            if result.is_err() {
+                let _ = fs::remove_file(&tmp);
+            }
+            result?;
+            for old in crate::metadata::covers::sidecar_files(audio) {
+                if old != target {
+                    fs::remove_file(&old)
+                        .map_err(|e| format!("删除旧封面 {} 失败: {e}", old.display()))?;
+                }
+            }
+            Ok(())
         }
     }
 }
@@ -795,6 +871,7 @@ mod tests {
                 .map(|(f, v)| (*f, Edit::Set((*v).to_owned())))
                 .collect(),
             cover: None,
+            cover_file: None,
             lrc: None,
         }
     }
@@ -872,6 +949,7 @@ mod tests {
         let clear = TagEdits {
             fields: vec![(TagField::Album, Edit::Clear)],
             cover: None,
+            cover_file: None,
             lrc: None,
         };
         write_tags(&path, &clear).unwrap();
@@ -917,6 +995,7 @@ mod tests {
         let clear_track = TagEdits {
             fields: vec![(TagField::Track, Edit::Clear)],
             cover: None,
+            cover_file: None,
             lrc: None,
         };
         write_tags(&path, &clear_track).unwrap();
@@ -944,6 +1023,7 @@ mod tests {
         let clear_total = TagEdits {
             fields: vec![(TagField::TrackTotal, Edit::Clear)],
             cover: None,
+            cover_file: None,
             lrc: None,
         };
         write_tags(&path, &clear_total).unwrap();
@@ -967,6 +1047,7 @@ mod tests {
             let set = TagEdits {
                 fields: vec![(TagField::Lyrics, Edit::Set(text.to_owned()))],
                 cover: None,
+                cover_file: None,
                 lrc: None,
             };
             match write_tags(&path, &set) {
@@ -983,6 +1064,7 @@ mod tests {
             let clear = TagEdits {
                 fields: vec![(TagField::Lyrics, Edit::Clear)],
                 cover: None,
+                cover_file: None,
                 lrc: None,
             };
             write_tags(&path, &clear).unwrap();
@@ -1004,6 +1086,7 @@ mod tests {
         let set = TagEdits {
             fields: Vec::new(),
             cover: None,
+            cover_file: None,
             lrc: Some(Edit::Set("[00:01.00]侧车歌词".to_owned())),
         };
         write_tags(&path, &set).unwrap();
@@ -1014,6 +1097,7 @@ mod tests {
         let clear = TagEdits {
             fields: Vec::new(),
             cover: None,
+            cover_file: None,
             lrc: Some(Edit::Clear),
         };
         write_tags(&path, &clear).unwrap();
@@ -1063,6 +1147,7 @@ mod tests {
                 data: png.clone(),
                 mime: "image/png".to_owned(),
             }),
+            cover_file: None,
             lrc: None,
         };
         write_tags(&path, &replace).unwrap();
@@ -1074,11 +1159,85 @@ mod tests {
         let remove = TagEdits {
             fields: Vec::new(),
             cover: Some(CoverEdit::Remove),
+            cover_file: None,
             lrc: None,
         };
         write_tags(&path, &remove).unwrap();
         assert!(!crate::metadata::read_meta(&path).unwrap().has_art);
         assert!(decoded_frames(&path) > 0);
+    }
+
+    /// 同名图片侧车：Replace 新建 / 更新 `<曲名>.<后缀>`（mime 定后缀，
+    /// bmp 转 PNG），写完删掉其它后缀的旧侧车；Remove 删除文件。音频
+    /// 本身不动。
+    #[test]
+    fn tag_write_cover_sidecar() {
+        let Some(source) = corpus("sine.flac") else {
+            return eprintln!("跳过：没有测试语料");
+        };
+        let png8 = |px: [u8; 4]| {
+            let mut png = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(image::ImageBuffer::from_pixel(8, 8, image::Rgba(px)))
+                .write_to(&mut png, image::ImageFormat::Png)
+                .unwrap();
+            png.into_inner()
+        };
+        let replace = |data, mime: &str| TagEdits {
+            fields: Vec::new(),
+            cover: None,
+            cover_file: Some(CoverEdit::Replace {
+                data,
+                mime: mime.to_owned(),
+            }),
+            lrc: None,
+        };
+
+        // 新建 .png，音频字节不动。
+        let path = scratch(&source);
+        let png_path = path.with_extension("png");
+        let before = fs::read(&path).unwrap();
+        let png = png8([220, 40, 40, 255]);
+        write_tags(&path, &replace(png.clone(), "image/png")).unwrap();
+        assert_eq!(fs::read(&png_path).unwrap(), png);
+        assert_eq!(fs::read(&path).unwrap(), before, "侧车编辑不能动音频文件");
+
+        // 再写 .jpg：旧 .png 删掉（jpg 读取序在前，留着会遮住新图）。
+        let jpg_path = path.with_extension("jpg");
+        write_tags(&path, &replace(b"fake-jpeg".to_vec(), "image/jpeg")).unwrap();
+        assert_eq!(fs::read(&jpg_path).unwrap(), b"fake-jpeg");
+        assert!(!png_path.exists(), "旧后缀的侧车应删掉");
+
+        // bmp 转 PNG 写 .png，.jpg 同样被清掉。
+        let mut bmp = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::ImageBuffer::from_pixel(
+            8,
+            8,
+            image::Rgba([40, 40, 220, 255]),
+        ))
+        .write_to(&mut bmp, image::ImageFormat::Bmp)
+        .unwrap();
+        write_tags(&path, &replace(bmp.into_inner(), "image/bmp")).unwrap();
+        assert!(png_path.exists(), "bmp 应转码写 .png");
+        assert!(!jpg_path.exists());
+        assert_eq!(
+            image::open(&png_path).unwrap().to_rgba8().get_pixel(0, 0).0,
+            [40, 40, 220, 255],
+            "转码应保留原图内容"
+        );
+
+        // Remove 删掉同名图片文件。
+        let remove = TagEdits {
+            fields: Vec::new(),
+            cover: None,
+            cover_file: Some(CoverEdit::Remove),
+            lrc: None,
+        };
+        write_tags(&path, &remove).unwrap();
+        assert!(!png_path.exists(), "Remove 应删掉同名图片");
+        assert!(
+            temp_files(path.parent().unwrap()).is_empty(),
+            "失败不能留 .zeo-tmp"
+        );
     }
 
     /// 失败路径：只读文件 → `ensure_writable` 在复制前就报错，原文件

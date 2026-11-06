@@ -1638,6 +1638,15 @@ pub fn save_tags(
             {
                 store().meta.set(Some(Same(meta)));
             }
+            // 写同名图片时音频指纹没变，`COVER_STAMPS` 的 effect 不会
+            // 重发封面请求——按已请求过的尺寸直接重发（缓存键折了侧车
+            // 指纹，必然重新生成；内嵌写走音频指纹重发，这里是去重的）。
+            if result.is_ok()
+                && let Some((side, _)) =
+                    COVERS.with(|c| c.borrow().get(path.as_str()).copied())
+            {
+                crate::metadata::covers::request(&path, side);
+            }
             done(result);
         });
     });

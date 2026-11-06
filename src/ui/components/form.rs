@@ -14,9 +14,11 @@ use super::icons::{Icon, icon};
 /// shadcn 的 `rounded-lg`。
 pub const RADIUS_LG: f32 = 10.0;
 
-/// shadcn Input：`h-9 rounded-md border border-input bg-transparent px-3
-/// text-sm shadow-xs`，聚焦时 `border-ring ring-3 ring-ring/50`；深色
-/// `bg-input/30`。`small` 为 `h-8`（放在一行条件里）。
+/// shadcn Input：`h-9 rounded-md border border-input px-3 text-sm
+/// shadow-xs`，聚焦时 `border-ring ring-3 ring-ring/50`。底色用 `card`
+/// 而不是 shadcn 的 `bg-transparent` / `dark:bg-input/30`：面板底色会随
+/// 封面染色，透明或半透明的底会把染色带进输入框。`small` 为 `h-8`
+/// （放在一行条件里）。
 pub fn input_field(small: bool) -> Input {
     let t = nsh_base::theme();
     let (input_c, ring) = (t.input, t.ring);
@@ -29,7 +31,7 @@ pub fn input_field(small: bool) -> Input {
         .shadow_xs()
         .text_size(px(14.0))
         .text_color(fg())
-        .dark(move |st| st.bg(input_c.opacity(0.3)))
+        .bg(t.card)
         .focus(move |st| {
             st.border_color(ring)
                 .ring(px(3.0))
@@ -80,11 +82,13 @@ pub fn select_trigger(
 }
 
 /// SelectTrigger 的外壳（`h-8 rounded-md border border-input px-3
-/// shadow-xs`，悬停 `bg-accent`，深色 `bg-input/30`），内容（值、chevron
-/// 等）由调用方给。`width` 约定同 [`select_trigger`]。popover 的触发器
-/// 必须是普通 view 时用这个，保持和下拉触发器同一外观。
+/// shadow-xs`，悬停 `bg-accent`），内容（值、chevron 等）由调用方给。
+/// 底色同 [`input_field`] 用 `card`，不随封面染色。`width` 约定同
+/// [`select_trigger`]。popover 的触发器必须是普通 view 时用这个，保持
+/// 和下拉触发器同一外观。
 pub fn trigger_shell(label: &'static str, width: f32) -> View {
-    let input_c = nsh_base::theme().input;
+    let t = nsh_base::theme();
+    let (input_c, card_c) = (t.input, t.card);
     let trigger = view()
         .h(px(32.0))
         .flex_row()
@@ -96,7 +100,7 @@ pub fn trigger_shell(label: &'static str, width: f32) -> View {
         .border_1()
         .border_color(input_c)
         .shadow_xs()
-        .dark(move |st| st.bg(input_c.opacity(0.3)))
+        .bg(card_c)
         .hover(move |st| st.bg(hover()))
         .role(AccessibilityRole::Button)
         .label(label);
@@ -184,18 +188,20 @@ pub fn tab_list() -> TabsElement {
 }
 
 /// shadcn TabsTrigger：`rounded-md px-2 py-1 text-sm font-medium`，选中时
-/// `bg-background shadow-sm`（深色里 background 与 muted 几乎同亮、白底浮不
-/// 起来，选中片改用亮一档的 `input` 表面）。`glyph` 为前置图标（可无）；
-/// 图标与文字颜色一样，选中变深。
+/// 加底色、边框与 `shadow-sm`（浅色用 `card`：白片落在 muted 列表上，
+/// 且不随封面染色——染过色的 background 与 muted 几乎同亮会分不出选中；
+/// 深色里 card 比列表暗，改用亮一档的 `input` 表面）。`glyph` 为前置图标
+/// （可无）；图标与文字颜色一样，选中变深。
 pub fn tab_trigger(
     on: impl Fn() -> bool + Copy + 'static,
     glyph: Option<Icon>,
     label: &'static str,
     press: impl Fn() + 'static,
 ) -> TabElement {
+    let t = nsh_base::theme();
     let active_bg = AdaptiveColor {
-        light: bg().light,
-        dark: nsh_base::theme().input.dark,
+        light: t.card.light,
+        dark: t.input.dark,
     };
     tab()
         .selected(on)
@@ -214,7 +220,7 @@ pub fn tab_trigger(
         .duration(150.0)
         .style_with(move |st| {
             if on() {
-                st.bg(active_bg).shadow_sm()
+                st.bg(active_bg).border_color(border()).shadow_sm()
             } else {
                 st
             }
@@ -286,8 +292,14 @@ pub fn select(
             }
         })
         .popup_style(move |st| {
-            st.min_w(px(width.max(140.0)))
-                .p(px(4.0))
+            // 弹层与触发器同宽（shadcn SelectContent 贴触发器宽）；
+            // width≤0 的弹性触发器宽度未知，退回 140 下限。
+            let st = if width > 0.0 {
+                st.w(px(width))
+            } else {
+                st.min_w(px(140.0))
+            };
+            st.p(px(4.0))
                 .rounded(px(10.0))
                 .overflow_hidden()
                 .border_1()

@@ -24,10 +24,18 @@ struct TagDraft {
     path: String,
     original: HashMap<TagField, String>,
     values: HashMap<TagField, String>,
-    /// `None`：封面不动。
+    /// `None`：内嵌封面不动。
     cover: Option<CoverEdit>,
     /// `Replace` 时新图的本地路径（预览用文件路径，不用 data URI）。
     cover_src: Option<String>,
+    /// 同名图片文件已存在（「保存到」默认值与提示文案用）。
+    art_exists: bool,
+    /// 封面写到同名图片文件（true）还是内嵌标签（false）；默认跟已有文件走。
+    cover_target: bool,
+    /// 图片文件目标的封面改动 / `Replace` 预览路径（与内嵌目标的
+    /// 草稿互不影响——`.lrc` / 内嵌歌词同款）。
+    cover_file: Option<CoverEdit>,
+    cover_file_src: Option<String>,
     /// 同名 `.lrc` 侧车歌词文件已存在（提示文案与「清空会删除它」用）。
     lrc_exists: bool,
     /// 歌词写到 `.lrc`（true）还是内嵌标签（false）；默认跟已有文件走。
@@ -54,12 +62,18 @@ pub fn edit_info_dialog() -> AnyElement {
         .as_deref()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .unwrap_or_default();
+    // 同名图片已有时封面默认写它（编辑的就是显示的那份）。
+    let art_exists = crate::metadata::covers::find_sidecar(Path::new(&path)).is_some();
     let draft = signal(TagDraft {
         path,
         original: values.clone(),
         values,
         cover: None,
         cover_src: None,
+        art_exists,
+        cover_target: art_exists,
+        cover_file: None,
+        cover_file_src: None,
         lrc_exists: lrc_path.is_some(),
         lrc_target: lrc_path.is_some(),
         lrc_text: lrc_original.clone(),
@@ -182,7 +196,13 @@ fn build_edits(d: &TagDraft) -> TagEdits {
     };
     TagEdits {
         fields,
-        cover: d.cover.clone(),
+        // 只写选中的目标；另一头的草稿留着（切回去内容还在），不生效。
+        cover: if d.cover_target { None } else { d.cover.clone() },
+        cover_file: if d.cover_target {
+            d.cover_file.clone()
+        } else {
+            None
+        },
         lrc,
     }
 }
@@ -369,14 +389,16 @@ fn split_genres(raw: &str) -> Vec<String> {
         .collect()
 }
 
-/// 流派：标签输入器 + 下拉。chips 在 combobox 的 `prefix`；输入即过滤
-/// 曲库已有流派（`s.tracks` 去重），点选 / 回车选中，回车对第一项生效
-/// ——查询不是已有流派时第一项是「添加“…”」自由新增。选过的项再选会
-/// 取消勾选（等同删 chip）。去重忽略大小写，草稿存 `;` 合并串。
+/// 流派：标签输入器 + 下拉。chips 在 combobox 的 `prefix`，宽度随内容、
+/// 顶满整行后内部折行；combobox 根行 flex_wrap，输入框紧跟最后一个
+/// chip，剩余宽度不够时折到下一行占满。输入即过滤曲库已有流派
+/// （`s.tracks` 去重），点选 / 回车选中，回车对第一项生效——查询不是
+/// 已有流派时第一项是「添加“…”」自由新增。选过的项再选会取消勾选
+/// （等同删 chip）。去重忽略大小写，草稿存 `;` 合并串。
 fn genre_row(draft: Signal<TagDraft>) -> View {
     let s = store();
     let t = nsh_base::theme();
-    let (input_c, ring, popover_c) = (t.input, t.ring, t.popover);
+    let (input_c, ring, popover_c, card_c) = (t.input, t.ring, t.popover, t.card);
     let gate = store::menu_control();
     let query = signal(String::new());
     let genres = move || {
@@ -423,12 +445,12 @@ fn genre_row(draft: Signal<TagDraft>) -> View {
         items
     };
     let chips = move || {
-        // chips 占满输入框剩下的宽度并在框内折行；最多两行高
-        // （2×24+4），再多的在框内滚——字段高度封顶，弹窗才不会
-        // 被流派撑出滚动条 / 横向裁掉。
+        // chips 宽度随内容（一整行 chips 的固有宽），顶到字段宽后内部
+        // 折行；最多两行高（2×24+4），再多的在框内滚——字段高度封顶，
+        // 弹窗才不会被流派撑出滚动条 / 横向裁掉。
         scroll()
-            .flex_1()
             .min_w(px(0.0))
+            .max_w(percentage(1.0))
             .max_h(px(52.0))
             .child(
                 view()
@@ -460,17 +482,20 @@ fn genre_row(draft: Signal<TagDraft>) -> View {
                 .flex_1()
                 .min_w(px(0.0))
                 .min_h(px(36.0))
-                // 根行默认顶对齐：chips 折行撑高后输入框 / chevron 会贴顶，
-                // 居中才对。
+                // 根行折行：chips 块顶满整行时输入框折到下一行；行内居中：
+                // chips 撑高后输入框不贴顶。右内边距给绝对定位的 chevron
+                // 留位（chevron 不参与折行，不会被挤掉）。
+                .flex_wrap()
                 .items_center()
-                .px(px(8.0))
+                .pl(px(8.0))
+                .pr(px(30.0))
                 .py(px(5.0))
                 .gap(px(6.0))
                 .rounded(px(RADIUS_MD))
                 .border_1()
                 .border_color(input_c)
                 .shadow_xs()
-                .dark(move |st| st.bg(input_c.opacity(0.3)))
+                .bg(card_c)
                 .focus_within(move |st| {
                     st.border_color(ring)
                         .ring(px(3.0))
@@ -528,22 +553,21 @@ fn genre_row(draft: Signal<TagDraft>) -> View {
                 })
                 .render_item(move |entry: &nsh_base::SelectEntry| genre_item(draft, entry))
                 .input_style(move |st| {
-                    let st = st
-                        .h(px(24.0))
+                    // 紧跟最后一个 chip 并吃掉该行剩余宽度；放不下 72
+                    // （够显示“回车添加”占位）时随根行折到下一行占满。
+                    st.h(px(24.0))
+                        .flex_1()
+                        .min_w(px(72.0))
                         .text_size(px(13.0))
-                        .text_color(fg());
-                    // 空字段时撑满（点哪里都能聚焦）；有 chips 时只占一
-                    // 小段，把行留给 chips 折行。
-                    if genres().is_empty() {
-                        st.flex_1().min_w(px(72.0))
-                    } else {
-                        st.w(px(96.0))
-                    }
+                        .text_color(fg())
                 })
                 .prefix(when(move || !genres().is_empty(), move || chips()))
                 .trigger_button(
                     view()
-                        .px(px(2.0))
+                        .absolute()
+                        .top(px(5.0))
+                        .right(px(6.0))
+                        .h(px(24.0))
                         .items_center()
                         .justify_center()
                         .child(trigger_chevron()),
@@ -650,7 +674,10 @@ fn genre_chip(draft: Signal<TagDraft>, name: String) -> View {
 
 // --- 封面 ----------------------------------------------------------------------
 
-/// 「封面」栏：96px 预览（新图 / 现有封面 / 占位符）+ 更换 / 移除按钮。
+/// 「封面」栏：「保存到」选同名图片文件或内嵌标签（默认跟已有文件
+/// 走），两目标各自的改动草稿互不影响——`.lrc` / 内嵌歌词同款。
+/// 192px 预览（新图 / 目标的现有封面 / 占位符）+ 更换 / 移除按钮
+/// 在剩余高度里整体居中（栏高固定给最高的「基础」栏）。
 fn cover_pane(draft: Signal<TagDraft>) -> View {
     let has_art = untracked(|| {
         draft.with(|d| {
@@ -659,18 +686,37 @@ fn cover_pane(draft: Signal<TagDraft>) -> View {
                 .unwrap_or(false)
         })
     });
+    let art_exists = untracked(|| draft.with(|d| d.art_exists));
+    let file_mode = move || draft.with(|d| d.cover_target);
     let src = move || {
         let d = draft.get();
-        match &d.cover {
+        let (edit, picked) = if d.cover_target {
+            (&d.cover_file, &d.cover_file_src)
+        } else {
+            (&d.cover, &d.cover_src)
+        };
+        match edit {
             // 换封面：预览本地图片文件。
-            Some(CoverEdit::Replace { .. }) => d.cover_src.clone().map(SharedString::from),
+            Some(CoverEdit::Replace { .. }) => picked.clone().map(SharedString::from),
             // 移除封面：显示占位符。
             Some(CoverEdit::Remove) => None,
+            // 目标的现有封面：图片文件 = 同名侧车文件本身；内嵌 = 内嵌
+            // 封面的缩略图（不能走 cover_for_always——它按「本地优先」
+            // 选源，内嵌目标会错显侧车图）。
             None => {
-                if has_art {
-                    store::cover_for_always(&d.path, 96.0)
+                if d.cover_target {
+                    crate::metadata::covers::find_sidecar(Path::new(&d.path))
+                        .map(|p| SharedString::from(p.to_string_lossy().into_owned()))
                 } else {
-                    None
+                    has_art
+                        .then(|| {
+                            crate::metadata::covers::embedded_cover_file(
+                                Path::new(&d.path),
+                                crate::metadata::covers::THUMB,
+                            )
+                            .map(|p| SharedString::from(p.to_string_lossy().into_owned()))
+                        })
+                        .flatten()
                 }
             }
         }
@@ -696,8 +742,13 @@ fn cover_pane(draft: Signal<TagDraft>) -> View {
             })();
             match outcome {
                 Ok((data, mime)) => draft.update(|d| {
-                    d.cover = Some(CoverEdit::Replace { data, mime });
-                    d.cover_src = Some(file.to_string_lossy().into_owned());
+                    let (slot, src) = if d.cover_target {
+                        (&mut d.cover_file, &mut d.cover_file_src)
+                    } else {
+                        (&mut d.cover, &mut d.cover_src)
+                    };
+                    *slot = Some(CoverEdit::Replace { data, mime });
+                    *src = Some(file.to_string_lossy().into_owned());
                     d.error = None;
                 }),
                 Err(error) => draft.update(|d| d.error = Some(error)),
@@ -706,42 +757,141 @@ fn cover_pane(draft: Signal<TagDraft>) -> View {
     };
     let remove = move || {
         draft.update(|d| {
-            d.cover = Some(CoverEdit::Remove);
-            d.cover_src = None;
+            let (slot, src) = if d.cover_target {
+                (&mut d.cover_file, &mut d.cover_file_src)
+            } else {
+                (&mut d.cover, &mut d.cover_src)
+            };
+            *slot = Some(CoverEdit::Remove);
+            *src = None;
             d.error = None;
         })
     };
     view()
-        .gap(px(10.0))
+        .min_h(px(440.0))
+        .gap(px(8.0))
+        .child(target_row(
+            draft,
+            "封面保存位置",
+            |d, v| d.cover_target = v,
+            file_mode,
+            "同名图片",
+        ))
+        .child(when(move || file_mode(), move || {
+            text(if art_exists {
+                "保存到同名图片文件；「移除封面」会删除它。"
+            } else {
+                "保存时新建同名图片文件。"
+            })
+            .text_size(px(12.0))
+            .text_color(faint())
+        }))
+        .child(when(move || file_mode(), move || {
+            text("同名图片在「封面来源」本地优先时先于内嵌封面显示。")
+                .text_size(px(12.0))
+                .text_color(faint())
+        }))
+        .child(when(move || !file_mode(), move || {
+            text("保存后替换文件里的全部内嵌图片。")
+                .text_size(px(12.0))
+                .text_color(faint())
+        }))
+        .child(when(move || !file_mode() && art_exists, move || {
+            text("检测到同名图片——「封面来源」本地优先时，显示它而不是内嵌封面。")
+                .text_size(px(12.0))
+                .text_color(faint())
+        }))
         .child(
             view()
-                .flex_row()
+                .flex_1()
                 .items_center()
-                .gap(px(16.0))
-                .child(cover(src, Some(96.0), 8.0))
+                .justify_center()
                 .child(
                     view()
-                        .gap(px(8.0))
-                        .child(text_button(
-                            Variant::Outline,
-                            Size::Sm,
-                            None,
-                            "更换图片…",
-                            pick,
-                        ))
+                        .flex_row()
+                        .items_center()
+                        .gap(px(20.0))
+                        .child(cover(src, Some(192.0), 10.0))
                         .child(
-                            text_button(Variant::Outline, Size::Sm, None, "移除封面", remove)
-                                .disabled(move || {
-                                    draft.with(|d| d.saving || (!has_art && d.cover.is_none()))
-                                }),
+                            view()
+                                .gap(px(8.0))
+                                .child(
+                                    text_button(
+                                        Variant::Outline,
+                                        Size::Default,
+                                        None,
+                                        "更换图片…",
+                                        pick,
+                                    )
+                                    .w(px(112.0)),
+                                )
+                                .child(
+                                    text_button(
+                                        Variant::Outline,
+                                        Size::Default,
+                                        None,
+                                        "移除封面",
+                                        remove,
+                                    )
+                                    .w(px(112.0))
+                                    .disabled(move || {
+                                        draft.with(|d| {
+                                            if d.saving {
+                                                return true;
+                                            }
+                                            if d.cover_target {
+                                                !d.art_exists && d.cover_file.is_none()
+                                            } else {
+                                                !has_art && d.cover.is_none()
+                                            }
+                                        })
+                                    }),
+                                ),
                         ),
                 ),
         )
+}
+
+/// 「保存到」行：封面 / 歌词栏共用——标签 + 目标下拉（trigger 110，
+/// 弹层与 trigger 同宽）。`set` 写哪个目标字段（`cover_target` /
+/// `lrc_target`），`file_mode` 读当前目标；`file_name` 是文件目标
+/// 的显示名（「同名图片」/「.lrc 文件」），另一项固定「内嵌标签」。
+fn target_row(
+    draft: Signal<TagDraft>,
+    label: &'static str,
+    set: impl Fn(&mut TagDraft, bool) + Copy + 'static,
+    file_mode: impl Fn() -> bool + Copy + 'static,
+    file_name: &'static str,
+) -> View {
+    let target = move |file: bool| -> Box<dyn Fn()> {
+        Box::new(move || draft.update(|d| set(d, file)))
+    };
+    view()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
         .child(
-            text("保存后替换文件里的全部内嵌图片。")
-                .text_size(px(12.0))
-                .text_color(faint()),
+            text("保存到")
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .text_color(muted_fg()),
         )
+        .child(select(
+            move || {
+                if file_mode() {
+                    file_name
+                } else {
+                    "内嵌标签"
+                }
+                .to_owned()
+            },
+            label,
+            vec![
+                (None, file_name, target(true)),
+                (None, "内嵌标签", target(false)),
+            ],
+            110.0,
+        ))
 }
 
 // --- 歌词 ----------------------------------------------------------------------
@@ -752,39 +902,15 @@ fn cover_pane(draft: Signal<TagDraft>) -> View {
 fn lyrics_pane(draft: Signal<TagDraft>) -> View {
     let lrc_exists = untracked(|| draft.with(|d| d.lrc_exists));
     let file_mode = move || draft.with(|d| d.lrc_target);
-    let target = |file: bool| -> Box<dyn Fn()> {
-        Box::new(move || draft.update(|d| d.lrc_target = file))
-    };
     view()
         .gap(px(8.0))
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap(px(8.0))
-                .child(
-                    text("保存到")
-                        .text_size(px(13.0))
-                        .line_height(px(13.0))
-                        .text_color(muted_fg()),
-                )
-                .child(select(
-                    move || {
-                        if file_mode() {
-                            ".lrc 文件"
-                        } else {
-                            "内嵌标签"
-                        }
-                        .to_owned()
-                    },
-                    "歌词保存位置",
-                    vec![
-                        (None, ".lrc 文件", target(true)),
-                        (None, "内嵌标签", target(false)),
-                    ],
-                    130.0,
-                )),
-        )
+        .child(target_row(
+            draft,
+            "歌词保存位置",
+            |d, v| d.lrc_target = v,
+            file_mode,
+            ".lrc 文件",
+        ))
         .child(when(move || file_mode(), move || {
             text(if lrc_exists {
                 "保存到同名 .lrc 文件；清空会删除它。"
