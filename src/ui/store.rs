@@ -1549,9 +1549,14 @@ pub fn rebuild() {
     });
 }
 
-/// 改流派分隔符（立即重新拆分，后台线程）。
+/// 改流派标签分隔符（立即重新拆分，后台线程）。
 pub fn set_separators(separators: Vec<String>) {
     std::thread::spawn(move || library_store().set_separators(&separators));
+}
+
+/// 改艺术家分隔符（立即保存配置，后台线程）。
+pub fn set_artist_separators(separators: Vec<String>) {
+    std::thread::spawn(move || library_store().set_artist_separators(&separators));
 }
 
 /// 过滤阈值：短于 `secs` 的音频不进曲库（0 不过滤）；保存后重新扫描。

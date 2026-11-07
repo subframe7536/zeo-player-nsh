@@ -131,8 +131,17 @@ pub fn Artists() -> impl IntoElement {
     let selected = s.artist_sel;
     let groups = computed(move || {
         let tracks = s.tracks.get();
-        Rc::new(group_by(&tracks, |t| {
-            vec![(t.artist.clone(), t.artist.clone(), String::new())]
+        let seps = s.library.with(|l| l.config.artist_separators.clone());
+        Rc::new(group_by(&tracks, move |t| {
+            let parts = crate::config::split_artists(&t.artist, &seps);
+            if parts.is_empty() {
+                vec![(t.artist.clone(), t.artist.clone(), String::new())]
+            } else {
+                parts
+                    .into_iter()
+                    .map(|a| (a.clone(), a, String::new()))
+                    .collect()
+            }
         }))
     });
     view().flex_1().child(dynamic(move || {

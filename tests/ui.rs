@@ -136,7 +136,7 @@ fn sidebar_navigates_between_library_views() {
         "歌词",
         "封面",
         "窗口",
-        "标签",
+        "其他",
         "通用",
         "元数据",
     ] {
@@ -144,7 +144,7 @@ fn sidebar_navigates_between_library_views() {
     }
     for (pane, section) in [
         ("曲库", "音乐文件夹"),
-        ("标签", "分号"),
+        ("其他", "分号"),
         ("播放", "淡入淡出"),
         ("窗口", "关闭窗口时"),
         ("歌词", "歌词对齐"),
@@ -154,6 +154,13 @@ fn sidebar_navigates_between_library_views() {
             .unwrap();
         app.wait_for(section).unwrap();
     }
+    app.press("id:settings-nav >> role:button[其他]").unwrap();
+    app.wait_for("艺术家分隔符").unwrap();
+    app.wait_for("标签分隔符").unwrap();
+    assert!(
+        !texts(&app).iter().any(|t| t.starts_with("预览 ·")),
+        "其他页不应包含预览部分"
+    );
     app.press("id:settings-nav >> role:button[曲库]").unwrap();
     app.wait_for("音乐文件夹").unwrap();
     for label in ["添加文件夹…", "重建曲库", "监视文件夹变化"] {

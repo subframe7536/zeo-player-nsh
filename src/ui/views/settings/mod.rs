@@ -1,12 +1,12 @@
 //! 「设置」弹窗：左栏是搜索框与分类，右栏是所选分类的各节（曲库 / 播放 /
-//! 歌词 / 窗口 / 标签 / 外观）。各节无卡片包装，靠间距分开。
+//! 歌词 / 窗口 / 其他 / 外观）。各节无卡片包装，靠间距分开。
 
 mod appearance;
 mod covers;
 mod library;
 mod lyrics;
+mod other;
 mod playback;
-mod tags;
 mod window;
 
 use nsh_core::element::input;
@@ -128,12 +128,12 @@ pub(super) enum Pane {
     Lyrics,
     Covers,
     Window,
-    Tags,
+    Other,
 }
 
 impl Pane {
     /// 左栏分组（小标题 + 分类，不折叠）：通用是外观 / 曲库 / 播放 /
-    /// 窗口；歌词、封面、标签这些描述曲目信息的归「元数据」。
+    /// 窗口；歌词、封面、其他这些描述曲目信息的归「元数据」。
     const GROUPS: [(&'static str, &'static [Pane]); 2] = [
         (
             "通用",
@@ -144,7 +144,7 @@ impl Pane {
                 Pane::Window,
             ],
         ),
-        ("元数据", &[Pane::Lyrics, Pane::Covers, Pane::Tags]),
+        ("元数据", &[Pane::Lyrics, Pane::Covers, Pane::Other]),
     ];
 
     /// 全部分类（显示顺序）。
@@ -162,7 +162,7 @@ impl Pane {
             Pane::Lyrics => "歌词",
             Pane::Covers => "封面",
             Pane::Window => "窗口",
-            Pane::Tags => "标签",
+            Pane::Other => "其他",
         }
     }
 
@@ -173,7 +173,7 @@ impl Pane {
             Pane::Lyrics => Icon::Note,
             Pane::Covers => Icon::Disc,
             Pane::Window => Icon::Monitor,
-            Pane::Tags => Icon::Tag,
+            Pane::Other => Icon::More,
             Pane::Appearance => Icon::Sun,
         }
     }
@@ -287,10 +287,16 @@ const SECTIONS: &[Section] = &[
         build: window::menubar_section,
     },
     Section {
-        pane: Pane::Tags,
-        title: "标签",
+        pane: Pane::Other,
+        title: "艺术家分隔符",
+        keys: "艺术家 歌手 分隔符 分号 顿号 斜杠 拆分",
+        build: other::artist_separators_section,
+    },
+    Section {
+        pane: Pane::Other,
+        title: "标签分隔符",
         keys: "流派 标签 分隔符 分号 顿号 斜杠 拆分",
-        build: tags::genres_section,
+        build: other::genre_separators_section,
     },
     Section {
         pane: Pane::Appearance,

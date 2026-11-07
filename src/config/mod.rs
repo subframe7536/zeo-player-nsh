@@ -119,6 +119,9 @@ pub enum SidebarSection {
 /// 出厂流派分隔符。
 pub const DEFAULT_SEPARATORS: &[&str] = &[";"];
 
+/// 出厂艺术家分隔符。
+pub const DEFAULT_ARTIST_SEPARATORS: &[&str] = &[";"];
+
 /// 出厂过滤：短于 10 秒的音频不进曲库。
 pub const DEFAULT_MIN_DURATION_SECS: u32 = 10;
 /// 出厂过滤：小于 100 KB 的音频不进曲库。
@@ -240,6 +243,9 @@ pub struct LibraryConfig {
     /// 流派分隔符（任一出现即切开；空列表为不拆分）。
     #[serde(default = "default_separators")]
     pub genre_separators: Vec<String>,
+    /// 艺术家分隔符（任一出现即切开；空列表为不拆分）。
+    #[serde(default = "default_artist_separators")]
+    pub artist_separators: Vec<String>,
     /// 监视根目录，文件变化后自动扫描。
     #[serde(default)]
     pub watch: bool,
@@ -360,6 +366,7 @@ impl Default for LibraryConfig {
             roots: Vec::new(),
             genre_separator: None,
             genre_separators: default_separators(),
+            artist_separators: default_artist_separators(),
             watch: false,
             font: None,
             close_action: CloseAction::Ask,
@@ -393,6 +400,13 @@ fn default_separators() -> Vec<String> {
     DEFAULT_SEPARATORS.iter().map(|s| (*s).to_owned()).collect()
 }
 
+fn default_artist_separators() -> Vec<String> {
+    DEFAULT_ARTIST_SEPARATORS
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
+}
+
 impl LibraryConfig {
     /// 迁移旧字段、去空去重。
     fn normalized(mut self) -> Self {
@@ -403,6 +417,7 @@ impl LibraryConfig {
             self.genre_separators = vec![old];
         }
         self.genre_separators = clean_separators(&self.genre_separators);
+        self.artist_separators = clean_separators(&self.artist_separators);
         self
     }
 }
@@ -1066,6 +1081,13 @@ impl LibraryStore {
         clean
     }
 
+    /// 改艺术家分隔符：保存。
+    pub fn set_artist_separators(&self, separators: &[String]) -> Vec<String> {
+        let clean = clean_separators(separators);
+        self.update_config(|c| c.artist_separators = clean.clone());
+        clean
+    }
+
     /// 同步所有源的曲目并重建索引（在调用方的工作线程上运行）。目前只有
     /// `local`；多源时在这里逐个同步、合并写回，`progress` 随之推进。
     pub fn scan(&self) -> usize {
@@ -1094,6 +1116,29 @@ pub fn split_genres(raw: &[String], separators: &[String]) -> Vec<String> {
             if !part.is_empty() && !out.iter().any(|g| g == part) {
                 out.push(part.to_owned());
             }
+        }
+    }
+    out
+}
+
+/// 艺术家切分：任一分隔符处切开 → trim 每段 → 去空段、去重。
+pub fn split_artists(raw: &str, separators: &[String]) -> Vec<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    let mut parts = vec![raw];
+    for sep in separators.iter().filter(|s| !s.is_empty()) {
+        parts = parts
+            .into_iter()
+            .flat_map(|p| p.split(sep.as_str()))
+            .collect();
+    }
+    let mut out: Vec<String> = Vec::new();
+    for part in parts {
+        let part = part.trim();
+        if !part.is_empty() && !out.iter().any(|a| a == part) {
+            out.push(part.to_owned());
         }
     }
     out
@@ -1184,6 +1229,18 @@ mod tests {
             split_genres(&raw, &[";".into()]),
             vec!["Rock", "Indie", "Dream Pop"]
         );
+    }
+
+    #[test]
+    fn artist_split() {
+        let raw = "Jay Chou; Mayday / Eason Chan";
+        let seps = vec![";".to_owned(), "/".to_owned()];
+        assert_eq!(
+            split_artists(raw, &seps),
+            vec!["Jay Chou", "Mayday", "Eason Chan"]
+        );
+        assert_eq!(split_artists("  ;;  ", &[";".into()]), Vec::<String>::new());
+        assert_eq!(split_artists("Solo", &[]), vec!["Solo"]);
     }
 
     #[test]
