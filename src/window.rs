@@ -289,7 +289,9 @@ pub fn update_tray(state: TrayState) {
 
 /// 把空闲内存还给系统（隐藏到托盘后调用）：界面拆掉释放的堆页
 /// 一直留在进程工作集 / malloc 分区里，任务管理器 / 活动监视器的
-/// 数值不会降，要手动裁剪。
+/// 数值不会降，要手动裁剪。它只回收**调用时已经空闲**的页——隐藏
+/// 期间后台线程新产生的垃圾要再调一次才走，所以隐藏状态下由界面
+/// 侧周期重复调用（`store` 的隐藏清理循环）。
 pub fn trim_memory() {
     platform::trim_memory();
 }
@@ -300,8 +302,8 @@ pub fn hwnd() -> Option<u64> {
     platform::HWND_VALUE.get().copied()
 }
 
-/// 进程内存采样（私有字节, 工作集），测量脚本用；macOS / 其它平台
-/// 未实现，返回 (0, 0)（bench 只在 Windows 上跑）。
+/// 进程内存采样，测量脚本用：macOS 是（物理足迹, 驻留大小），Windows
+/// 是（私有字节, 工作集）；其它平台未实现，返回 (0, 0)。
 #[cfg(any(debug_assertions, test))]
 pub fn memory_usage() -> (u64, u64) {
     platform::memory_usage()
@@ -702,14 +704,37 @@ mod platform {
         unsafe extern "C" {
             fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
         }
-        // SAFETY: zone 传 NULL 表示默认分区；goal 0 表示尽量释放空闲页。
+        // SAFETY: zone 传 NULL 遍历全部分区（NanoZone 管小对象，大
+        // 块仍走 szone——只调默认分区碰不到它）；goal 0 表示尽量释放
+        // 空闲页。返回值恒为 0、不代表没释放（实测能把已空闲的大块
+        // 脏页还给系统）。
         unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
     }
 
-    /// 未实现（bench 的采样只在 Windows 上跑）。
+    /// 进程内存（物理足迹, 驻留大小）：`phys_footprint` 就是活动监视器
+    /// 「内存」列的口径（含压缩与 IOSurface），`resident_size` 接近
+    /// 「真实内存」列。测量脚本用。
     #[cfg(any(debug_assertions, test))]
     pub fn memory_usage() -> (u64, u64) {
-        (0, 0)
+        // rusage_info_v4（libproc.h）：16B uuid 后跟 35 个 u64 字段——
+        // ri_resident_size 是 uuid 后第 7 个（含 uuid 共第 9 个 u64），
+        // ri_phys_footprint 第 8 个。缓冲区给宽一点，内核按它自己的
+        // 结构大小回填。
+        #[repr(C)]
+        struct RusageV4 {
+            raw: [u64; 40],
+        }
+        unsafe extern "C" {
+            fn proc_pid_rusage(pid: i32, flavor: i32, buffer: *mut RusageV4) -> i32;
+        }
+        const RUSAGE_INFO_V4: i32 = 4;
+        let mut info = RusageV4 { raw: [0; 40] };
+        // SAFETY: buffer 是本进程地址空间里不小于写出结构的内存。
+        let ok = unsafe { proc_pid_rusage(std::process::id() as i32, RUSAGE_INFO_V4, &mut info) };
+        if ok != 0 {
+            return (0, 0);
+        }
+        (info.raw[9], info.raw[8])
     }
 }
 

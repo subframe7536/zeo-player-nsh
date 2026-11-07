@@ -49,6 +49,12 @@ fn cache() -> &'static WaveCache {
     CACHE.get_or_init(|| std::sync::Mutex::new(Vec::new()))
 }
 
+/// 清空波形 LRU（隐藏到托盘时调）：重算要解码整个文件，但界面已拆，
+/// 显示后当前曲目按需重算。
+pub fn clear() {
+    cache().lock().unwrap().clear();
+}
+
 /// 一个文件的 56 根波形条（按文件指纹缓存，上限 [`WAVE_CAP`] 条）。
 pub fn waveform(path: &Path) -> Result<Arc<Vec<f64>>, String> {
     let key = path.to_string_lossy().into_owned();

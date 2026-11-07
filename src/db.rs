@@ -211,55 +211,101 @@ fn json(values: &[String]) -> String {
 
 // --- 曲目元数据 ---------------------------------------------------------------
 
-/// 读出全部元数据（启动时一次）。
+/// 读出全部元数据（启动时一次，及隐藏丢弃后的 `entries` 整体回填）。
 pub fn load_meta() -> Vec<(String, CacheEntry)> {
     with("读取元数据", |conn| load_meta_from(conn)).unwrap_or_default()
 }
 
+fn meta_row(r: &rusqlite::Row) -> rusqlite::Result<(String, CacheEntry)> {
+    let meta = MetaInfo {
+        title: r.get(4)?,
+        artist: r.get(5)?,
+        album: r.get(6)?,
+        album_artist: r.get(7)?,
+        duration: r.get(8)?,
+        has_art: r.get(9)?,
+        bit_rate: r.get(10)?,
+        bit_depth: r.get(11)?,
+        sample_rate: r.get(12)?,
+        channels: r.get(13)?,
+        codec: r.get(14)?,
+        quality: r.get(15)?,
+        genres: list(r.get(16)?),
+        year: r.get(17)?,
+        track: r.get(18)?,
+        track_total: r.get(19)?,
+        disk: r.get(20)?,
+        disk_total: r.get(21)?,
+        album_artists: list(r.get(22)?),
+        composers: list(r.get(23)?),
+        art_hue: match (r.get::<_, Option<f64>>(24)?, r.get::<_, Option<f64>>(25)?) {
+            (Some(h), Some(s)) => Some((h as f32, s as f32)),
+            _ => None,
+        },
+        replaygain: crate::metadata::ReplayGain {
+            track_gain: r.get::<_, Option<f64>>(26)?.map(|v| v as f32),
+            track_peak: r.get::<_, Option<f64>>(27)?.map(|v| v as f32),
+            album_gain: r.get::<_, Option<f64>>(28)?.map(|v| v as f32),
+            album_peak: r.get::<_, Option<f64>>(29)?.map(|v| v as f32),
+        },
+    };
+    let entry = CacheEntry {
+        stamp: r.get::<_, i64>(1)? as u64,
+        size: r.get::<_, i64>(2)? as u64,
+        modified: r.get::<_, i64>(3)? as u64,
+        value: Arc::new(meta),
+    };
+    Ok((r.get::<_, String>(0)?, entry))
+}
+
 fn load_meta_from(conn: &Connection) -> rusqlite::Result<Vec<(String, CacheEntry)>> {
     let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM tracks"))?;
-    let rows = stmt.query_map([], |r| {
-        let meta = MetaInfo {
-            title: r.get(4)?,
-            artist: r.get(5)?,
-            album: r.get(6)?,
-            album_artist: r.get(7)?,
-            duration: r.get(8)?,
-            has_art: r.get(9)?,
-            bit_rate: r.get(10)?,
-            bit_depth: r.get(11)?,
-            sample_rate: r.get(12)?,
-            channels: r.get(13)?,
-            codec: r.get(14)?,
-            quality: r.get(15)?,
-            genres: list(r.get(16)?),
-            year: r.get(17)?,
-            track: r.get(18)?,
-            track_total: r.get(19)?,
-            disk: r.get(20)?,
-            disk_total: r.get(21)?,
-            album_artists: list(r.get(22)?),
-            composers: list(r.get(23)?),
-            art_hue: match (r.get::<_, Option<f64>>(24)?, r.get::<_, Option<f64>>(25)?) {
-                (Some(h), Some(s)) => Some((h as f32, s as f32)),
-                _ => None,
-            },
-            replaygain: crate::metadata::ReplayGain {
-                track_gain: r.get::<_, Option<f64>>(26)?.map(|v| v as f32),
-                track_peak: r.get::<_, Option<f64>>(27)?.map(|v| v as f32),
-                album_gain: r.get::<_, Option<f64>>(28)?.map(|v| v as f32),
-                album_peak: r.get::<_, Option<f64>>(29)?.map(|v| v as f32),
-            },
-        };
-        let entry = CacheEntry {
-            stamp: r.get::<_, i64>(1)? as u64,
-            size: r.get::<_, i64>(2)? as u64,
-            modified: r.get::<_, i64>(3)? as u64,
-            value: Arc::new(meta),
-        };
-        Ok((r.get::<_, String>(0)?, entry))
-    })?;
+    let rows = stmt.query_map([], meta_row)?;
     rows.collect()
+}
+
+/// 单行元数据（内存缓存隐藏丢弃后 `entry` 的按需回填）：不存在或出错
+/// 都回 `None`，调用方再落到现场读标签。
+pub fn load_meta_row(path: &str) -> Option<CacheEntry> {
+    with("读取元数据行", |conn| {
+        conn.query_row(
+            &format!("SELECT {COLUMNS} FROM tracks WHERE path = ?1"),
+            [path],
+            meta_row,
+        )
+        .optional()
+    })
+    .flatten()
+    .map(|(_, e)| e)
+}
+
+/// 已存的封面主色调（`art_hue` 在内存条目被隐藏丢掉后查库）。
+pub fn meta_hue(path: &str) -> Option<(f32, f32)> {
+    with("读取封面色调", |conn| {
+        conn.query_row(
+            "SELECT art_hue, art_sat FROM tracks WHERE path = ?1",
+            [path],
+            |r| Ok((r.get::<_, Option<f64>>(0)?, r.get::<_, Option<f64>>(1)?)),
+        )
+        .optional()
+    })
+    .flatten()
+    .and_then(|(h, s)| h.zip(s))
+    .map(|(h, s)| (h as f32, s as f32))
+}
+
+/// 只写封面主色调（内存条目被隐藏丢掉、`set_art_hue` 无处落时直写库）：
+/// `WHERE stamp` 保证还是同一份文件（与 `set_art_hue` 的指纹检查同一
+/// 语义），不存在的行 / 旧指纹静默不写。
+pub fn set_meta_hue(path: &str, stamp: u64, hue: Option<(f32, f32)>) {
+    let (h, s) = hue.map_or((None, None), |(h, s)| (Some(h as f64), Some(s as f64)));
+    with("写入封面色调", |conn| {
+        conn.execute(
+            "UPDATE tracks SET art_hue = ?2, art_sat = ?3 WHERE path = ?1 AND stamp = ?4",
+            params![path, h, s, stamp as i64],
+        )
+        .map(|_| ())
+    });
 }
 
 /// 写入（同一路径覆盖），一个事务。

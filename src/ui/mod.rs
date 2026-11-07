@@ -321,12 +321,14 @@ fn bench(open_full: Rc<dyn Fn()>) {
             crate::window::hide();
             eprintln!("ZEO_PLAYER_BENCH step hidden");
             let mem = || {
-                let (priv_bytes, ws) = crate::window::memory_usage();
-                format!(
-                    "priv={:.1}MB ws={:.1}MB",
-                    priv_bytes as f64 / 1048576.0,
-                    ws as f64 / 1048576.0
-                )
+                // macOS 是（物理足迹, 驻留），Windows 是（私有字节, 工作集）。
+                let (a, b) = crate::window::memory_usage();
+                let (a, b) = (a as f64 / 1048576.0, b as f64 / 1048576.0);
+                if cfg!(target_os = "macos") {
+                    format!("footprint={a:.1}MB rss={b:.1}MB")
+                } else {
+                    format!("priv={a:.1}MB ws={b:.1}MB")
+                }
             };
             loop {
                 wait(30).await;

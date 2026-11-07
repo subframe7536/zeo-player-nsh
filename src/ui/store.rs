@@ -354,7 +354,10 @@ pub fn install() -> Store {
                 // 刚进托盘：封面信号的 owner 整个 dispose（缩略图在磁盘
                 // 缓存，显示时重新请求）；大图 LRU、歌词缓存与 SQLite 页
                 // 缓存一并放掉（当前曲目的大图 Arc 由 NowPlaying 持着，
-                // 不受影响）；延迟 1 秒等界面拆完，再把空闲堆页还给系统。
+                // 不受影响）；延迟 1 秒等界面拆完（NSH 视图放掉图片
+                // lease），清掉进程共享的解码图片预算（封面 / SVG / 变体
+                // 的未出租条目会留到 budget 上限，隐藏期不会再被逐出），
+                // 再把空闲堆页还给系统。期间重新显示则全跳过。
                 COVERS.with(|c| c.borrow_mut().clear());
                 COVER_STAMPS.with(|c| c.borrow_mut().clear());
                 COVER_OWNER.with(|o| {
@@ -364,10 +367,28 @@ pub fn install() -> Store {
                 });
                 crate::metadata::covers::clear_artwork();
                 crate::engine::Meta::clear_lyrics();
+                crate::metadata::waveform::clear();
+                // 全库元数据内存表也丢（数据库行保留，按需单行回填）——
+                // 曲库大时这是最重的一块常驻堆。
+                crate::metadata::MetaCache::global().drop_in_memory();
                 crate::db::shrink_memory();
                 spawn(async {
                     timer(Duration::from_secs(1)).await;
-                    crate::window::trim_memory();
+                    if !crate::window::is_hidden() {
+                        return;
+                    }
+                    nsh_core::image::budget().clear();
+                    // 首剪之后每 30 秒再剪一次：隐藏期间封面池 / 队尾
+                    // 预载仍在解码（大封面一条几十 MB 的临时缓冲），释放
+                    // 后留在 malloc 分区里不还，要再调一次裁剪才还给
+                    // 系统。重新显示即退出循环。
+                    loop {
+                        crate::window::trim_memory();
+                        timer(Duration::from_secs(30)).await;
+                        if !crate::window::is_hidden() {
+                            break;
+                        }
+                    }
                 });
             }
             s.hidden.set(hidden);

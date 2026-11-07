@@ -212,16 +212,19 @@ pub fn art_hue(path: &Path) -> Option<(f32, f32)> {
 
 /// 库里没有色调时解码封面算一次（covers 工作线程；扫描时每个有封面的
 /// 文件都会走到这里，保证 `art_hue` 尽量入库）。优先用已缓存的 `cached`
-/// 缩略图（小 JPEG，省一次 lofty + 原图解码），没有才回封面来源解码
-/// （与 [`cover_source`] 同一优先序：本地同名图片 ↔ 内嵌封面）。
+/// 缩略图（小 JPEG，省一次 lofty + 原图解码），**解不开**才回封面来源
+/// 解码（与 [`cover_source`] 同一优先序：本地同名图片 ↔ 内嵌封面）。
+/// 缩略图是灰图（`palette_hue` 为 `None`）不回退——它是封面源的缩放，
+/// 原图同样给不出色调，回退只会白做一次全尺寸解码（内嵌大图一条几十
+/// MB 的临时缓冲）。
 fn ensure_hue(path: &Path, cached: &Path) {
     if MetaCache::global().art_hue(path).is_some() {
         return;
     }
-    let hue = image::open(cached)
-        .ok()
-        .and_then(|img| palette_hue(&img))
-        .or_else(|| decode_cover(path).and_then(|img| palette_hue(&img)));
+    let hue = match image::open(cached) {
+        Ok(img) => palette_hue(&img),
+        Err(_) => decode_cover(path).and_then(|img| palette_hue(&img)),
+    };
     store_hue(path, hue);
 }
 

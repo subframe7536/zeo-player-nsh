@@ -336,6 +336,10 @@ pub struct MetaCache {
     pending: Mutex<Vec<(String, CacheEntry)>>,
     /// 扫描中：攒一批再写（见 [`Self::begin_batch`]）。
     batching: AtomicBool,
+    /// 隐藏到托盘时丢过内存条目（[`Self::drop_in_memory`]）：置位期间
+    /// `entries` 全量需求从数据库整体回填，`entry` / `art_hue` /
+    /// `set_art_hue` 按需走数据库单行读写。
+    dropped: AtomicBool,
 }
 
 impl MetaCache {
@@ -346,14 +350,19 @@ impl MetaCache {
             entries: Mutex::new(crate::db::load_meta().into_iter().collect()),
             pending: Mutex::new(Vec::new()),
             batching: AtomicBool::new(false),
+            dropped: AtomicBool::new(false),
         })
     }
 
     /// 全部条目（启动时据此先显示上次的曲库）。
     pub fn entries(&self) -> Vec<(String, CacheEntry)> {
-        self.entries
-            .lock()
-            .unwrap()
+        let mut entries = self.entries.lock().unwrap();
+        if self.dropped.swap(false, Ordering::Relaxed) {
+            // 隐藏期间丢过内存条目：曲库索引重建这类全量需求本就需要
+            // 全部条目，从数据库整体回填（单行按需回填见 `entry`）。
+            *entries = crate::db::load_meta().into_iter().collect();
+        }
+        entries
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
@@ -364,6 +373,18 @@ impl MetaCache {
         self.entries.lock().unwrap().clear();
         self.pending.lock().unwrap().clear();
         crate::db::clear_meta();
+    }
+
+    /// 只丢内存条目（隐藏到托盘时调）：数据库行保留，`entry` /
+    /// `art_hue` / `set_art_hue` 按需单行回填与直写——引擎后台换曲、
+    /// 封面工作线程照常工作，但只有被碰到的条目重新占内存。
+    pub fn drop_in_memory(&self) {
+        self.flush();
+        let mut entries = self.entries.lock().unwrap();
+        // 标志在持锁状态下先置位再清表：否则「清空」与「置位」之间的
+        // `entries` 读方会拿到空表且错过回填。
+        self.dropped.store(true, Ordering::Relaxed);
+        entries.clear();
     }
 
     /// 移除单条缓存（界面「删除记录」）：连待写队列里同一路径的条目
@@ -457,25 +478,41 @@ impl MetaCache {
         self.entry(path).map(|e| e.value)
     }
 
-    /// `path` 已存的封面主色调（同步读，界面用）。
+    /// `path` 已存的封面主色调（同步读，界面用）。内存条目被隐藏丢
+    /// 掉后回退到数据库单行查——色调本来就在库里，不该因丢缓存重算。
     pub fn art_hue(&self, path: &Path) -> Option<(f32, f32)> {
-        self.entries
+        let key = path.to_string_lossy().into_owned();
+        if let Some(hue) = self
+            .entries
             .lock()
             .unwrap()
-            .get(path.to_string_lossy().as_ref())?
-            .value
-            .art_hue
+            .get(key.as_str())
+            .and_then(|e| e.value.art_hue)
+        {
+            return Some(hue);
+        }
+        if self.dropped.load(Ordering::Relaxed) {
+            return crate::db::meta_hue(&key);
+        }
+        None
     }
 
     /// 写封面主色调（covers 工作线程）：条目在且文件指纹未变才写
     /// （指纹变了说明算的是旧封面，等下次读取重建）。写入走 `pending`
-    /// 与元数据同一批落库。
+    /// 与元数据同一批落库；条目被隐藏丢掉时按同指纹直写库。
     pub fn set_art_hue(&self, path: &Path, hue: Option<(f32, f32)>) {
         let stamp = std::fs::metadata(path).map(|m| file_stamp(&m)).unwrap_or(0);
         let key = path.to_string_lossy().into_owned();
         let row = {
             let mut entries = self.entries.lock().unwrap();
             let Some(entry) = entries.get_mut(&key) else {
+                drop(entries);
+                // 内存条目被隐藏丢掉：不重建条目，同指纹直写库（`WHERE
+                // stamp` 与上面的指纹检查同一语义）。未丢弃时条目缺失
+                // = 库里也没有（表随启动装载且只增），保持原静默返回。
+                if self.dropped.load(Ordering::Relaxed) {
+                    crate::db::set_meta_hue(&key, stamp, hue);
+                }
                 return;
             };
             if entry.stamp != stamp || entry.value.art_hue == hue {
@@ -505,6 +542,17 @@ impl MetaCache {
             && entry.stamp == stamp
         {
             return Ok(entry.clone());
+        }
+        // 内存条目可能被隐藏丢掉：先试数据库行（指纹一致直接用，免
+        // 重读文件）；已在库的条目不进 `pending` 再写一遍。
+        if let Some(entry) = crate::db::load_meta_row(&key)
+            && entry.stamp == stamp
+        {
+            self.entries
+                .lock()
+                .unwrap()
+                .insert(key.clone(), entry.clone());
+            return Ok(entry);
         }
         let entry = CacheEntry {
             stamp,
