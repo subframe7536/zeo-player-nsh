@@ -52,7 +52,7 @@ fn start(width: f32, height: f32) -> Headless {
     config.environment.os = Os::MacOs;
     zeo_player::engine::Player::global().set_volume(0.0);
     let mut app = Headless::start(config).expect("start the app");
-    app.wait_for("文件夹").unwrap();
+    app.wait_for("首页").unwrap();
     app
 }
 
@@ -192,7 +192,9 @@ fn edit_dialog_layout_probe() {
     let mut app = start(1200.0, 800.0);
     let probed = probe(&mut app);
 
-    app.press("文件夹").unwrap();
+    app.press("label:切换视图").unwrap();
+    app.wait_for("role:option[文件夹]").unwrap();
+    app.press("role:option[文件夹]").unwrap();
     app.wait_for_within("text:测试歌曲", Duration::from_secs(20))
         .unwrap();
     app.right_click("label:测试歌曲").unwrap();

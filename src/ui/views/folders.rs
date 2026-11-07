@@ -6,7 +6,7 @@
 //! 目录会同步改路径）。树行右键菜单做增删改：新建子文件夹、重命名、
 //! 删除（回收站 / 直接删按「删除文件」设置）；曲目行也能重命名文件。
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::rc::Rc;
@@ -252,25 +252,22 @@ struct TreeRow {
     count: usize,
 }
 
-/// `expanded` 里的文件夹展开；`selected` 的祖先总是展开（选中项留在视野里）。
-fn flatten_with(
-    tree: &[Folder],
-    expanded: &BTreeSet<String>,
-    selected: Option<&str>,
-    sep: char,
-) -> Vec<TreeRow> {
-    fn walk(
-        node: &Folder,
-        depth: usize,
-        expanded: &BTreeSet<String>,
-        selected: Option<&str>,
-        sep: char,
-        out: &mut Vec<TreeRow>,
-    ) {
-        // 严格后代（`path/` 前缀）才算祖先展开。
-        let under = selected
-            .is_some_and(|s| s.starts_with(&format!("{}{sep}", node.path.trim_end_matches(sep))));
-        let open = expanded.contains(&node.path) || under;
+/// 展开 `path` 的所有父级祖先目录。
+fn expand_ancestors(expanded: &mut BTreeSet<String>, path: &str, sep: char) {
+    let mut current = path.trim_end_matches(sep);
+    while let Some(idx) = current.rfind(sep) {
+        current = &current[..idx];
+        if current.is_empty() {
+            break;
+        }
+        expanded.insert(current.to_owned());
+    }
+}
+
+/// `expanded` 里的文件夹展开。
+fn flatten_with(tree: &[Folder], expanded: &BTreeSet<String>) -> Vec<TreeRow> {
+    fn walk(node: &Folder, depth: usize, expanded: &BTreeSet<String>, out: &mut Vec<TreeRow>) {
+        let open = expanded.contains(&node.path);
         out.push(TreeRow {
             path: node.path.clone(),
             name: node.name.clone(),
@@ -281,13 +278,13 @@ fn flatten_with(
         });
         if open {
             for child in node.children.values() {
-                walk(child, depth + 1, expanded, selected, sep, out);
+                walk(child, depth + 1, expanded, out);
             }
         }
     }
     let mut out = Vec::new();
     for root in tree {
-        walk(root, 0, expanded, selected, sep, &mut out);
+        walk(root, 0, expanded, &mut out);
     }
     out
 }
@@ -370,9 +367,8 @@ struct DragCtx {
     /// 由平台原生写入，每帧零引擎开销（别用 `set` 逐帧推它）。
     gx: AnimatedValue,
     gy: AnimatedValue,
-    /// 测量用：树列表与本页根 view。
+    /// 测量用：树列表。
     list: ElementRef,
-    root: ElementRef,
     /// 移动成功后定位（新路径或目标文件夹）。
     select: Rc<dyn Fn(&str)>,
     /// 结果提示（页头副标题短暂显示）。
@@ -416,14 +412,12 @@ impl DragCtx {
         // 量出来之前把 ghost 停在窗外，免得沿上次的锚点闪一下。
         self.anchor.set((-10000.0, -10000.0));
         let (down, geo, anchor) = (self.down.clone(), self.geo.clone(), self.anchor);
-        let (list, root) = (self.list, self.root);
+        let list = self.list;
         spawn(async move {
-            if let Some(m) = root.measure().await {
-                if let Some(d) = down.get() {
-                    // ghost 锚在按下点（本页根 view 坐标）+ nudge；pan
-                    // 值是「当前位置 - 按下点」，加起来正好贴着指针。
-                    anchor.set((d.x.0 - m.page.x.0 + 10.0, d.y.0 - m.page.y.0 + 12.0));
-                }
+            if let Some(d) = down.get() {
+                // ghost 锚在按下点（窗口坐标）+ nudge；pan
+                // 值是「当前位置 - 按下点」，加起来正好贴着指针。
+                anchor.set((d.x.0 + 10.0, d.y.0 + 12.0));
             }
             if let Some(m) = list.measure().await {
                 geo.set(Some((m.page.x.0, m.page.y.0, m.frame.size.width.0)));
@@ -492,17 +486,7 @@ fn show_message(message: Signal<String>, text: String) {
 
 // --- 文件树增删改 --------------------------------------------------------------
 
-/// 树行 / 曲目行的操作请求：`Some` 时对应弹窗挂着。
-#[derive(Clone, PartialEq)]
-enum FileOp {
-    /// 在 `parent` 下新建文件夹。
-    NewFolder { parent: String },
-    /// 重命名 `path`（`dir`：文件夹；否则是文件，输入框只改主名、扩展名
-    /// 沿用）。
-    Rename { path: String, dir: bool },
-    /// 删除文件夹 `path`（含其中全部内容）。
-    DeleteFolder { path: String },
-}
+pub use crate::ui::store::FileOp;
 
 /// 新建 / 重命名的目标名：非空、不含路径分隔符、不是 `.` / `..`。
 fn valid_name(name: &str) -> Result<&str, String> {
@@ -647,11 +631,12 @@ struct Ops {
     message: Signal<String>,
 }
 
-/// 操作完成后定位到某个文件夹：选中并保证它展开。
+/// 操作完成后定位到某个文件夹：选中并保证它与祖先展开。
 fn select_folder(cwd: Signal<Option<String>>, expanded: Signal<BTreeSet<String>>, path: &str) {
     cwd.set(Some(path.to_owned()));
     expanded.update(|e| {
         e.insert(path.to_owned());
+        expand_ancestors(e, path, SEP);
     });
 }
 
@@ -779,22 +764,6 @@ impl Ops {
                 }
             });
         });
-    }
-}
-
-/// 「新建子文件夹」/「重命名」/「删除文件夹」的弹窗（`ops.op` 有请求
-/// 时挂载，关掉即卸）。
-fn op_dialog(ops: Rc<Ops>) -> AnyElement {
-    let Some(op) = ops.op.get_untracked() else {
-        return view().into_element();
-    };
-    let close = {
-        let op = ops.op;
-        move || op.set(None)
-    };
-    match op {
-        FileOp::DeleteFolder { path } => delete_folder_dialog(ops, path, close),
-        FileOp::NewFolder { .. } | FileOp::Rename { .. } => name_dialog(ops, op, close),
     }
 }
 
@@ -980,46 +949,34 @@ fn tree_menu(trigger: View, row: Memo<Option<TreeRow>>, ops: Rc<Ops>) -> AnyElem
         .into_element()
 }
 
-#[component]
-pub fn Folders() -> impl IntoElement {
-    let s = store();
-    let cwd = signal(None::<String>);
-    // 根文件夹默认展开（构造时从配置同步拿到根目录）。
-    let expanded = signal(
-        s.library
-            .with_untracked(|l| l.config.roots.iter().cloned().collect::<BTreeSet<String>>()),
-    );
-    let message = signal(String::new());
-    let dropping = signal(false);
-    // 增删改：本次会话建出来还没曲目的空文件夹也挂进树（树本来由曲目
-    // 路径推导）；磁盘上没了的在构建时滤掉。
-    let extra = signal(BTreeSet::<String>::new());
-    let op = signal(None::<FileOp>);
-    let tree = computed(move || {
-        let roots = s.library.with(|l| l.config.roots.clone());
-        let tracks = s.tracks.get();
-        let extra: Vec<String> = extra
-            .get()
-            .into_iter()
-            .filter(|d| Path::new(d).is_dir())
-            .collect();
-        let t = build_tree(&roots, &tracks, &extra);
-        Same(Arc::new(t))
-    });
-    let here = computed(move || {
-        let tree = tree.get();
-        place(&tree, cwd.get().as_deref())
-    });
+#[derive(Clone)]
+struct FolderUi {
+    here: Memo<Place>,
+    rows: Memo<Rc<Vec<TreeRow>>>,
+    files: Memo<Rc<Vec<usize>>>,
+    select: Rc<dyn Fn(&str)>,
+    toggle: Rc<dyn Fn(&str, bool)>,
+    ops: Rc<Ops>,
+    ctx: Rc<DragCtx>,
+    list_ref: ElementRef,
+    scroll: Signal<f32>,
+}
 
-    // 选中并展开它；祖先总是展开（`flatten_with`），不用逐个写。
+fn create_folder_ui() -> FolderUi {
+    let s = store();
     let select: Rc<dyn Fn(&str)> = Rc::new(move |path: &str| {
-        cwd.set(Some(path.to_owned()));
-        expanded.update(|e| {
+        s.folder_sel.set(Some(path.to_owned()));
+        s.folder_expanded.update(|e| {
             e.insert(path.to_owned());
+            expand_ancestors(e, path, SEP);
         });
+        let nav = global::<crate::ui::Nav>();
+        if nav.get_untracked() != crate::ui::Nav::Folders {
+            nav.set(crate::ui::Nav::Folders);
+        }
     });
     let toggle: Rc<dyn Fn(&str, bool)> = Rc::new(move |path: &str, open: bool| {
-        expanded.update(|e| {
+        s.folder_expanded.update(|e| {
             if open {
                 e.remove(path);
             } else {
@@ -1027,40 +984,48 @@ pub fn Folders() -> impl IntoElement {
             }
         });
     });
-    // 增删改：树行右键菜单与曲目行的「重命名文件…」都走它。
     let ops = Rc::new(Ops {
-        op,
-        extra,
-        cwd,
-        expanded,
-        message,
+        op: s.folder_op,
+        extra: s.folder_extra,
+        cwd: s.folder_sel,
+        expanded: s.folder_expanded,
+        message: s.folder_message,
     });
-    // `otherwise` 的闭包会把 `ops` 搬走，弹窗这边先留一份。
-    let ops_dialog = ops.clone();
-
+    let tree = computed(move || {
+        let roots = s.library.with(|l| l.config.roots.clone());
+        let tracks = s.tracks.get();
+        let mut extra: BTreeSet<String> = s.dirs.get().iter().cloned().collect();
+        for d in s.folder_extra.get() {
+            if Path::new(&d).is_dir() {
+                extra.insert(d);
+            }
+        }
+        let extra_vec: Vec<String> = extra.into_iter().collect();
+        let t = build_tree(&roots, &tracks, &extra_vec);
+        Same(Arc::new(t))
+    });
+    let here = computed(move || {
+        let tree = tree.get();
+        place(&tree, s.folder_sel.get().as_deref())
+    });
     let rows = computed(move || {
-        let selected = here.with(|p| p.path.clone());
-        let r = flatten_with(&tree.get(), &expanded.get(), selected.as_deref(), SEP);
+        let r = flatten_with(&tree.get(), &s.folder_expanded.get());
         Rc::new(r)
     });
     let files = computed(move || here.with(|p| p.files.clone()));
 
-    // 应用内拖动（文件行 / 文件夹行 → 树行）：ghost 跟随 + 目标高亮 +
-    // 落下移动。
     let active = signal(None::<DragState>);
     let over = signal(None::<String>);
-    // 拖动浮层的锚点（按下点在本页根 view 里的位置），量出来前停在窗外。
     let anchor = signal((-10000.0, -10000.0));
     let scroll = signal(0.0_f32);
     let gx = animated_value(0.0);
     let gy = animated_value(0.0);
     let list_ref = element_ref();
-    let root_ref = element_ref();
     let ctx = Rc::new(DragCtx {
         active,
         over,
         anchor,
-        extra,
+        extra: s.folder_extra,
         rows,
         scroll,
         geo: Rc::new(Cell::new(None)),
@@ -1068,15 +1033,81 @@ pub fn Folders() -> impl IntoElement {
         gx,
         gy,
         list: list_ref,
-        root: root_ref,
         select: select.clone(),
-        message,
+        message: s.folder_message,
     });
+
+    FolderUi {
+        here,
+        rows,
+        files,
+        select,
+        toggle,
+        ops,
+        ctx,
+        list_ref,
+        scroll,
+    }
+}
+
+thread_local! {
+    static FOLDER_UI: RefCell<Option<FolderUi>> = const { RefCell::new(None) };
+}
+
+fn folder_ui() -> FolderUi {
+    FOLDER_UI.with(|cell| {
+        let mut b = cell.borrow_mut();
+        if let Some(ui) = b.as_ref() {
+            return ui.clone();
+        }
+        let ui = create_folder_ui();
+        *b = Some(ui.clone());
+        ui
+    })
+}
+
+/// 侧栏文件夹树列表。
+pub(crate) fn tree_sidebar_list(_rail: impl Fn() -> bool + Copy + 'static) -> View {
+    let ui = folder_ui();
+    let s = store();
+    let rows = ui.rows;
+    let here = ui.here;
+    let ctx = ui.ctx.clone();
+    let ops = ui.ops.clone();
+    let select = ui.select.clone();
+    let toggle = ui.toggle.clone();
+    let scroll_sig = ui.scroll;
+    let cell_select = select.clone();
+    let cell_toggle = toggle.clone();
+    let tree_list = virtual_list(computed(move || rows.with(|r| r.len())), move |at| {
+        let row = computed(move || rows.with(|r| r.get(at.index()).cloned()));
+        tree_cell(
+            row,
+            here,
+            ctx.clone(),
+            ops.clone(),
+            cell_select.clone(),
+            cell_toggle.clone(),
+        )
+    })
+    .keys(move || {
+        rows.get()
+            .iter()
+            .map(|r| r.path.clone())
+            .collect::<Vec<_>>()
+    })
+    .estimated_item_size(px(TREE_ROW))
+    .content_padding_x(px(4.0))
+    .content_padding_bottom(px(BAR_SPACE))
+    .element_ref(&ui.list_ref)
+    .on_scroll(move |e: &ScrollEvent| scroll_sig.set(e.offset.y.0))
+    .empty(empty_state(Icon::Folder, "没有文件夹", ""))
+    .flex_1();
 
     let on_drop = {
         let select = select.clone();
+        let message = s.folder_message;
         move |event: &FileDropEvent| {
-            dropping.set(false);
             let mut dir = None;
             let mut added = false;
             let notes: Vec<String> = event
@@ -1097,253 +1128,240 @@ pub fn Folders() -> impl IntoElement {
             if let Some(dir) = dir {
                 select(&dir);
             }
-            // 页头副标题只有一行，多条结果用分号连。
             show_message(message, notes.join("；"));
         }
     };
 
     view()
         .flex_1()
-        .element_ref(&root_ref)
-        .border_1()
-        .border_color(move || {
-            if dropping.get() {
-                primary()
-            } else {
-                AdaptiveColor::TRANSPARENT
-            }
-        })
-        .bg(move || {
-            if dropping.get() {
-                hover()
-            } else {
-                AdaptiveColor::TRANSPARENT
-            }
-        })
-        .transition_colors()
-        .duration(300.0)
-        .style_when(
-            move || active.with(|a| a.is_some()),
-            |st| st.cursor(Cursor::Grabbing),
-        )
-        .on_file_drag_enter(move || dropping.set(true))
-        .on_file_drag_leave(move || dropping.set(false))
+        .min_h(px(0.0))
         .on_file_drop(on_drop)
-        .child(
-            when(
-                move || s.library.with(|l| l.config.roots.is_empty()),
-                no_library,
-            )
-            .otherwise(move || {
-                let (select, toggle, ctx, ops) =
-                    (select.clone(), toggle.clone(), ctx.clone(), ops.clone());
-                let cell_ctx = ctx.clone();
-                let cell_ops = ops.clone();
-                let tree_list = virtual_list(computed(move || rows.with(|r| r.len())), move |at| {
-                    let row = computed(move || rows.with(|r| r.get(at.index()).cloned()));
-                    tree_cell(
-                        row,
-                        here,
-                        cell_ctx.clone(),
-                        cell_ops.clone(),
-                        select.clone(),
-                        toggle.clone(),
-                    )
-                })
-                // 路径作 key：cell 按行绑定（回收时行不变），树行右键
-                // 菜单里的行才不会错位。
-                .keys(move || {
-                    rows.get()
-                        .iter()
-                        .map(|r| r.path.clone())
-                        .collect::<Vec<_>>()
-                })
-                .estimated_item_size(px(TREE_ROW))
-                .content_padding_x(px(8.0))
-                .content_padding_bottom(px(BAR_SPACE))
-                .element_ref(&list_ref)
-                .on_scroll(move |e: &ScrollEvent| scroll.set(e.offset.y.0))
-                .empty(empty_state(Icon::Folder, "没有文件夹", ""))
-                .flex_1();
-                let tree_pane = view()
-                    .w(px(FOLDERS_TREE))
-                    .flex_shrink_0()
-                    .border_r_1()
-                    .border_r_color(border())
-                    .child(
-                        view()
-                            .px(px(14.0))
-                            .pt(px(14.0))
-                            .pb(px(6.0))
-                            .window_drag(true)
-                            .child(
-                                text("文件夹")
-                                    .text_size(px(11.0))
-                                    .line_height(px(11.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .letter_spacing(px(0.6))
-                                    .text_color(faint()),
-                            ),
-                    )
-                    .child(tree_list);
-
-                let subtitle = move || {
-                    let note = message.get();
-                    if !note.is_empty() {
-                        return note;
-                    }
-                    here.with(|p| {
-                        let mut parts = Vec::new();
-                        if !p.trail.is_empty() && p.trail != p.title {
-                            parts.push(p.trail.clone());
-                        }
-                        if p.folders > 0 {
-                            parts.push(format!("{} 个文件夹", p.folders));
-                        }
-                        parts.push(format!("{} 首", p.tracks));
-                        parts.push(format_bytes(p.bytes));
-                        parts.join(" · ")
-                    })
-                };
-                let title = move || here.with(|p| p.title.clone());
-                let actions = view()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(rescan_button())
-                    .child(when(
-                        move || here.with(|p| !p.all.is_empty()),
-                        move || {
-                            pill_button(Icon::Play, "播放全部", move || {
-                                here.with_untracked(|p| play_indices(&p.all, 0))
-                            })
-                        },
-                    ));
-                let header = view()
-                    .child(page_header(
-                        title,
-                        subtitle,
-                        None,
-                        Some(actions.into_element()),
-                    ))
-                    .child(track_columns(FOLDER_COLS));
-                let file_list =
-                    virtual_list(computed(move || files.with(|f| f.len())), move |at| {
-                        let index = computed(move || files.with(|f| f.get(at.index()).copied()));
-                        let track = computed(move || {
-                            index.with(|i| i.and_then(|i| s.tracks.with(|t| t.get(i).cloned())))
-                        });
-                        let number = computed(move || (at.index() + 1).to_string());
-                        let play = Rc::new(move || {
-                            let files = files.get_untracked();
-                            play_indices(&files, at.index());
-                        });
-                        let row = track_row(track, number, FOLDER_COLS, {
-                            let play = play.clone();
-                            move || play()
-                        })
-                        .pan_values(Some(&ctx.gx), Some(&ctx.gy))
-                        .claim_touches(ctx.claim())
-                        .keep_touches(true)
-                        .on_responder_grant({
-                            let ctx = ctx.clone();
-                            move |_: &ResponderEvent| {
-                                if let Some(t) = track.get_untracked() {
-                                    ctx.begin(t.path.clone(), false, t.title.clone());
-                                }
-                            }
-                        })
-                        .on_responder_move({
-                            let ctx = ctx.clone();
-                            move |e: &ResponderEvent| ctx.move_to(e.page)
-                        })
-                        .on_responder_release({
-                            let ctx = ctx.clone();
-                            move |e: &ResponderEvent| ctx.finish(e.page)
-                        })
-                        .on_responder_terminate({
-                            let ctx = ctx.clone();
-                            move |_: &ResponderEvent| ctx.cancel()
-                        });
-                        super::playlists::track_menu(row, track, None, move || play(), {
-                            let ops = ops.clone();
-                            Some(Rc::new(move |p: &str| {
-                                ops.op.set(Some(FileOp::Rename {
-                                    path: p.to_owned(),
-                                    dir: false,
-                                }))
-                            }) as Rc<dyn Fn(&str)>)
-                        })
-                    })
-                    .estimated_item_size(px(ROW))
-                    .content_padding_bottom(px(BAR_SPACE))
-                    .content_padding_x(px(20.0))
-                    .flex_1()
-                    .empty(empty_state(
-                        Icon::Folder,
-                        "这个文件夹没有曲目",
-                        "它包含的音乐可能在子文件夹里，在左侧树里选一个子文件夹。",
-                    ));
-                let right = view()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .child(header)
-                    .child(file_list);
-                view()
-                    .flex_1()
-                    .flex_row()
-                    .child(tree_pane)
-                    .child(right)
-                    .into_element()
-            }),
-        )
-        // 拖动浮层：跟着指针的小条，不拦截事件。
-        .child(when(
-            move || active.with(|a| a.is_some()),
-            move || {
-                let name =
-                    move || active.with(|a| a.as_ref().map(|d| d.name.clone()).unwrap_or_default());
-                let dir = move || active.with(|a| a.as_ref().is_some_and(|d| d.dir));
-                view()
-                    .absolute()
-                    .top(move || px(anchor.get().1))
-                    .left(move || px(anchor.get().0))
-                    .bind_translate_x(&gx)
-                    .bind_translate_y(&gy)
-                    .pointer_events(PointerEvents::None)
-                    .h(px(28.0))
-                    .flex_row()
-                    .items_center()
-                    .gap(px(6.0))
-                    .pl(px(8.0))
-                    .pr(px(12.0))
-                    .rounded(px(8.0))
-                    .bg(bar())
-                    .shadow_lg()
-                    .child(icon_dyn(
-                        move || {
-                            if dir() { Icon::Folder } else { Icon::Note }
-                        },
-                        13.0,
-                        primary,
-                    ))
-                    .child(
-                        text(name)
-                            .number_of_lines(1)
-                            .text_size(px(13.0))
-                            .line_height(px(13.0))
-                            .text_color(fg()),
-                    )
-            },
-        ))
-        // 增删改弹窗（新建 / 重命名输入名，删除先确认）。
-        .child(when(move || op.with(|o| o.is_some()), {
-            let ops = ops_dialog;
-            move || op_dialog(ops.clone())
-        }))
+        .child(tree_list)
 }
 
-fn rescan_button() -> nsh_base::ButtonElement {
+#[component]
+pub fn Folders() -> impl IntoElement {
+    let s = store();
+    let ui = folder_ui();
+    let here = ui.here;
+    let files = ui.files;
+    let ctx = ui.ctx.clone();
+    let ops = ui.ops.clone();
+    let select = ui.select.clone();
+    let message = s.folder_message;
+
+    let on_drop = {
+        let select = select.clone();
+        move |event: &FileDropEvent| {
+            let mut dir = None;
+            let mut added = false;
+            let notes: Vec<String> = event
+                .uris
+                .iter()
+                .map(|uri| {
+                    let dropped = add_dropped(&url_to_path(uri));
+                    added |= dropped.added;
+                    if dir.is_none() {
+                        dir = dropped.dir;
+                    }
+                    dropped.note
+                })
+                .collect();
+            if added {
+                scan();
+            }
+            if let Some(dir) = dir {
+                select(&dir);
+            }
+            show_message(message, notes.join("；"));
+        }
+    };
+
+    view().flex_1().on_file_drop(on_drop).child(
+        when(
+            move || s.library.with(|l| l.config.roots.is_empty()),
+            no_library,
+        )
+        .otherwise(move || {
+            let list_ctx = ctx.clone();
+            let list_ops = ops.clone();
+            let subtitle = move || {
+                let note = message.get();
+                if !note.is_empty() {
+                    return note;
+                }
+                here.with(|p| {
+                    let mut parts = Vec::new();
+                    if !p.trail.is_empty() && p.trail != p.title {
+                        parts.push(p.trail.clone());
+                    }
+                    if p.folders > 0 {
+                        parts.push(format!("{} 个文件夹", p.folders));
+                    }
+                    parts.push(format!("{} 首", p.tracks));
+                    parts.push(format_bytes(p.bytes));
+                    parts.join(" · ")
+                })
+            };
+            let title = move || here.with(|p| p.title.clone());
+            let actions = view()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .child(rescan_button())
+                .child(when(
+                    move || here.with(|p| !p.all.is_empty()),
+                    move || {
+                        pill_button(Icon::Play, "播放全部", move || {
+                            here.with_untracked(|p| play_indices(&p.all, 0))
+                        })
+                    },
+                ));
+            let header = view()
+                .child(page_header(
+                    title,
+                    subtitle,
+                    None,
+                    Some(actions.into_element()),
+                ))
+                .child(track_columns(FOLDER_COLS));
+            let file_list = virtual_list(computed(move || files.with(|f| f.len())), move |at| {
+                let index = computed(move || files.with(|f| f.get(at.index()).copied()));
+                let track = computed(move || {
+                    index.with(|i| i.and_then(|i| s.tracks.with(|t| t.get(i).cloned())))
+                });
+                let number = computed(move || (at.index() + 1).to_string());
+                let play = Rc::new(move || {
+                    let files = files.get_untracked();
+                    play_indices(&files, at.index());
+                });
+                let row = track_row(track, number, FOLDER_COLS, {
+                    let play = play.clone();
+                    move || play()
+                })
+                .pan_values(Some(&list_ctx.gx), Some(&list_ctx.gy))
+                .claim_touches(list_ctx.claim())
+                .keep_touches(true)
+                .on_responder_grant({
+                    let ctx = list_ctx.clone();
+                    move |_: &ResponderEvent| {
+                        if let Some(t) = track.get_untracked() {
+                            ctx.begin(t.path.clone(), false, t.title.clone());
+                        }
+                    }
+                })
+                .on_responder_move({
+                    let ctx = list_ctx.clone();
+                    move |e: &ResponderEvent| ctx.move_to(e.page)
+                })
+                .on_responder_release({
+                    let ctx = list_ctx.clone();
+                    move |e: &ResponderEvent| ctx.finish(e.page)
+                })
+                .on_responder_terminate({
+                    let ctx = list_ctx.clone();
+                    move |_: &ResponderEvent| ctx.cancel()
+                });
+                super::playlists::track_menu(row, track, None, move || play(), {
+                    let ops = list_ops.clone();
+                    Some(Rc::new(move |p: &str| {
+                        ops.op.set(Some(FileOp::Rename {
+                            path: p.to_owned(),
+                            dir: false,
+                        }))
+                    }) as Rc<dyn Fn(&str)>)
+                })
+            })
+            .estimated_item_size(px(ROW))
+            .content_padding_bottom(px(BAR_SPACE))
+            .content_padding_x(px(20.0))
+            .flex_1()
+            .empty(empty_state(
+                Icon::Folder,
+                "这个文件夹没有曲目",
+                "它包含的音乐可能在子文件夹里，在侧栏树里选一个子文件夹。",
+            ));
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .child(header)
+                .child(file_list)
+                .into_element()
+        }),
+    )
+}
+
+/// 文件夹增删改弹窗（新建 / 重命名输入名，删除先确认）。
+pub fn op_dialog() -> impl IntoElement {
+    let s = store();
+    let ui = folder_ui();
+    let ops = ui.ops;
+    when(
+        move || s.folder_op.with(|o| o.is_some()),
+        move || {
+            let Some(op) = s.folder_op.get() else {
+                return view().into_element();
+            };
+            let ops_cloned = ops.clone();
+            let close = move || s.folder_op.set(None);
+            match op {
+                FileOp::DeleteFolder { path } => delete_folder_dialog(ops_cloned, path, close),
+                FileOp::NewFolder { .. } | FileOp::Rename { .. } => {
+                    name_dialog(ops_cloned, op, close)
+                }
+            }
+        },
+    )
+}
+
+/// 全局拖拽浮层：跟着指针的小条。
+pub fn drag_ghost() -> impl IntoElement {
+    let ui = folder_ui();
+    let active = ui.ctx.active;
+    let anchor = ui.ctx.anchor;
+    let gx = ui.ctx.gx.clone();
+    let gy = ui.ctx.gy.clone();
+    when(
+        move || active.with(|a| a.is_some()),
+        move || {
+            let name =
+                move || active.with(|a| a.as_ref().map(|d| d.name.clone()).unwrap_or_default());
+            let dir = move || active.with(|a| a.as_ref().is_some_and(|d| d.dir));
+            view()
+                .absolute()
+                .top(move || px(anchor.get().1))
+                .left(move || px(anchor.get().0))
+                .bind_translate_x(&gx)
+                .bind_translate_y(&gy)
+                .pointer_events(PointerEvents::None)
+                .h(px(28.0))
+                .flex_row()
+                .items_center()
+                .gap(px(6.0))
+                .pl(px(8.0))
+                .pr(px(12.0))
+                .rounded(px(8.0))
+                .bg(bar())
+                .shadow_lg()
+                .child(icon_dyn(
+                    move || {
+                        if dir() { Icon::Folder } else { Icon::Note }
+                    },
+                    13.0,
+                    primary,
+                ))
+                .child(
+                    text(name)
+                        .number_of_lines(1)
+                        .text_size(px(13.0))
+                        .line_height(px(13.0))
+                        .text_color(fg()),
+                )
+        },
+    )
+}
+
+pub(crate) fn rescan_button() -> nsh_base::ButtonElement {
     let s = store();
     icon_button(|| Icon::Refresh, 16.0, "重新扫描", muted_fg, scan)
         .disabled(move || s.library.with(|l| l.progress.scanning))
@@ -1366,11 +1384,13 @@ fn tree_cell(
     let has_children = move || row.with(|r| r.as_ref().is_some_and(|r| r.has_children));
     let open = move || row.with(|r| r.as_ref().is_some_and(|r| r.open));
     let count = move || row.with(|r| r.as_ref().map(|r| r.count).unwrap_or(0));
+    let nav = global::<crate::ui::Nav>();
     let selected = move || {
-        row.with(|r| {
-            r.as_ref()
-                .is_some_and(|r| here.with(|p| p.path.as_deref() == Some(r.path.as_str())))
-        })
+        nav.get() == crate::ui::Nav::Folders
+            && row.with(|r| {
+                r.as_ref()
+                    .is_some_and(|r| here.with(|p| p.path.as_deref() == Some(r.path.as_str())))
+            })
     };
     let over = ctx.over;
     let drop_to = move || {
@@ -1545,21 +1565,22 @@ mod tests {
             rows.iter().map(|r| r.path.as_str()).collect()
         }
         // 全部折叠：只有根。
-        assert_eq!(
-            paths(&flatten_with(&tree, &BTreeSet::new(), None, '/')),
-            vec!["/m"]
-        );
+        assert_eq!(paths(&flatten_with(&tree, &BTreeSet::new())), vec!["/m"]);
         // 根展开：一层子文件夹。
         let open = BTreeSet::from(["/m".to_owned()]);
-        assert_eq!(
-            paths(&flatten_with(&tree, &open, None, '/')),
-            vec!["/m", "/m/a"]
-        );
-        // 选中 /m/a/b：祖先自动展开（自己没进展开集不算开，但它是叶子）。
-        let rows = flatten_with(&tree, &BTreeSet::new(), Some("/m/a/b"), '/');
+        assert_eq!(paths(&flatten_with(&tree, &open)), vec!["/m", "/m/a"]);
+        // 选中 /m/a/b 时展开祖先：/m 与 /m/a 都展开，子项出现。
+        let mut open2 = BTreeSet::new();
+        expand_ancestors(&mut open2, "/m/a/b", '/');
+        let rows = flatten_with(&tree, &open2);
         assert_eq!(paths(&rows), vec!["/m", "/m/a", "/m/a/b"]);
         assert!(rows[..2].iter().all(|r| r.open));
         assert!(!rows[2].open);
+        // 收起父目录 /m/a：子项隐藏，收起成功生效！
+        open2.remove("/m/a");
+        let rows_collapsed = flatten_with(&tree, &open2);
+        assert_eq!(paths(&rows_collapsed), vec!["/m", "/m/a"]);
+        assert!(!rows_collapsed[1].open);
     }
 
     #[test]

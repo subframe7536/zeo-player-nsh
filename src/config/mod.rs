@@ -387,6 +387,7 @@ pub struct LibraryStore {
     config: std::sync::Mutex<Arc<LibraryConfig>>,
     // 索引与扫描进度由提供方（`crate::provider`）写；按惯例只经方法访问。
     pub(crate) tracks: std::sync::RwLock<Arc<Vec<TrackEntry>>>,
+    pub(crate) dirs: std::sync::RwLock<Arc<Vec<String>>>,
     pub(crate) scanning: std::sync::atomic::AtomicBool,
     pub(crate) done: std::sync::atomic::AtomicUsize,
     pub(crate) total: std::sync::atomic::AtomicUsize,
@@ -426,10 +427,12 @@ pub fn library_store() -> &'static LibraryStore {
         let config = load_config(&dir);
         // 先用数据库里上次的元数据建索引，界面马上有曲库；随后的同步只重读变了的内容。
         let tracks = crate::provider::initial_index(&config);
+        let dirs = crate::provider::initial_dirs(&config.roots);
         LibraryStore {
             dir,
             config: std::sync::Mutex::new(Arc::new(config)),
             tracks: std::sync::RwLock::new(Arc::new(tracks)),
+            dirs: std::sync::RwLock::new(Arc::new(dirs)),
             scanning: std::sync::atomic::AtomicBool::new(false),
             done: std::sync::atomic::AtomicUsize::new(0),
             total: std::sync::atomic::AtomicUsize::new(0),
@@ -713,6 +716,14 @@ impl LibraryStore {
         self.tracks.read().unwrap().clone()
     }
 
+    pub fn dirs(&self) -> Arc<Vec<String>> {
+        self.dirs.read().unwrap().clone()
+    }
+
+    pub fn set_dirs(&self, dirs: Vec<String>) {
+        *self.dirs.write().unwrap() = Arc::new(dirs);
+    }
+
     /// 从索引里移除 `path`（界面「删除记录」）；元数据行与界面信号由
     /// 调用方清，文件不碰。文件仍在时下次扫描会重新入库。
     pub fn remove_track(&self, path: &str) {
@@ -742,6 +753,18 @@ impl LibraryStore {
                 .cloned()
                 .collect();
             *self.tracks.write().unwrap() = Arc::new(kept);
+        }
+        let current_dirs = self.dirs();
+        if current_dirs
+            .iter()
+            .any(|d| d == trimmed || d.starts_with(&under))
+        {
+            let kept_dirs: Vec<String> = current_dirs
+                .iter()
+                .filter(|d| *d != trimmed && !d.starts_with(&under))
+                .cloned()
+                .collect();
+            *self.dirs.write().unwrap() = Arc::new(kept_dirs);
         }
         MetaCache::global().remove_under(trimmed);
     }
@@ -831,6 +854,27 @@ impl LibraryStore {
                 }))
             })
             .collect();
+
+        let current_dirs = self.dirs();
+        let mut dirs_touched = false;
+        let updated_dirs: Vec<String> = current_dirs
+            .iter()
+            .map(|d| {
+                if d == &src {
+                    dirs_touched = true;
+                    dest.clone()
+                } else if let Some(rest) = d.strip_prefix(&under) {
+                    dirs_touched = true;
+                    format!("{dest}{sep}{rest}")
+                } else {
+                    d.clone()
+                }
+            })
+            .collect();
+        if dirs_touched {
+            *self.dirs.write().unwrap() = Arc::new(updated_dirs);
+        }
+
         if rows.is_empty() {
             return;
         }
@@ -972,6 +1016,7 @@ mod tests {
                 ..Default::default()
             })),
             tracks: RwLock::new(Arc::new(tracks)),
+            dirs: RwLock::new(Arc::new(Vec::new())),
             scanning: AtomicBool::new(false),
             done: AtomicUsize::new(0),
             total: AtomicUsize::new(0),

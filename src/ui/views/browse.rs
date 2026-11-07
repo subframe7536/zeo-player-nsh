@@ -8,7 +8,7 @@ use nsh_core::prelude::*;
 
 use super::super::components::button::pill_button;
 use super::super::components::cover::cover_initial;
-use super::super::components::icons::Icon;
+use super::super::components::icons::{Icon, icon};
 use super::super::components::page::{empty_state, page_header};
 use super::super::components::tracks::{Columns, track_columns};
 use super::super::store::{cover_for, covers_on, format_total, play_list, store};
@@ -406,7 +406,7 @@ pub fn Albums() -> impl IntoElement {
 #[component]
 pub fn Genres() -> impl IntoElement {
     let s = store();
-    let selected = signal(None::<String>);
+    let selected = s.genre_sel;
     let groups = computed(move || {
         let tracks = s.tracks.get();
         Rc::new(group_by(&tracks, |t| {
@@ -420,115 +420,178 @@ pub fn Genres() -> impl IntoElement {
         if s.tracks.with(|t| t.is_empty()) {
             return no_library().into_element();
         }
-        match selected.get() {
-            Some(key) => {
-                let group = untracked(|| groups.with(|g| g.iter().find(|g| g.key == key).cloned()));
-                let Some(group) = group else {
-                    selected.set(None);
-                    return view().into_element();
-                };
-                let items = computed({
-                    let list = group.tracks.clone();
-                    move || list.clone()
-                });
-                let title = format!("# {}", group.title);
-                let subtitle = format!(
-                    "{} 首 · {}",
-                    group.tracks.len(),
-                    format_total(total_duration(&group.tracks))
-                );
-                let header = view()
-                    .child(page_header(
-                        move || title.clone(),
-                        move || subtitle.clone(),
-                        Some(Rc::new(move || selected.set(None))),
-                        Some(
-                            pill_button(Icon::Play, "播放", move || {
-                                items.with_untracked(|v| play_list(v, 0))
-                            })
-                            .into_element(),
-                        ),
-                    ))
-                    .child(track_columns(Columns::ALL));
-                view()
-                    .flex_1()
-                    .child(track_list(items, Columns::ALL, header.into_element()))
-                    .into_element()
-            }
-            None => {
-                let list = groups.get_untracked();
-                let total = list.len();
-                if total == 0 {
-                    return empty_state(
-                        Icon::Tag,
-                        "没有流派标签",
-                        "曲目的流派标签会出现在这里（按 ; 拆分）。",
-                    )
-                    .into_element();
-                }
-                let chips = list.iter().map(|g| {
-                    let key = g.key.clone();
-                    let art = stored(g.cover.clone());
-                    let first =
-                        stored(g.title.chars().next().map(String::from).unwrap_or_default());
-                    nsh_base::button()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(10.0))
-                        .h(px(44.0))
-                        .pl(px(6.0))
-                        .pr(px(16.0))
-                        .rounded_full()
-                        .bg(muted())
-                        .accessibility_label(g.title.clone())
-                        .hover(|st| st.bg(hover()))
-                        .active(|st| st.opacity(0.7))
-                        .on_press(move |_: &()| selected.set(Some(key.clone())))
-                        .child(when(covers_on, move || {
-                            cover_initial(
-                                move || art.get().and_then(|p| cover_for(&p, 32.0)),
-                                move || first.get(),
-                                Some(32.0),
-                                16.0,
-                            )
-                        }))
-                        .child(
-                            text(g.title.clone())
-                                .text_size(px(14.0))
-                                .line_height(px(14.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(fg()),
-                        )
-                        .child(
-                            text(g.tracks.len().to_string())
-                                .text_size(px(12.0))
-                                .line_height(px(12.0))
-                                .tabular_nums()
-                                .text_color(faint()),
-                        )
-                });
-                view()
-                    .flex_1()
-                    .child(page_header(
-                        || "标签".into(),
-                        move || format!("{total} 个流派"),
-                        None,
-                        None,
-                    ))
-                    .child(
-                        scroll().flex_1().child(
-                            view()
-                                .flex_row()
-                                .flex_wrap()
-                                .gap(px(10.0))
-                                .px(px(32.0))
-                                .pt(px(4.0))
-                                .pb(px(BAR_SPACE))
-                                .children(chips),
-                        ),
-                    )
-                    .into_element()
-            }
+        let groups_ref = groups.get();
+        if groups_ref.is_empty() {
+            return empty_state(
+                Icon::Tag,
+                "没有流派标签",
+                "曲目的流派标签会出现在这里（按 ; 拆分）。",
+            )
+            .into_element();
         }
+        let cur_key = match selected.get() {
+            Some(k) => k,
+            None => {
+                let first = groups_ref[0].key.clone();
+                selected.set(Some(first.clone()));
+                first
+            }
+        };
+        let group = groups_ref.iter().find(|g| g.key == cur_key).cloned();
+        let Some(group) = group else {
+            selected.set(None);
+            return view().into_element();
+        };
+        let items = computed({
+            let list = group.tracks.clone();
+            move || list.clone()
+        });
+        let title = format!("# {}", group.title);
+        let subtitle = format!(
+            "{} 首 · {}",
+            group.tracks.len(),
+            format_total(total_duration(&group.tracks))
+        );
+        let header = view()
+            .child(page_header(
+                move || title.clone(),
+                move || subtitle.clone(),
+                None,
+                Some(
+                    pill_button(Icon::Play, "播放", move || {
+                        items.with_untracked(|v| play_list(v, 0))
+                    })
+                    .into_element(),
+                ),
+            ))
+            .child(track_columns(Columns::ALL));
+        view()
+            .flex_1()
+            .child(track_list(items, Columns::ALL, header.into_element()))
+            .into_element()
     }))
+}
+
+/// 侧栏标签（流派）单行。
+fn tag_sidebar_row(
+    rail: impl Fn() -> bool + Copy + 'static,
+    label: String,
+    count: usize,
+    selected: impl Fn() -> bool + Clone + 'static,
+    on_press: impl Fn() + 'static,
+) -> AnyElement {
+    let fade = super::super::frame::label_fade(rail);
+    let sel_icon = selected.clone();
+    let sel_text = selected.clone();
+    nsh_base::button()
+        .w_full()
+        .h(px(34.0))
+        .flex_row()
+        .items_center()
+        .pl(px(10.0))
+        .pr(px(10.0))
+        .gap(px(10.0))
+        .rounded(px(8.0))
+        .overflow_hidden()
+        .accessibility_label(label.clone())
+        .selected(selected)
+        .selected_style(|st| st.bg(move || primary().opacity(0.12)))
+        .hover(|st| st.bg(move || primary().opacity(0.08)))
+        .active(|st| st.opacity(0.7))
+        .on_press(move |_: &()| on_press())
+        .child(
+            view()
+                .size(px(20.0))
+                .flex_shrink_0()
+                .items_center()
+                .justify_center()
+                .child(icon(Icon::Tag, 16.0, move || {
+                    if sel_icon() { primary() } else { sidebar_fg() }
+                })),
+        )
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .opacity(fade)
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .child(
+                    text(label)
+                        .number_of_lines(1)
+                        .text_size(px(14.0))
+                        .line_height(px(14.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(move || if sel_text() { fg() } else { sidebar_fg() }),
+                )
+                .child(
+                    text(count.to_string())
+                        .text_size(px(11.0))
+                        .line_height(px(11.0))
+                        .tabular_nums()
+                        .text_color(faint()),
+                ),
+        )
+        .into_element()
+}
+
+/// 侧栏标签（流派）列表。
+pub(crate) fn tags_sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> impl IntoElement {
+    let s = store();
+    let nav = global::<crate::ui::Nav>();
+    let fade = super::super::frame::label_fade(rail);
+    let groups = computed(move || {
+        let tracks = s.tracks.get();
+        Rc::new(group_by(&tracks, |t| {
+            t.genres
+                .iter()
+                .map(|g| (g.clone(), g.clone(), String::new()))
+                .collect()
+        }))
+    });
+    scroll()
+        .flex_1()
+        .child(
+            view()
+                .px(px(10.0))
+                .pb(px(8.0))
+                .gap(px(2.0))
+                .child(dynamic(move || {
+                    let list = groups.get();
+                    if list.is_empty() {
+                        return vec![
+                            view()
+                                .opacity(fade)
+                                .child(
+                                    text("暂无标签")
+                                        .text_size(px(12.0))
+                                        .line_height(px(18.0))
+                                        .text_color(faint())
+                                        .px(px(10.0))
+                                        .py(px(4.0)),
+                                )
+                                .into_element(),
+                        ];
+                    }
+                    list.iter()
+                        .map(|g| {
+                            let key = g.key.clone();
+                            let title = g.title.clone();
+                            let count = g.tracks.len();
+                            let active = {
+                                let key = key.clone();
+                                move || {
+                                    nav.get() == crate::ui::Nav::Genres
+                                        && s.genre_sel.with(|sel| sel.as_deref() == Some(&key))
+                                }
+                            };
+                            tag_sidebar_row(rail, title, count, active, move || {
+                                s.genre_sel.set(Some(key.clone()));
+                                nav.set(crate::ui::Nav::Genres);
+                            })
+                        })
+                        .collect()
+                })),
+        )
 }

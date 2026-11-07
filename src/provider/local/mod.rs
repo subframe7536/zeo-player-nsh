@@ -36,6 +36,26 @@ pub(crate) fn initial_index(config: &LibraryConfig) -> Vec<TrackEntry> {
     tracks
 }
 
+/// 收集初始根目录下所有子目录。
+pub(crate) fn initial_dirs(roots: &[String]) -> Vec<String> {
+    let mut dirs = Vec::new();
+    for root in roots {
+        let root_path = Path::new(root);
+        for entry in walkdir::WalkDir::new(root_path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_dir() && entry.path() != root_path {
+                dirs.push(entry.path().to_string_lossy().into_owned());
+            }
+        }
+    }
+    dirs.sort_unstable();
+    dirs.dedup();
+    dirs
+}
+
 /// 扫描所有根目录并重建索引：先遍历目录得到总数，再逐个读标签，
 /// `store.progress()` 随之推进。
 pub(crate) fn scan(store: &LibraryStore) -> usize {
@@ -46,10 +66,14 @@ pub(crate) fn scan(store: &LibraryStore) -> usize {
     store.total.store(0, Ordering::Relaxed);
     let config = store.config();
     let mut files: Vec<PathBuf> = Vec::new();
+    let mut dirs: Vec<String> = Vec::new();
     for root in &config.roots {
         *store.current.lock().unwrap() = root.clone();
-        collect_audio_files(Path::new(root), &mut files);
+        collect_audio_and_dirs(Path::new(root), &mut files, &mut dirs);
     }
+    dirs.sort_unstable();
+    dirs.dedup();
+    store.set_dirs(dirs);
     store.total.store(files.len(), Ordering::Relaxed);
     let cache = MetaCache::global();
     cache.begin_batch();
@@ -102,12 +126,18 @@ pub(crate) fn rebuild(store: &LibraryStore) -> usize {
     scan(store)
 }
 
-fn collect_audio_files(root: &Path, out: &mut Vec<PathBuf>) {
+fn collect_audio_and_dirs(root: &Path, files: &mut Vec<PathBuf>, dirs: &mut Vec<String>) {
     for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
     {
+        if entry.file_type().is_dir() {
+            if entry.path() != root {
+                dirs.push(entry.path().to_string_lossy().into_owned());
+            }
+            continue;
+        }
         if !entry.file_type().is_file() {
             continue;
         }
@@ -117,7 +147,7 @@ fn collect_audio_files(root: &Path, out: &mut Vec<PathBuf>) {
             .and_then(|e| e.to_str())
             .map(|e| e.to_ascii_lowercase());
         if ext.is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.as_str())) {
-            out.push(entry.into_path());
+            files.push(entry.into_path());
         }
     }
 }

@@ -12,8 +12,8 @@ use super::super::components::button::{
     Size, Variant, icon_button, outline_button, pill_button, text_button,
 };
 use super::super::components::form::{
-    cover_realign, cover_realign_flex, dialog_content, dialog_footer, dialog_header, input_field,
-    modal, select, select_trigger, tab_list, tab_trigger,
+    SelectOption, cover_realign, cover_realign_flex, dialog_content, dialog_footer, dialog_header,
+    input_field, modal, select, select_trigger, tab_list, tab_trigger,
 };
 use super::super::components::icons::{Icon, icon};
 use super::super::components::page::{empty_state, page_header};
@@ -167,9 +167,25 @@ fn add_playlist_menu(trigger: View) -> AnyElement {
 }
 
 /// 侧栏的歌单区：小标题 + 新建按钮，下面是歌单列表（可滚动）。
-/// `rail` 为图标栏模式：标题与歌单名藏起、表头高度收掉，「新建歌单」
-/// 变成列表第一行（只露出加号，与其他行的图标同列）。
-pub fn sidebar_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
+/// 添加歌单的按钮（带下拉菜单）。
+pub(crate) fn add_playlist_button() -> AnyElement {
+    add_playlist_menu(
+        view()
+            .size(px(22.0))
+            .rounded(px(6.0))
+            .items_center()
+            .justify_center()
+            .role(AccessibilityRole::Button)
+            .label("添加歌单")
+            .window_drag(false)
+            .hover(|st| st.bg(move || primary().opacity(0.08)))
+            .active(|st| st.opacity(0.6))
+            .child(icon(Icon::Plus, 14.0, faint)),
+    )
+}
+
+/// 侧栏歌单列表（滚动区）。
+pub(crate) fn sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> impl IntoElement {
     let s = store();
     let fade = super::super::frame::label_fade(rail);
     // 图标栏时顶替表头「+」的一行：只在 rail 出现（不占高度），
@@ -196,20 +212,7 @@ pub fn sidebar_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
                     .child(icon(Icon::Plus, 17.0, sidebar_fg)),
             ),
     );
-    let add = add_playlist_menu(
-        view()
-            .size(px(22.0))
-            .rounded(px(6.0))
-            .items_center()
-            .justify_center()
-            .role(AccessibilityRole::Button)
-            .label("添加歌单")
-            .window_drag(false)
-            .hover(|st| st.bg(move || primary().opacity(0.08)))
-            .active(|st| st.opacity(0.6))
-            .child(icon(Icon::Plus, 14.0, faint)),
-    );
-    let list = scroll().flex_1().child(
+    scroll().flex_1().child(
         view()
             .px(px(10.0))
             .pb(px(8.0))
@@ -237,28 +240,7 @@ pub fn sidebar_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
                 }
                 rows
             })),
-    );
-    view()
-        .flex_1()
-        .min_h(px(0.0))
-        .window_drag(true)
-        // 表头藏起并收掉高度，把空间还给歌单列表。
-        .child(
-            view()
-                .h(move || px(if rail() { 0.0 } else { 33.0 }))
-                .overflow_hidden()
-                .opacity(fade)
-                .flex_row()
-                .items_center()
-                .px(px(10.0))
-                .child(
-                    super::super::frame::section_label("歌单")
-                        .px(px(10.0))
-                        .flex_1(),
-                )
-                .child(view().pt(px(10.0)).child(add)),
-        )
-        .child(list)
+    )
 }
 
 fn sidebar_row(p: &Playlist, rail: impl Fn() -> bool + Copy + 'static) -> AnyElement {
@@ -585,13 +567,7 @@ fn rule_editor(draft: Signal<Draft>) -> View {
         "排序",
         Sort::ALL
             .iter()
-            .map(|&o| {
-                (
-                    None,
-                    o.label(),
-                    Box::new(move || change(Box::new(move |r| r.sort = o))) as Box<dyn Fn()>,
-                )
-            })
+            .map(|&o| SelectOption::new(o.label(), move || change(Box::new(move |r| r.sort = o))))
             .collect(),
         170.0,
     );
@@ -671,7 +647,7 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
         .enumerate()
         .map(|(i, &f)| {
             let heading = (i == 0 || Field::ALL[i - 1].group() != f.group()).then(|| f.group());
-            let pick = Box::new(move || {
+            let mut opt = SelectOption::new(f.label(), move || {
                 change(Box::new(move |c| {
                     // 标签只能从列表里选，换过去时把自由文本的值也清掉。
                     if c.field.kind() != f.kind() || f == Field::Tag {
@@ -682,8 +658,11 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
                         c.op = f.ops()[0];
                     }
                 }))
-            }) as Box<dyn Fn()>;
-            (heading, f.label(), pick)
+            });
+            if let Some(h) = heading {
+                opt = opt.with_heading(h);
+            }
+            opt
         })
         .collect();
     let field_select = select(
@@ -699,11 +678,7 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
             .ops()
             .iter()
             .map(|&o: &Op| {
-                (
-                    None,
-                    o.label(),
-                    Box::new(move || change(Box::new(move |c| c.op = o))) as Box<dyn Fn()>,
-                )
+                SelectOption::new(o.label(), move || change(Box::new(move |c| c.op = o)))
             })
             .collect();
         select(move || get().op.label().to_owned(), "条件", options, 110.0)

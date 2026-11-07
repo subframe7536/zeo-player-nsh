@@ -14,12 +14,10 @@ use super::super::components::icons::{Icon, icon};
 use super::super::theme::{self, *};
 use super::super::{Nav, store};
 
-const LIBRARY: [(Nav, &str, Icon); 5] = [
+const LIBRARY: [(Nav, &str, Icon); 3] = [
     (Nav::Home, "首页", Icon::Home),
-    (Nav::Folders, "文件夹", Icon::Folder),
     (Nav::Artists, "歌手", Icon::Mic),
     (Nav::Albums, "专辑", Icon::Disc),
-    (Nav::Genres, "标签", Icon::Tag),
 ];
 
 /// 搜索框的焦点：点在框外时让它失焦。
@@ -180,18 +178,6 @@ pub(crate) fn adaptive_row(
         )
 }
 
-pub(crate) fn section_label(label: &'static str) -> Text {
-    text(label)
-        .text_size(px(11.0))
-        .line_height(px(11.0))
-        .font_weight(FontWeight::SEMIBOLD)
-        .letter_spacing(px(0.6))
-        .text_color(faint())
-        .px(px(10.0))
-        .pt(px(16.0))
-        .pb(px(6.0))
-}
-
 /// 侧栏内容：展开与图标栏共用同一结构；图标栏时只把文字与搜索框
 /// 藏起（布局不变），放大镜在同一槽位浮出来。
 fn adaptive_body(search: SearchFocus, search_page: SearchFocus) -> View {
@@ -292,7 +278,7 @@ fn adaptive_body(search: SearchFocus, search_page: SearchFocus) -> View {
                     .into_element()
                 })),
         )
-        .child(super::super::views::playlists::sidebar_section(rail))
+        .child(sidebar_lower_section(rail))
         .child(
             view()
                 .px(px(10.0))
@@ -330,6 +316,143 @@ fn adaptive_body(search: SearchFocus, search_page: SearchFocus) -> View {
                         ),
                 ),
         )
+}
+
+fn sidebar_rescan_button() -> AnyElement {
+    let s = store::store();
+    let scanning = move || s.library.with(|l| l.progress.scanning);
+    view()
+        .size(px(22.0))
+        .rounded(px(6.0))
+        .items_center()
+        .justify_center()
+        .role(AccessibilityRole::Button)
+        .label("重新扫描")
+        .window_drag(false)
+        .opacity(move || if scanning() { 0.4_f32 } else { 1.0_f32 })
+        .hover(move |st| {
+            if !scanning() {
+                st.bg(primary().opacity(0.08))
+            } else {
+                st
+            }
+        })
+        .active(move |st| if !scanning() { st.opacity(0.6) } else { st })
+        .on_press(move |_: &()| {
+            if !scanning() {
+                store::scan();
+            }
+        })
+        .child(icon(Icon::Refresh, 14.0, faint))
+        .into_element()
+}
+
+fn sidebar_lower_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
+    let s = store::store();
+    let fade = label_fade(rail);
+    let nav = global::<Nav>();
+    // 主视图变化时自动联动侧栏下半部
+    effect(move || match nav.get() {
+        Nav::Folders => s.sidebar_section.set(store::SidebarSection::Folders),
+        Nav::Genres => s.sidebar_section.set(store::SidebarSection::Tags),
+        Nav::Playlist(_) => s.sidebar_section.set(store::SidebarSection::Playlists),
+        _ => {}
+    });
+
+    let trigger = view()
+        .flex_row()
+        .items_center()
+        .gap(px(4.0))
+        .px(px(10.0))
+        .pt(px(16.0))
+        .pb(px(6.0))
+        .role(AccessibilityRole::Button)
+        .label("切换视图")
+        .cursor(Cursor::Pointer)
+        .child(
+            text(move || match s.sidebar_section.get() {
+                store::SidebarSection::Playlists => "歌单",
+                store::SidebarSection::Tags => "标签",
+                store::SidebarSection::Folders => "文件夹",
+            })
+            .text_size(px(11.0))
+            .line_height(px(11.0))
+            .font_weight(FontWeight::SEMIBOLD)
+            .letter_spacing(px(0.6))
+            .text_color(faint()),
+        )
+        .child(icon(Icon::ChevronDown, 10.0, faint));
+
+    let options = vec![
+        super::super::components::form::SelectOption::new("歌单", move || {
+            s.sidebar_section.set(store::SidebarSection::Playlists);
+            let nav = global::<Nav>();
+            if matches!(nav.get_untracked(), Nav::Folders | Nav::Genres) {
+                if let Some(first) = s.playlists.with(|p| p.first().map(|pl| pl.id)) {
+                    nav.set(Nav::Playlist(first));
+                }
+            }
+        })
+        .with_glyph(Icon::Playlist),
+        super::super::components::form::SelectOption::new("标签", move || {
+            s.sidebar_section.set(store::SidebarSection::Tags);
+            let nav = global::<Nav>();
+            if nav.get_untracked() != Nav::Genres {
+                nav.set(Nav::Genres);
+            }
+        })
+        .with_glyph(Icon::Tag),
+        super::super::components::form::SelectOption::new("文件夹", move || {
+            s.sidebar_section.set(store::SidebarSection::Folders);
+            let nav = global::<Nav>();
+            if nav.get_untracked() != Nav::Folders {
+                nav.set(Nav::Folders);
+            }
+        })
+        .with_glyph(Icon::Folder),
+    ];
+
+    let current = move || match s.sidebar_section.get() {
+        store::SidebarSection::Playlists => "歌单".to_owned(),
+        store::SidebarSection::Tags => "标签".to_owned(),
+        store::SidebarSection::Folders => "文件夹".to_owned(),
+    };
+
+    let select_el = super::super::components::form::select_with_trigger(
+        current,
+        "切换视图",
+        options,
+        116.0,
+        Some(trigger),
+    );
+
+    let header_action = dynamic(move || match s.sidebar_section.get() {
+        store::SidebarSection::Playlists => super::super::views::playlists::add_playlist_button(),
+        store::SidebarSection::Folders => sidebar_rescan_button(),
+        store::SidebarSection::Tags => view().into_element(),
+    });
+
+    let header = view()
+        .h(move || px(if rail() { 0.0 } else { 33.0 }))
+        .overflow_hidden()
+        .opacity(fade)
+        .flex_row()
+        .items_center()
+        .px(px(10.0))
+        .child(view().flex_1().child(select_el))
+        .child(view().pt(px(10.0)).child(header_action));
+
+    let content = dynamic(move || match s.sidebar_section.get() {
+        store::SidebarSection::Playlists => {
+            super::super::views::playlists::sidebar_list(rail).into_element()
+        }
+        store::SidebarSection::Tags => super::super::views::tags_sidebar_list(rail).into_element(),
+        store::SidebarSection::Folders => {
+            super::super::views::tree_sidebar_list(rail).into_element()
+        }
+    });
+
+    view().flex_1().min_h(px(0.0)).child(header).child(content)
 }
 
 pub(crate) fn sidebar(search: SearchFocus, search_page: SearchFocus) -> View {

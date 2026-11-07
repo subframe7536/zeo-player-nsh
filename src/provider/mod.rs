@@ -16,6 +16,11 @@ pub(crate) fn initial_index(config: &LibraryConfig) -> Vec<TrackEntry> {
     local::initial_index(config)
 }
 
+/// 收集初始根目录下所有子目录。
+pub(crate) fn initial_dirs(roots: &[String]) -> Vec<String> {
+    local::initial_dirs(roots)
+}
+
 /// 同步所有源并重建全局索引。多源时逐个同步、合并写回。
 pub(crate) fn sync(store: &LibraryStore) -> usize {
     local::scan(store)

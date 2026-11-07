@@ -293,55 +293,129 @@ pub(crate) fn cover_realign_flex(
     (min_w, layout)
 }
 
+/// 下拉项的描述：文字、回调，可选分组小标题与前置图标。
+pub struct SelectOption {
+    pub heading: Option<&'static str>,
+    pub glyph: Option<Icon>,
+    pub label: &'static str,
+    pub pick: Box<dyn Fn()>,
+}
+
+impl SelectOption {
+    pub fn new(label: &'static str, pick: impl Fn() + 'static) -> Self {
+        Self {
+            heading: None,
+            glyph: None,
+            label,
+            pick: Box::new(pick),
+        }
+    }
+
+    pub fn with_glyph(mut self, glyph: Icon) -> Self {
+        self.glyph = Some(glyph);
+        self
+    }
+
+    pub fn with_heading(mut self, heading: &'static str) -> Self {
+        self.heading = Some(heading);
+        self
+    }
+}
+
+impl From<(Option<&'static str>, &'static str, Box<dyn Fn()>)> for SelectOption {
+    fn from((heading, label, pick): (Option<&'static str>, &'static str, Box<dyn Fn()>)) -> Self {
+        Self {
+            heading,
+            glyph: None,
+            label,
+            pick,
+        }
+    }
+}
+
+impl From<(Icon, &'static str, Box<dyn Fn()>)> for SelectOption {
+    fn from((glyph, label, pick): (Icon, &'static str, Box<dyn Fn()>)) -> Self {
+        Self {
+            heading: None,
+            glyph: Some(glyph),
+            label,
+            pick,
+        }
+    }
+}
+
 /// 下拉选择：nsh-base `select`（键盘导航、typeahead、无障碍、虚拟化列表），
-/// 触发器与弹层仍是 shadcn 外观；`options` 可带分组小标题。
+/// 触发器与弹层仍是 shadcn 外观；`options` 可带分组小标题与图标。
 #[allow(clippy::type_complexity)]
 pub fn select(
     current: impl Fn() -> String + Copy + 'static,
     label: &'static str,
-    options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)>,
+    options: Vec<SelectOption>,
     width: f32,
 ) -> AnyElement {
+    select_with_trigger(current, label, options, width, None)
+}
+
+/// 支持自定义触发器的下拉选择：触发器自定义（为 `None` 时回落默认 `select_trigger`）；
+/// 弹层外观、间距、键盘焦点由全局统一收敛。
+#[allow(clippy::type_complexity)]
+pub fn select_with_trigger(
+    current: impl Fn() -> String + Copy + 'static,
+    label: &'static str,
+    options: Vec<SelectOption>,
+    width: f32,
+    custom_trigger: Option<View>,
+) -> AnyElement {
     let pulse = signal(0.0f32);
-    let mut trigger = select_trigger(current, || None, label, width, "");
-    // 弹性触发器的宽度脉冲基准（cover_realign_flex 的布局监听记在触
-    // 发器上，min_w 加在 select 元素上）。
     let mut flex_min_w = None;
-    if width > 0.0 {
-        // 弹层宽绑的是触发器实测宽（listbox 的 `.w(width)`）：这里给触
-        // 发器宽叠上 ±1pt 的脉冲，on_open 后 cover_realign 一抖，弹层
-        // 尺寸就变，cover 对齐在滚动收敛后重采（上游限制，见该函数）。
-        trigger = trigger.w(move || px(width + pulse.get()));
+    let trigger = if let Some(trig) = custom_trigger {
+        if width > 0.0 {
+            trig.w(move || px(width + pulse.get()))
+        } else {
+            let (min_w, layout) = cover_realign_flex(pulse);
+            flex_min_w = Some(min_w);
+            trig.on_layout(layout)
+        }
     } else {
-        let (min_w, layout) = cover_realign_flex(pulse);
-        trigger = trigger.on_layout(layout);
-        flex_min_w = Some(min_w);
-    }
+        let mut trig = select_trigger(current, || None, label, width, "");
+        if width > 0.0 {
+            trig = trig.w(move || px(width + pulse.get()));
+        } else {
+            let (min_w, layout) = cover_realign_flex(pulse);
+            trig = trig.on_layout(layout);
+            flex_min_w = Some(min_w);
+        }
+        trig
+    };
+
     let gate = store::menu_control();
-    // 内部值用序号串：选中回调按序号回取；`value` 把当前显示文本映射回序号
-    // （显示文本不在选项里——EQ 的「自定义」——时无选中行）。
+    let has_glyph = options.iter().any(|o| o.glyph.is_some());
+
     let mut items = Vec::with_capacity(options.len());
     let mut labels = Vec::with_capacity(options.len());
+    let mut glyphs = Vec::with_capacity(options.len());
     let mut picks = Vec::with_capacity(options.len());
-    for (i, (heading, option, pick)) in options.into_iter().enumerate() {
-        let mut item = nsh_base::SelectItem::new(i.to_string(), option);
-        if let Some(h) = heading {
+    for (i, opt) in options.into_iter().enumerate() {
+        let mut item = nsh_base::SelectItem::new(i.to_string(), opt.label);
+        if let Some(h) = opt.heading {
             item = item.group(h);
         }
         items.push(item);
-        labels.push(option);
-        picks.push(pick);
+        labels.push(opt.label);
+        glyphs.push(opt.glyph);
+        picks.push(opt.pick);
     }
+    let value_labels = labels.clone();
     let value = move || {
         let cur = current();
         nsh_base::SelectValue::Controlled(
-            labels
+            value_labels
                 .iter()
                 .position(|l| *l == cur)
                 .map(|i| i.to_string().into()),
         )
     };
-    let select_el = nsh_base::select()
+    let mut select_el = nsh_base::select()
         .items(items)
         .value(value)
         .accessibility_label(label)
@@ -361,27 +435,20 @@ pub fn select(
             }
         })
         .popup_style(move |st| {
-            // 弹层与触发器同宽（shadcn SelectContent 贴触发器宽）：宽
-            // 不写死，交给 listbox 的 `.w(触发器实测宽)` 绑定——宽度脉冲
-            // （cover_realign）才能传到弹层尺寸；width≤0 的弹性触发器
-            // 宽度未知，退回 140 下限。
-            let st = if width > 0.0 { st } else { st.min_w(px(140.0)) };
+            let st = if width > 0.0 { st } else { st.min_w(px(120.0)) };
             st.p(px(4.0))
-                .rounded(px(10.0))
+                .rounded(px(8.0))
                 .overflow_hidden()
                 .border_1()
                 .border_color(border())
                 .bg(nsh_base::theme().popover)
                 .shadow_lg()
         })
-        // 列表不限高：放得下就整列一次铺开不滚动，超长（标签、字体）
-        // 才由弹层自己的 room 上限（窗口减 margin）截出滚动区。
-        // `focus:` 是高亮态（指针与键盘导航都算）；`bg-hover` 取主题色。
         .item_class("focus:bg-hover")
         .item_style(|st| {
-            st.px(px(10.0))
-                .py(px(6.0))
-                .rounded(px(6.0))
+            st.px(px(8.0))
+                .py(px(5.0))
+                .rounded(px(5.0))
                 .text_size(px(13.0))
                 .line_height(px(13.0))
                 .text_color(fg())
@@ -391,14 +458,36 @@ pub fn select(
                 .line_height(px(11.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(faint())
-                .px(px(10.0))
+                .px(px(8.0))
                 .pt(px(6.0))
                 .pb(px(2.0))
         })
         .trigger(trigger);
-    // width≤0 的弹性宽：伸缩加在 select 元素上——触发器在 select 的列
-    // 容器里，`flex_1` 会在纵轴把高度压没。宽度脉冲走根的 min_w，基准
-    // 宽由触发器记（cover_realign_flex）。
+
+    if has_glyph {
+        let render_labels = labels;
+        select_el = select_el.render_item(move |e: &nsh_base::SelectEntry| {
+            let glyph = glyphs.get(e.index as usize).copied().flatten();
+            let label = render_labels
+                .get(e.index as usize)
+                .copied()
+                .unwrap_or_default();
+            view()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .child(glyph.map(|g| icon(g, 14.0, muted_fg)))
+                .child(
+                    text(label)
+                        .flex_1()
+                        .number_of_lines(1)
+                        .text_size(px(13.0))
+                        .line_height(px(13.0))
+                        .text_color(fg()),
+                )
+        });
+    }
+
     if width > 0.0 {
         select_el.into_element()
     } else {

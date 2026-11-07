@@ -68,8 +68,20 @@ fn start_inner(width: f32, height: f32) -> Headless {
     // 静音（在挂载前）：按压与恢复的播放会真的走 cpal 输出，测试不要出声。
     zeo_player::engine::Player::global().set_volume(0.0);
     let mut app = Headless::start(config).expect("start the app");
-    app.wait_for("文件夹").unwrap();
+    app.wait_for("首页").unwrap();
     app
+}
+
+fn goto_folders(app: &mut Headless) {
+    if app
+        .wait_for_within("label:切换视图 >> text:文件夹", Duration::from_millis(50))
+        .is_ok()
+    {
+        return;
+    }
+    app.press("label:切换视图").unwrap();
+    app.wait_for("role:option[文件夹]").unwrap();
+    app.press("role:option[文件夹]").unwrap();
 }
 
 fn texts(app: &Headless) -> Vec<String> {
@@ -105,7 +117,7 @@ fn double_press(app: &mut Headless, sel: &str) {
 #[test]
 fn sidebar_navigates_between_library_views() {
     let mut app = start(1200.0, 800.0);
-    for label in ["歌手", "专辑", "标签"] {
+    for label in ["首页", "歌手", "专辑"] {
         assert!(has(&app, label), "{label}: {:?}", texts(&app));
     }
     app.press("专辑").unwrap();
@@ -310,7 +322,7 @@ fn lyrics_offset_nudges_and_resets() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     double_press(&mut app, "role:button[测试歌曲]");
@@ -400,7 +412,7 @@ fn lyrics_offset_global_saves() {
     app.type_text(field, "300\n").unwrap();
     assert!(saved(300), "改回 300: {:?}", saved_global_offset());
     app.press("label:关闭设置").unwrap();
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     double_press(&mut app, "role:button[测试歌曲]");
@@ -520,7 +532,7 @@ fn cover_mode_tints_the_playing_track_title() {
     })
     .unwrap();
     // 文件夹视图 → 点进根文件夹，曲目行才出现。双击才播放。
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     double_press(&mut app, "role:button[测试歌曲]");
@@ -550,7 +562,7 @@ fn list_rows_drop_the_cover_column_when_covers_are_off() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     let frame = "role:button[测试歌曲] >> id:cover";
@@ -635,7 +647,7 @@ fn folders_page_shows_tree_and_files() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     // 子文件夹要等扫描完曲目才出现在树里，顺带等到曲库就绪。
     app.wait_for_within("text:sub", Duration::from_secs(20))
         .unwrap();
@@ -660,7 +672,7 @@ fn folders_page_tree_ops() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     app.wait_for_within("text:sub", Duration::from_secs(20))
         .unwrap();
     let sub = dunce::canonicalize(CORPUS).unwrap().join("sub");
@@ -721,6 +733,44 @@ fn folders_page_tree_ops() {
     app.press("label:取消").unwrap();
 }
 
+/// 侧栏下半部可切换视图（歌单 / 标签 / 文件夹）与主视图联动：
+/// 1. 默认展示歌单；
+/// 2. 主视图切至「文件夹」，侧栏自动联动为文件树；
+/// 3. 主视图切至「标签」，侧栏自动联动为标签列表，默认选中首个标签直达曲目；
+/// 4. 侧栏下拉菜单可手动切换视图。
+#[test]
+fn sidebar_switchable_views_and_auto_linkage() {
+    let mut app = start(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    // 默认展示「我喜欢」歌单
+    app.wait_for("label:我喜欢").unwrap();
+
+    // 1. 手动切换：通过下拉切到「标签」
+    app.press("label:切换视图").unwrap();
+    app.wait_for("role:option[标签]").unwrap();
+    app.press("role:option[标签]").unwrap();
+    app.wait_for("text:Rock").unwrap();
+
+    // 2. 切到「文件夹」：主视图联动为文件夹页，侧栏联动为文件树
+    app.press("label:切换视图").unwrap();
+    app.wait_for("role:option[文件夹]").unwrap();
+    app.press("role:option[文件夹]").unwrap();
+    app.wait_for_within("text:sub", Duration::from_secs(20))
+        .unwrap();
+    app.wait_for("label:切换视图 >> text:文件夹").unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+
+    // 3. 切到「标签」：主视图联动为标签页，侧栏联动为标签列表
+    app.press("label:切换视图").unwrap();
+    app.wait_for("role:option[标签]").unwrap();
+    app.press("role:option[标签]").unwrap();
+    app.wait_for("label:切换视图 >> text:标签").unwrap();
+    app.wait_for("text:/^# /").unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+}
+
 /// 右键菜单互斥：再开一个菜单时旧的关掉（右键按下不产生 PressOutside，
 /// 平台不会收旧菜单，靠 `store::menu_control` 的令牌互斥）；右键点到
 /// 没有菜单的地方，开着的菜单也要关掉。
@@ -730,7 +780,7 @@ fn context_menus_replace_each_other() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     app.wait_for_within("text:sub", Duration::from_secs(20))
         .unwrap();
     app.press("sub").unwrap();
@@ -764,7 +814,7 @@ fn edit_info_dialog_opens_with_current_tags() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     app.wait_for_within("text:测试歌曲", Duration::from_secs(20))
         .unwrap();
     app.right_click("label:测试歌曲").unwrap();
@@ -827,7 +877,7 @@ fn narrow_windows_drop_album_and_size_columns() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     app.wait_for_within("大小", Duration::from_secs(20))
         .unwrap();
     // 侧栏收成图标栏（< 900 pt，导航文字被裁掉不绘制），内容区 572 pt：
@@ -846,7 +896,7 @@ fn number_column_only_in_album_detail() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     // 等扫描完（树里的 sub 出现即曲库就绪）。
     app.wait_for_within("text:sub", Duration::from_secs(20))
         .unwrap();
@@ -950,7 +1000,7 @@ fn playlists_manual_and_smart() {
 
     if corpus {
         // 文件夹页右键第一首 → 添加到歌单 → 测试歌单。
-        app.press("文件夹").unwrap();
+        goto_folders(&mut app);
         app.wait_for_within("大小", Duration::from_secs(20))
             .unwrap();
         app.press(&format!("text:{}", root_name())).unwrap();
@@ -959,6 +1009,8 @@ fn playlists_manual_and_smart() {
         app.right_click("label:测试歌曲").unwrap();
         app.press("label:添加到歌单").unwrap();
         app.press("role:menuitem[测试歌单]").unwrap();
+        app.press("label:切换视图").unwrap();
+        app.press("role:option[歌单]").unwrap();
         app.press("role:button[测试歌单]").unwrap();
         app.wait_for("label:测试歌曲").unwrap();
         assert!(!has(&app, "歌单是空的"));
@@ -1010,7 +1062,7 @@ fn track_row_double_click_like_and_menu() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     let row = "role:button[测试歌曲]";
@@ -1115,7 +1167,7 @@ fn home_counts_a_play() {
 
     // 播三秒：阈值一过引擎即记播放（播放记录代次 +1）。
     let before = zeo_player::engine::Player::global().plays_generation();
-    app.press("文件夹").unwrap();
+    goto_folders(&mut app);
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     double_press(&mut app, "role:button[测试歌曲]");
@@ -1204,4 +1256,35 @@ fn root_name() -> String {
         .unwrap()
         .to_string_lossy()
         .into_owned()
+}
+
+/// 即使子文件夹当前正处于选中状态，点击父文件夹的收起按钮也必须能够成功收起（子项在树中隐藏）。
+#[test]
+fn folder_parent_collapses_even_when_child_is_selected() {
+    let mut app = start(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    goto_folders(&mut app);
+    app.wait_for_within("text:sub", Duration::from_secs(20))
+        .unwrap();
+    // 选中子文件夹 sub，主视图展示 sub 里的曲目
+    app.press("sub").unwrap();
+    app.wait_for("text:mono").unwrap();
+
+    let root = root_name();
+    let collapse_btn = format!("label:收起 {root}");
+    let expand_btn = format!("label:展开 {root}");
+
+    // 点击父目录的收起按钮
+    app.press(&collapse_btn).unwrap();
+    // 收起后：树中的 sub 行消失，按钮变成「展开 ...」
+    app.wait_for(&expand_btn).unwrap();
+    app.wait_for_gone("role:button[sub]", Duration::from_secs(2))
+        .unwrap();
+
+    // 再次点击展开按钮：sub 重新在树中出现
+    app.press(&expand_btn).unwrap();
+    app.wait_for(&collapse_btn).unwrap();
+    app.wait_for("role:button[sub]").unwrap();
 }

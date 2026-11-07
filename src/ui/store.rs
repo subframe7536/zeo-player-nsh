@@ -2,7 +2,7 @@
 //! （元数据 / 歌词 / 波形）、专辑封面缓存，以及播放命令。
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
@@ -123,6 +123,7 @@ pub struct Store {
     pub track: Signal<NowPlaying>,
     pub library: Signal<LibraryState>,
     pub tracks: Signal<Same<Vec<TrackEntry>>>,
+    pub dirs: Signal<Same<Vec<String>>>,
     pub meta: Signal<Option<Same<MetaInfo>>>,
     pub lyrics: Signal<Option<Lyrics>>,
     /// 当前曲目的手动歌词偏移（毫秒，正值 = 提前；换曲时从数据库读）。
@@ -165,10 +166,47 @@ pub struct Store {
     /// 「歌手」页当前点开的歌手（分组 key，即歌手标签原文）；首页
     /// 「热门艺术家」深链进详情也写它。
     pub artist_sel: Signal<Option<String>>,
+    /// 侧栏下半部当前显示的视图（歌单 / 标签 / 文件夹）。
+    pub sidebar_section: Signal<SidebarSection>,
+    /// 「标签」页当前选中的流派（分组 key）；侧栏与主视图共用。
+    pub genre_sel: Signal<Option<String>>,
+    /// 「文件夹」页当前选中的目录路径；侧栏树与主视图共用。
+    pub folder_sel: Signal<Option<String>>,
+    /// 文件夹树当前展开的目录路径集合。
+    pub folder_expanded: Signal<BTreeSet<String>>,
+    /// 本次会话创建但尚无曲目的空目录集合（用于挂进目录树）。
+    pub folder_extra: Signal<BTreeSet<String>>,
+    /// 文件夹操作反馈提示（副标题展示）。
+    pub folder_message: Signal<String>,
+    /// 文件夹增删改弹窗（`Some` 时打开）。
+    pub folder_op: Signal<Option<FileOp>>,
     /// 当前开着的弹出菜单（`menu_control` 的 id）：同一时刻只开一个。
     /// 桌面上右键按下不产生 PressOutside（平台只发 ContextMenu 事件），
     /// 已开的菜单不会被平台关掉，由它互斥。
     pub menu_open: Signal<Option<u64>>,
+}
+
+/// 侧栏下半部当前显示的视图。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SidebarSection {
+    /// 歌单列表。
+    #[default]
+    Playlists,
+    /// 标签（流派）列表。
+    Tags,
+    /// 文件夹树。
+    Folders,
+}
+
+/// 文件夹增删改的操作请求（弹窗状态）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileOp {
+    /// 在 `parent` 下新建文件夹。
+    NewFolder { parent: String },
+    /// 重命名 `path`（`dir`：文件夹；否则是文件）。
+    Rename { path: String, dir: bool },
+    /// 删除文件夹 `path`。
+    DeleteFolder { path: String },
 }
 
 /// 歌单编辑弹窗的草稿：`id` 为 `None` 时是新建。
@@ -250,6 +288,7 @@ pub fn install() -> Store {
     let track = signal(now_playing(&snap));
     let library = signal(library_state());
     let tracks = signal(Same(lib.tracks()));
+    let dirs = signal(Same(lib.dirs()));
     let lyrics = signal(None::<Lyrics>);
     let lyrics_offset = signal(0_i64);
     let active_line = computed(move || {
@@ -267,6 +306,7 @@ pub fn install() -> Store {
         track,
         library,
         tracks,
+        dirs,
         meta: signal(None),
         lyrics,
         lyrics_offset,
@@ -292,6 +332,19 @@ pub fn install() -> Store {
         accent: signal(None),
         tint: signal(None),
         artist_sel: signal(None),
+        sidebar_section: signal(SidebarSection::Playlists),
+        genre_sel: signal(None),
+        folder_sel: signal(None),
+        folder_expanded: signal(
+            lib.config()
+                .roots
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<String>>(),
+        ),
+        folder_extra: signal(BTreeSet::new()),
+        folder_message: signal(String::new()),
+        folder_op: signal(None),
         menu_open: signal(None),
     };
     STORE.with(|cell| cell.set(Some(s)));
@@ -446,6 +499,7 @@ pub fn install() -> Store {
                 apply_accent();
             }
             s.tracks.set(Same(library_store().tracks()));
+            s.dirs.set(Same(library_store().dirs()));
         }
     });
 

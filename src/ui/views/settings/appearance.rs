@@ -18,10 +18,10 @@ pub(super) fn appearance_section() -> View {
         Some(appearance_select()),
     )
 }
-/// 「外观」的下拉：触发器显示当前值，nsh-base `select` 列三个带图标的选项
-/// （行内容自绘；高亮 / 键盘导航 / 无障碍由上游接管）。
+/// 「外观」的下拉：触发器显示当前值，复用通用 `select` 列三个带图标的选项。
 fn appearance_select() -> AnyElement {
     use crate::config::Appearance;
+    use crate::ui::components::form::{SelectOption, select_trigger, select_with_trigger};
     let s = store();
     const OPTIONS: &[(Appearance, Icon, &str)] = &[
         (Appearance::System, Icon::Monitor, "系统"),
@@ -35,79 +35,23 @@ fn appearance_select() -> AnyElement {
             .copied()
     };
     let current = move || current_mode().map_or("系统", |(_, _, l)| l).to_owned();
-    let trigger = super::super::super::components::form::select_trigger(
+    let trigger = select_trigger(
         current,
         move || current_mode().map(|(_, g, _)| g),
         "外观",
         110.0,
         "",
     );
-    let gate = super::super::super::store::menu_control();
-    nsh_base::select()
-        .items(
-            OPTIONS
-                .iter()
-                .enumerate()
-                .map(|(i, (_, _, label))| nsh_base::SelectItem::new(i.to_string(), *label))
-                .collect::<Vec<_>>(),
-        )
-        .value(move || {
-            let mode = s.library.with(|l| l.config.appearance);
-            nsh_base::SelectValue::Controlled(
-                OPTIONS
-                    .iter()
-                    .position(|(m, _, _)| *m == mode)
-                    .map(|i| i.to_string().into()),
-            )
+    let options = OPTIONS
+        .iter()
+        .map(|&(mode, glyph, label)| {
+            SelectOption::new(label, move || {
+                super::super::super::store::set_appearance(mode);
+            })
+            .with_glyph(glyph)
         })
-        .accessibility_label("外观")
-        .placement(Placement::Bottom)
-        .align(Align::Start)
-        .offset(px(4.0))
-        .margin(px(8.0))
-        .open(gate.open())
-        .on_open_change(gate.select_change())
-        .on_change(move |v: &Option<SharedString>| {
-            if let Some(v) = v
-                && let Ok(i) = v.parse::<usize>()
-                && let Some(&(mode, _, _)) = OPTIONS.get(i)
-            {
-                super::super::super::store::set_appearance(mode)
-            }
-        })
-        .render_item(|e: &nsh_base::SelectEntry| {
-            let (glyph, label) = OPTIONS
-                .get(e.index as usize)
-                .map(|(_, g, l)| (*g, *l))
-                .unwrap_or((Icon::Monitor, ""));
-            view()
-                .flex_row()
-                .items_center()
-                .gap(px(8.0))
-                .child(icon(glyph, 15.0, muted_fg))
-                .child(
-                    text(label)
-                        .flex_1()
-                        .number_of_lines(1)
-                        .text_size(px(13.0))
-                        .line_height(px(13.0))
-                        .text_color(fg()),
-                )
-        })
-        .popup_style(|st| {
-            st.min_w(px(140.0))
-                .p(px(4.0))
-                .rounded(px(10.0))
-                .overflow_hidden()
-                .border_1()
-                .border_color(border())
-                .bg(nsh_base::theme().popover)
-                .shadow_lg()
-        })
-        .item_class("focus:bg-hover")
-        .item_style(|st| st.px(px(10.0)).py(px(6.0)).rounded(px(6.0)))
-        .trigger(trigger)
-        .into_element()
+        .collect::<Vec<_>>();
+    select_with_trigger(current, "外观", options, 110.0, Some(trigger))
 }
 /// 主题色：一排预设色 + 跟随当前曲目封面（强调色，立即生效）。
 pub(super) fn accent_section() -> View {

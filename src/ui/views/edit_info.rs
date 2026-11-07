@@ -9,8 +9,8 @@ use nsh_core::prelude::*;
 use super::super::components::button::{RADIUS_MD, Size, Variant, text_button};
 use super::super::components::cover::cover;
 use super::super::components::form::{
-    dialog_content, dialog_footer, dialog_header, input_field, modal, select, tab_list,
-    tab_trigger, trigger_chevron,
+    SelectOption, dialog_content, dialog_footer, dialog_header, input_field, modal, select,
+    tab_list, tab_trigger, trigger_chevron,
 };
 use super::super::components::icons::{Icon, icon};
 use super::super::store::{self, store};
@@ -879,8 +879,8 @@ fn target_row(
             },
             label,
             vec![
-                (None, file_name, target(true)),
-                (None, "内嵌标签", target(false)),
+                SelectOption::new(file_name, target(true)),
+                SelectOption::new("内嵌标签", target(false)),
             ],
             110.0,
         ))

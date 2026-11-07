@@ -3,7 +3,7 @@
 use nsh_core::prelude::*;
 
 use super::super::super::components::button::{Size, Variant, text_button};
-use super::super::super::components::form::{input_field, select};
+use super::super::super::components::form::{SelectOption, input_field, select};
 use super::super::super::components::slider::{SliderStyle, slider};
 use super::super::super::store::store;
 use super::super::super::theme::*;
@@ -432,17 +432,10 @@ pub(super) fn eq_section() -> View {
                     move |c, db| c.bands[i] = db,
                 ));
             }
-            let options: Vec<(Option<&'static str>, &'static str, Box<dyn Fn()>)> =
-                crate::engine::eq::PRESETS
-                    .iter()
-                    .map(|&(name, bands)| {
-                        (
-                            None,
-                            name,
-                            Box::new(move || edit_eq(|c| c.bands = bands)) as Box<dyn Fn()>,
-                        )
-                    })
-                    .collect();
+            let options: Vec<SelectOption> = crate::engine::eq::PRESETS
+                .iter()
+                .map(|&(name, bands)| SelectOption::new(name, move || edit_eq(|c| c.bands = bands)))
+                .collect();
             view()
                 .gap(px(16.0))
                 .child(

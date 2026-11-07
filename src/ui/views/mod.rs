@@ -1,9 +1,9 @@
 //! 路由页：曲库（文件夹 / 歌手 / 专辑 / 流派）、歌单、设置。跨页共享的
 //! （曲目列表、详情页头、空曲库、路径工具、搜索结果）在本文件。
 
-mod browse;
+pub(super) mod browse;
 mod edit_info;
-mod folders;
+pub(super) mod folders;
 mod home;
 pub(super) mod playlists;
 mod settings;
@@ -21,9 +21,9 @@ use super::store::{play_list, store};
 use super::theme::*;
 use crate::config::{TrackEntry, library_store};
 
-pub(super) use self::browse::{albums, artists, genres};
+pub(super) use self::browse::{albums, artists, genres, tags_sidebar_list};
 pub(super) use self::edit_info::edit_info_dialog;
-pub(super) use self::folders::folders;
+pub(super) use self::folders::{folders, tree_sidebar_list};
 pub(super) use self::home::home;
 pub(super) use self::settings::dialog as settings_dialog;
 
@@ -51,7 +51,7 @@ macro_rules! popup {
 pub(crate) use popup;
 
 /// 菜单项的一行：图标（可无）+ 文字。
-fn row_content(glyph: Option<Icon>, label: impl Fn() -> String + 'static) -> View {
+pub(crate) fn row_content(glyph: Option<Icon>, label: impl Fn() -> String + 'static) -> View {
     view()
         .flex_row()
         .items_center()

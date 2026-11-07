@@ -118,6 +118,7 @@ pub fn App() -> impl IntoElement {
                             .child(frame::bar::player_bar(open, queue_open)),
                     ),
             )
+            .child(views::folders::drag_ghost())
             .child(frame::title_bar())
             .child(when(
                 move || full_open.get(),
@@ -156,6 +157,10 @@ pub fn App() -> impl IntoElement {
         .child(when(
             move || s.edit_info.with(Option::is_some),
             views::edit_info_dialog,
+        ))
+        .child(when(
+            move || s.folder_op.with(Option::is_some) && !s.hidden.get(),
+            views::folders::op_dialog,
         ))
         .child(when(
             move || s.delete_ask.with(Option::is_some) && !s.hidden.get(),
