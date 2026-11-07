@@ -1,10 +1,37 @@
-# macOS ld：dev 二进制的 __eh_frame 超 16MB 时放弃把它编码进紧凑 unwind
-# 表并告警（"performance of exception handling might be affected"——panic
-# 仍能展开，只是走慢一点的 DWARF 路径）。直接 `-no_compact_unwind` 关掉
-# 紧凑表生成，让取舍显式化、消掉这个每次构建都出现的告警。
-# 注意该 flag 对所有 macOS 链接生效，包括 `nsh package` 的发布包：发布
-# 包因此没有 __unwind_info 快路径，unwind 走 eh_frame——语义不变，异常
-# 展开与回溯稍慢；若在意发布包的紧凑表，打包时可用
-# `CARGO_ENCODED_RUSTFLAGS` 临时清掉本项。
-[target.'cfg(target_os = "macos")']
-rustflags = ["-C", "link-arg=-Wl,-no_compact_unwind"]
+# 打包优化（nsh package 在 .nsh/rust 子工作区运行，.cargo/config.toml 会全局生效）：
+# opt-level = "s" 抑制 UI/平台库的过度循环展开与单态泛型膨胀；
+# codegen-units = 1 + lto = "thin" 做跨 crate  dead-code 裁剪与内联；
+# strip = true 剥离调试符号；
+# 音频重采样 / 解码 / FFT / 主色提取等性能敏感库保持 opt-level = 3 享受 SIMD 优化。
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.release.package.rubato]
+opt-level = 3
+
+[profile.release.package.rustfft]
+opt-level = 3
+
+[profile.release.package.symphonia]
+opt-level = 3
+
+[profile.release.package.symphonia-bundle-mp3]
+opt-level = 3
+
+[profile.release.package.symphonia-bundle-flac]
+opt-level = 3
+
+[profile.release.package.symphonia-codec-aac]
+opt-level = 3
+
+[profile.release.package.symphonia-codec-alac]
+opt-level = 3
+
+[profile.release.package.symphonia-codec-vorbis]
+opt-level = 3
+
+[profile.release.package.color-thief]
+opt-level = 3
