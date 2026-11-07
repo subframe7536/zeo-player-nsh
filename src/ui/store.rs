@@ -1213,11 +1213,6 @@ pub struct MenuGate {
 }
 
 impl MenuGate {
-    /// 主动开这个弹层（行内「⋯」按钮这类显式触发器用）。
-    pub fn request_open(self) {
-        self.open.set(Some(self.id));
-    }
-
     /// `menu` / `context_menu` 的 `.open(..)`。
     pub fn open(self) -> impl Fn() -> Option<bool> + 'static {
         let (id, open) = (self.id, self.open);

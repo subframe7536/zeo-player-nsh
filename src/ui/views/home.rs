@@ -15,10 +15,10 @@ use super::super::components::button::icon_button;
 use super::super::components::cover::{cover, cover_initial, initial_letter};
 use super::super::components::icons::{Icon, icon};
 use super::super::components::page::empty_state;
-use super::super::components::tracks::content_width;
+use super::super::components::tracks::{Columns, content_width, track_columns, track_row};
 use super::super::store::{cover_for, covers_on, play_list, player, queue_add, store};
 use super::super::theme::*;
-use super::{browse::avatar, no_library, playlists::track_menu_with};
+use super::{browse::avatar, no_library, playlists::track_menu};
 use crate::config::TrackEntry;
 
 /// 千分位（页头与统计卡的大数）。
@@ -556,115 +556,10 @@ fn hot_artists(stats: Signal<crate::db::PlayStats>) -> AnyElement {
     .into_element()
 }
 
-/// 「新添加」卡：方封面 + 曲名 / 歌手，悬停出播放圆钮与「⋯」（同右键菜单）。
-/// 按下以本批为队列从本卡开始播。
-fn added_card(t: &TrackEntry, index: usize, list: Rc<Vec<TrackEntry>>) -> AnyElement {
-    let t = t.clone();
-    let path = stored(t.path.clone());
-    let title = stored(t.title.clone());
-    let src = move || cover_for(&path.get(), 96.0);
-    let letter = move || initial_letter(&title.get(), &path.get());
-    let hovering = signal(false);
-    let gate = super::super::store::menu_control();
-    let play_row = {
-        let list = list.clone();
-        move || play_list(&list, index)
-    };
-    let play_btn = {
-        let list = list.clone();
-        move || play_list(&list, index)
-    };
-    let play_menu = { move || play_list(&list, index) };
-    let row = view()
-        .w_full()
-        .h(px(64.0))
-        .flex_row()
-        .items_center()
-        .rounded(px(12.0))
-        .overflow_hidden()
-        .role(AccessibilityRole::Button)
-        .label(move || SharedString::from(title.get()))
-        .bg(muted())
-        .hover(|st| st.bg(hover()))
-        .active(|st| st.opacity(0.85))
-        .on_mouse_enter(move |_: &MouseEvent| hovering.set(true))
-        .on_mouse_leave(move |_: &MouseEvent| hovering.set(false))
-        .on_press(move |_: &()| play_row())
-        .child(when(covers_on, move || {
-            cover_initial(src, letter, Some(64.0), 0.0)
-        }))
-        .child(
-            view()
-                .flex_1()
-                .min_w(px(0.0))
-                .pl(px(12.0))
-                .pr(px(88.0))
-                .gap(px(4.0))
-                .child(
-                    text(t.title.clone())
-                        .number_of_lines(1)
-                        .text_size(px(14.0))
-                        .line_height(px(14.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(fg()),
-                )
-                .child(
-                    text(t.artist.clone())
-                        .number_of_lines(1)
-                        .text_size(px(12.0))
-                        .line_height(px(12.0))
-                        .text_color(muted_fg()),
-                ),
-        )
-        // 按钮浮在右侧不占位：插 flex 子项会改卡的固有宽、引起网格回流。
-        .child(when(
-            move || hovering.get(),
-            move || {
-                view()
-                    .absolute()
-                    .top(px(0.0))
-                    .bottom(px(0.0))
-                    .right(px(10.0))
-                    .flex_row()
-                    .items_center()
-                    .gap(px(4.0))
-                    .child(
-                        button()
-                            .size(px(36.0))
-                            .flex_shrink_0()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .accessibility_label("播放")
-                            .bg(move || nsh_base::theme().secondary)
-                            .hover(|st| st.opacity(0.85))
-                            .on_press({
-                                let play = play_btn.clone();
-                                move |_: &()| play()
-                            })
-                            .child(icon(Icon::Play, 16.0, fg)),
-                    )
-                    .child(icon_button(
-                        || Icon::More,
-                        16.0,
-                        "更多",
-                        muted_fg,
-                        move || gate.request_open(),
-                    ))
-                    .into_element()
-            },
-        ));
-    let track = computed(move || Some(t.clone()));
-    // flex 尺寸挂在外层：context_menu 的根是包住 trigger 的 view，网格
-    // 直接排的是它——尺寸写在卡上会被菜单包装吞掉，行宽乱掉。
-    view()
-        .flex_1()
-        .min_w(px(300.0))
-        .child(track_menu_with(gate, row, track, None, play_menu, None))
-        .into_element()
-}
-
-/// 「新添加」：最近入库的曲目（最多十条），一行多张卡。
+/// 「新添加」：最近入库的曲目（最多十条），与曲库页相同的曲目列表
+/// （列头 + `track_row` 行，双击播放、右键菜单相同）。节在 px(32) 栏
+/// 里，`mx(-12)` 抵消出 20 的行距——与曲库页 `mx(20)` + 行内
+/// `px(12)` 对齐到同一内容线。
 fn new_added(stats: Signal<crate::db::PlayStats>) -> AnyElement {
     let s = store();
     dynamic(move || {
@@ -681,14 +576,30 @@ fn new_added(stats: Signal<crate::db::PlayStats>) -> AnyElement {
             return view().into_element();
         }
         let queue = Rc::new(list);
-        let mut grid = view().flex_row().flex_wrap().gap(px(12.0));
+        // `mx(-12)` 把行距抵成 20（与曲库页 `mx(20)` + 行内 `px(12)`
+        // 同一内容线）；列头用它覆盖自带的 `mx(20)`。
+        let mut table = view().child(track_columns(Columns::ALL).mx(px(-12.0)));
         for (i, t) in queue.iter().enumerate() {
-            grid = grid.child(added_card(t, i, queue.clone()));
+            let track = {
+                let t = t.clone();
+                computed(move || Some(t.clone()))
+            };
+            let number = computed(move || (i + 1).to_string());
+            let play = Rc::new({
+                let queue = queue.clone();
+                move || play_list(&queue, i)
+            });
+            let row = track_row(track, number, Columns::ALL, {
+                let play = play.clone();
+                move || play()
+            })
+            .mx(px(-12.0));
+            table = table.child(track_menu(row, track, None, move || play(), None));
         }
         view()
             .gap(px(12.0))
             .child(section_title("新添加"))
-            .child(grid)
+            .child(table)
             .into_element()
     })
     .into_element()

@@ -90,19 +90,7 @@ pub fn track_menu(
     play: impl Fn() + 'static,
     rename: Option<Rc<dyn Fn(&str)>>,
 ) -> AnyElement {
-    track_menu_with(store::menu_control(), row, track, from, play, rename)
-}
-
-/// 同 [`track_menu`]，但弹层门由调用方持有——行内的「⋯」按钮可以用
-/// `gate.request_open()` 主动打开同一个菜单。
-pub fn track_menu_with(
-    gate: store::MenuGate,
-    row: impl IntoElement,
-    track: Memo<Option<TrackEntry>>,
-    from: Option<u64>,
-    play: impl Fn() + 'static,
-    rename: Option<Rc<dyn Fn(&str)>>,
-) -> AnyElement {
+    let gate = store::menu_control();
     let path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
     let paths = move || path().into_iter().collect::<Vec<_>>();
     let menu = context_menu()
