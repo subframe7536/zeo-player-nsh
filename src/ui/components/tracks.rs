@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use nsh_core::prelude::*;
 
-use super::super::store::{cover_for, covers_on, format_time, is_liked, store, toggle_like};
+use super::super::store::{
+    cover_for, covers_on, format_time, is_liked, shown_playing, store, toggle_like,
+};
 use super::super::theme::*;
 use super::cover::{cover_initial, initial_letter};
 use super::icons::{Icon, icon_dyn};
@@ -200,7 +202,7 @@ pub fn track_row(
                 .with(|now| now.path.as_deref() == Some(t.path.as_str()))
         })
     });
-    let playing = move || current.get() && s.playback.with(|p| p.playing);
+    let playing = move || current.get() && shown_playing();
     let field = move |f: fn(&TrackEntry) -> String| {
         move || track.with(|t| t.as_ref().map(f).unwrap_or_default())
     };

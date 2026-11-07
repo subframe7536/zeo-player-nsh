@@ -108,10 +108,10 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .active(|st| st.scale(0.92))
         .transition_transform()
         .duration(120.0)
-        .on_press(|_: &()| player().toggle())
+        .on_press(|_: &()| super::super::store::toggle())
         .child(super::super::components::icons::play_pause(
             28.0,
-            move || s.playback.with(|p| p.playing),
+            super::super::store::shown_playing,
             fg,
         ));
 

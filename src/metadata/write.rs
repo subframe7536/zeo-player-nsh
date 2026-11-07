@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 
 use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
-use lofty::probe::Probe;
 use lofty::picture::{MimeType, Picture, PictureType};
+use lofty::probe::Probe;
 use lofty::tag::items::Timestamp;
 use lofty::tag::{Accessor, ItemKey, Tag, TagItem, TagType};
 
@@ -252,8 +252,7 @@ pub fn read_fields(path: &Path) -> Result<HashMap<TagField, String>, String> {
 pub fn write_tags(path: &Path, edits: &TagEdits) -> Result<(), String> {
     validate(edits)?;
     // 写入目标是符号链接所指的真实文件（链接本身留着不动）。
-    let target =
-        fs::canonicalize(path).map_err(|e| format!("无法访问 {}: {e}", path.display()))?;
+    let target = fs::canonicalize(path).map_err(|e| format!("无法访问 {}: {e}", path.display()))?;
     if edits.has_tag_changes() {
         ensure_writable(&target)?;
         let tmp = temp_path(&target)?;
@@ -329,8 +328,7 @@ fn write_cover_sidecar(audio: &Path, edit: &CoverEdit) -> Result<(), String> {
     match edit {
         CoverEdit::Remove => {
             for old in crate::metadata::covers::sidecar_files(audio) {
-                fs::remove_file(&old)
-                    .map_err(|e| format!("删除 {} 失败: {e}", old.display()))?;
+                fs::remove_file(&old).map_err(|e| format!("删除 {} 失败: {e}", old.display()))?;
             }
             Ok(())
         }
@@ -506,13 +504,11 @@ fn write_tag(
 
     let existing_type = read_tag_type(tagged);
     let existing_error = match existing_type {
-        Some(tag_type) if tag_type != TagType::Id3v1 => {
-            match tagged.tag_mut(tag_type).map(f) {
-                Some(Ok(())) => return Ok(()),
-                Some(Err(error)) => Some(error),
-                None => None,
-            }
-        }
+        Some(tag_type) if tag_type != TagType::Id3v1 => match tagged.tag_mut(tag_type).map(f) {
+            Some(Ok(())) => return Ok(()),
+            Some(Err(error)) => Some(error),
+            None => None,
+        },
         _ => None,
     };
 
@@ -594,10 +590,7 @@ fn insert_text_checked(
     if tag.insert_text(item_key, text) {
         return Ok(());
     }
-    Err(format!(
-        "{field} 不受 {:?} 标签支持",
-        tag.tag_type()
-    ))
+    Err(format!("{field} 不受 {:?} 标签支持", tag.tag_type()))
 }
 
 /// 闰年的 2 月 29 天。
@@ -749,12 +742,7 @@ fn set_field(tag: &mut Tag, field: TagField, value: &str) -> Result<(), String> 
             let key = if tag.insert_text(ItemKey::Lyrics, value.to_owned()) {
                 ItemKey::Lyrics
             } else {
-                insert_text_checked(
-                    tag,
-                    ItemKey::UnsyncLyrics,
-                    field.label(),
-                    value.to_owned(),
-                )?;
+                insert_text_checked(tag, ItemKey::UnsyncLyrics, field.label(), value.to_owned())?;
                 ItemKey::UnsyncLyrics
             };
             tag.remove_key(if key == ItemKey::Lyrics {
@@ -771,9 +759,7 @@ fn set_field(tag: &mut Tag, field: TagField, value: &str) -> Result<(), String> 
 /// 年份：写 `RecordingDate`（保留原有月日时分），把旧的 `Year` 键清掉；
 /// 标签类型不支持 `RecordingDate` 时退回 `Year`。
 fn set_year(tag: &mut Tag, value: &str) -> Result<(), String> {
-    let year: u16 = value
-        .parse()
-        .map_err(|_| "年份必须是整数".to_owned())?;
+    let year: u16 = value.parse().map_err(|_| "年份必须是整数".to_owned())?;
     let date = with_year(tag.date(), year);
     if tag.insert_text(ItemKey::RecordingDate, date.to_string()) {
         tag.remove_key(ItemKey::Year);
@@ -924,8 +910,8 @@ mod tests {
             assert_eq!(meta.disk_total, Some(2), "{name}");
             assert_eq!(meta.composers, ["作曲丁"], "{name}");
 
-            let fields = read_fields(&path)
-                .unwrap_or_else(|e| panic!("{name} 写后读字段失败: {e}"));
+            let fields =
+                read_fields(&path).unwrap_or_else(|e| panic!("{name} 写后读字段失败: {e}"));
             assert_eq!(fields[&TagField::Comment], "注释戊", "{name}");
 
             assert!(decoded_frames(&path) > 0, "{name} 写完解不出声音");
@@ -960,10 +946,7 @@ mod tests {
         let blank = edits(&[(TagField::Title, "")]);
         write_tags(&path, &blank).unwrap();
         // 空串 = Clear：标题回落到文件名。
-        assert_eq!(
-            crate::metadata::read_meta(&path).unwrap().title,
-            "sine"
-        );
+        assert_eq!(crate::metadata::read_meta(&path).unwrap().title, "sine");
     }
 
     /// TRACKNUMBER="3/12" 合并写法：动号 / 动总数 / 清号 / 清总数都
@@ -984,9 +967,7 @@ mod tests {
             let tag = tagged.primary_tag_mut().unwrap();
             tag.insert_text(ItemKey::TrackNumber, "3/12".to_owned());
             tag.remove_key(ItemKey::TrackTotal);
-            tagged
-                .save_to_path(path, WriteOptions::default())
-                .unwrap();
+            tagged.save_to_path(path, WriteOptions::default()).unwrap();
         };
         let meta = |path: &Path| crate::metadata::read_meta(path).unwrap();
 
@@ -1000,7 +981,10 @@ mod tests {
         };
         write_tags(&path, &clear_track).unwrap();
         // 清了号，总数还在（拆到独立键）。
-        assert_eq!((meta(&path).track, meta(&path).track_total), (None, Some(12)));
+        assert_eq!(
+            (meta(&path).track, meta(&path).track_total),
+            (None, Some(12))
+        );
 
         let path = scratch(&source);
         pair_file(&path);
@@ -1134,9 +1118,11 @@ mod tests {
         let path = scratch(&source);
         // 8×8 红 PNG。
         let mut png = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(
-            image::ImageBuffer::from_pixel(8, 8, image::Rgba([220, 40, 40, 255])),
-        )
+        image::DynamicImage::ImageRgba8(image::ImageBuffer::from_pixel(
+            8,
+            8,
+            image::Rgba([220, 40, 40, 255]),
+        ))
         .write_to(&mut png, image::ImageFormat::Png)
         .unwrap();
         let png = png.into_inner();

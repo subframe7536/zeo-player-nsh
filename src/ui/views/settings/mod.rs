@@ -222,7 +222,7 @@ const SECTIONS: &[Section] = &[
     Section {
         pane: Pane::Playback,
         title: "淡入淡出",
-        keys: "播放 音量 渐变 切歌 暂停 毫秒 时长",
+        keys: "播放 音量 渐变 切歌 暂停 毫秒 时长 无缝",
         build: playback::playback_section,
     },
     Section {
@@ -278,6 +278,13 @@ const SECTIONS: &[Section] = &[
         title: "关闭窗口时",
         keys: "关闭 窗口 最小化 托盘 退出 询问 记住 大小 位置 恢复",
         build: window::window_section,
+    },
+    #[cfg(target_os = "macos")]
+    Section {
+        pane: Pane::Window,
+        title: "菜单栏",
+        keys: "菜单栏 状态栏 托盘 曲名 标题 图标 menubar tray title",
+        build: window::menubar_section,
     },
     Section {
         pane: Pane::Tags,

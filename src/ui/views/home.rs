@@ -213,26 +213,41 @@ impl Shelf {
             .items_center()
             .child(section_title(title))
             .child(view().flex_1())
-            .child(when(move || this.max() > 0.5, move || {
-                let page = move || this.viewport.get() * 0.9;
-                view()
-                    .flex_row()
-                    .gap(px(2.0))
-                    .child(
-                        icon_button(|| Icon::ChevronLeft, 14.0, "往前翻", muted_fg, move || {
-                            let x = (this.offset.get() - page()).max(0.0);
-                            this.el.scroll_to(point(Points(x), Points::ZERO), true);
-                        })
-                        .disabled(move || this.offset.get() <= 0.5),
-                    )
-                    .child(
-                        icon_button(|| Icon::ChevronRight, 14.0, "往后翻", muted_fg, move || {
-                            let x = (this.offset.get() + page()).min(this.max());
-                            this.el.scroll_to(point(Points(x), Points::ZERO), true);
-                        })
-                        .disabled(move || this.offset.get() >= this.max() - 0.5),
-                    )
-            }))
+            .child(when(
+                move || this.max() > 0.5,
+                move || {
+                    let page = move || this.viewport.get() * 0.9;
+                    view()
+                        .flex_row()
+                        .gap(px(2.0))
+                        .child(
+                            icon_button(
+                                || Icon::ChevronLeft,
+                                14.0,
+                                "往前翻",
+                                muted_fg,
+                                move || {
+                                    let x = (this.offset.get() - page()).max(0.0);
+                                    this.el.scroll_to(point(Points(x), Points::ZERO), true);
+                                },
+                            )
+                            .disabled(move || this.offset.get() <= 0.5),
+                        )
+                        .child(
+                            icon_button(
+                                || Icon::ChevronRight,
+                                14.0,
+                                "往后翻",
+                                muted_fg,
+                                move || {
+                                    let x = (this.offset.get() + page()).min(this.max());
+                                    this.el.scroll_to(point(Points(x), Points::ZERO), true);
+                                },
+                            )
+                            .disabled(move || this.offset.get() >= this.max() - 0.5),
+                        )
+                },
+            ))
     }
 
     /// 横向 Scroll：一行横排、藏滚动条（横排卡子项 `flex_1` 够宽摊满、
@@ -378,7 +393,7 @@ fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement {
             .gap(px(24.0))
             .p(px(20.0))
             .rounded(px(16.0))
-            .bg(move || muted())
+            .bg(primary().opacity(0.08))
             .child(when(covers_on, move || cover(art, Some(180.0), 12.0)))
             .child(
                 view()

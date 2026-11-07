@@ -183,6 +183,9 @@ pub struct LibraryConfig {
     /// 列表里显示封面；关掉后行 / 网格 / 队列都只画占位图（省解码内存）。
     #[serde(default = "default_true")]
     pub show_covers: bool,
+    /// macOS 菜单栏在托盘图标旁显示当前曲名（只在该平台生效）。
+    #[serde(default = "default_true")]
+    pub show_tray_title: bool,
     /// 「删除文件」不经过回收站、直接删除（不可恢复）。
     #[serde(default)]
     pub delete_permanently: bool,
@@ -267,6 +270,7 @@ impl Default for LibraryConfig {
             lyrics_timestamps: true,
             prefer_local_covers: default_true(),
             show_covers: default_true(),
+            show_tray_title: default_true(),
             delete_permanently: false,
             pause_on_device_change: true,
             stats_min_percent: default_stats_min_percent(),
@@ -566,6 +570,11 @@ impl LibraryStore {
     /// 设置列表是否显示封面（关闭后行 / 网格 / 队列只画占位图）。
     pub fn set_show_covers(&self, on: bool) {
         self.update_config(|c| c.show_covers = on);
+    }
+
+    /// macOS 菜单栏是否在托盘图标旁显示当前曲名。
+    pub fn set_show_tray_title(&self, on: bool) {
+        self.update_config(|c| c.show_tray_title = on);
     }
 
     /// 「删除文件」是否不经过回收站、直接删除。

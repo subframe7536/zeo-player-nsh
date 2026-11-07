@@ -5,7 +5,7 @@
 pub(super) mod button;
 pub(super) mod cover;
 pub(super) mod form;
-pub(super) mod icons;
+pub(crate) mod icons;
 pub(super) mod page;
 pub(super) mod radio;
 pub(super) mod slider;

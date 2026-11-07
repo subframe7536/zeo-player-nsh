@@ -159,7 +159,13 @@ fn settings_search_filters_sections() {
     // 只有「字体」一节命中：左栏一行结果，右栏是它的内容（「外观」节被滤掉）。
     app.wait_for("id:settings-nav >> role:button[字体]")
         .unwrap();
-    assert!(has(&app, "系统字体"));
+    // 字体 combobox 的输入框显示当前值（不是文本节点，看 input 的文本）。
+    assert_eq!(
+        app.screen()
+            .input_text("id:settings-content >> label:字体")
+            .unwrap(),
+        Some("系统字体")
+    );
     assert!(!has(&app, "或为界面固定一种"));
     // 空曲库时主窗口空状态里也有「添加文件夹…」（没语料的平台），只看
     // 设置内容区里它被滤掉。
@@ -613,7 +619,9 @@ fn font_select_opens_a_searchable_popover() {
     app.wait_for("id:settings-content >> label:字体").unwrap();
     // 弹层未开时预览行不在屏上。
     assert!(!has(&app, "系统字体 · 歌词 Aa あ"));
-    app.press("id:settings-content >> label:字体").unwrap();
+    // combobox：在输入框里输入即开并过滤（选中名先被整词替换）。
+    app.type_text("id:settings-content >> label:字体", "系统")
+        .unwrap();
     assert!(has(&app, "系统字体 · 歌词 Aa あ"), "{:?}", texts(&app));
     app.press("label:系统字体").unwrap();
     assert!(!has(&app, "系统字体 · 歌词 Aa あ"), "选完弹层应关闭");
@@ -1167,14 +1175,18 @@ fn home_recent_shelf_scrolls_horizontally() {
         .expect("卡条应能横向滚动");
     // 翻页钮一次滚近一屏：右翻后左翻解禁，回到起点再禁用。
     app.press("label:往后翻").unwrap();
-    app.wait_until("右翻后「往前翻」应解禁", Duration::from_secs(5), |s| {
-        s.enabled("label:往前翻") == Ok(true)
-    })
+    app.wait_until(
+        "右翻后「往前翻」应解禁",
+        Duration::from_secs(5),
+        |s| s.enabled("label:往前翻") == Ok(true),
+    )
     .unwrap();
     app.press("label:往前翻").unwrap();
-    app.wait_until("回翻后「往前翻」应禁用", Duration::from_secs(5), |s| {
-        s.enabled("label:往前翻") == Ok(false)
-    })
+    app.wait_until(
+        "回翻后「往前翻」应禁用",
+        Duration::from_secs(5),
+        |s| s.enabled("label:往前翻") == Ok(false),
+    )
     .unwrap();
     // 拉宽到全放下 → 翻页钮消失。
     app.set_viewport(size(px(2200.0), px(900.0))).unwrap();

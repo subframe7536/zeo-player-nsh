@@ -1,7 +1,7 @@
 //! ZeoPlayer 的界面（纯 Rust）：侧栏导航 + 内容区 + 浮动播放条；全屏播放为
 //! 带淡入的覆盖层。
 
-mod components;
+pub(crate) mod components;
 mod fonts;
 mod frame;
 mod now_playing;
@@ -42,7 +42,7 @@ pub fn App() -> impl IntoElement {
     set_title_bar(TitleBarStyle::Hidden, Some(px(TITLE_BAR)));
     #[cfg(target_os = "windows")]
     frame::caption::install();
-    on_key("space", |_| store::player().toggle());
+    on_key("space", |_| store::toggle());
 
     let full_open = signal(false);
     // 正在收起（淡出动画中）；收起途中再打开会取消它。

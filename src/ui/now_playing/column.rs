@@ -212,10 +212,10 @@ pub(super) fn left_column(swap: &Swap) -> View {
         .active(|st| st.scale(0.92))
         .transition_transform()
         .duration(120.0)
-        .on_press(|_: &()| player().toggle())
+        .on_press(|_: &()| super::super::store::toggle())
         .child(super::super::components::icons::play_pause(
             34.0,
-            move || s.playback.with(|p| p.playing),
+            super::super::store::shown_playing,
             || white_a(0.95),
         ));
     let mode_icon = move || match s.playback.with(|p| p.loop_mode) {

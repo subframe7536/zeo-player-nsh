@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nsh_core::prelude::*;
 
@@ -115,6 +115,11 @@ pub struct Lyrics {
 #[derive(Clone, Copy)]
 pub struct Store {
     pub playback: Signal<Playback>,
+    /// 播放 / 暂停的用户意图：点击立刻记下目标态，播放键马上形变，
+    /// 不等引擎命令的轮询回传（见 `toggle` / `shown_playing`）。
+    /// `Instant` 是**截止时刻**——引擎一直没跟上（没有可播曲目之类）
+    /// 到期就丢弃，回落到真实状态。
+    pub intent: Signal<Option<(bool, Instant)>>,
     pub track: Signal<NowPlaying>,
     pub library: Signal<LibraryState>,
     pub tracks: Signal<Same<Vec<TrackEntry>>>,
@@ -201,6 +206,34 @@ pub fn player() -> &'static Player {
     Player::global()
 }
 
+/// 意图的引擎往返余量（毫秒）：命令正常时远早于此兑现；没兑现
+/// （没有可播曲目之类）就到期回落真实状态。
+const INTENT_TTL_MS: u64 = 600;
+
+/// 播放 / 暂停：先记下意图（播放键立刻形变），再发引擎命令。
+/// 快速连点按意图取反——真实状态还没回传时连续点不会被旧值顶回。
+pub fn toggle() {
+    let s = store();
+    let now = s
+        .intent
+        .with(|i| i.map(|(v, _)| v).unwrap_or_else(|| s.playback.with(|p| p.playing)));
+    s.intent.set(Some((
+        !now,
+        Instant::now() + Duration::from_millis(INTENT_TTL_MS),
+    )));
+    player().toggle();
+}
+
+/// 播放键应显示的播放态：用户意图优先（点击立即形变），否则引擎
+/// 轮询回的真实状态。
+pub fn shown_playing() -> bool {
+    let s = store();
+    s.intent.with(|i| {
+        i.map(|(v, _)| v)
+            .unwrap_or_else(|| s.playback.with(|p| p.playing))
+    })
+}
+
 /// 建立状态并启动轮询；在根组件里调用一次。
 pub fn install() -> Store {
     let snap = player().state();
@@ -229,6 +262,7 @@ pub fn install() -> Store {
     });
     let s = Store {
         playback,
+        intent: signal(None),
         track,
         library,
         tracks,
@@ -282,6 +316,16 @@ pub fn install() -> Store {
                 volume: snap.volume,
                 loop_mode: snap.loop_mode,
             });
+            // 意图兑现（引擎已跟上）或等太久（命令被忽略，比如没有
+            // 可播曲目）就丢弃，图标回落到真实状态。注意只能 `set` 不能
+            // `update`：`update` 无条件通知订阅者，每轮都触发图标重算
+            // （`timing` 重定向会一直占着动画器，无头测试的 settle 永远
+            // 等不到 quiet）。
+            if s.intent.with_untracked(|i| {
+                i.is_some_and(|(want, dl)| want == snap.is_playing || Instant::now() >= dl)
+            }) {
+                s.intent.set(None);
+            }
             if !Arc::ptr_eq(&snap.track, &last_track) {
                 last_track = snap.track.clone();
                 s.track.set(now_playing(&snap));
@@ -329,7 +373,7 @@ pub fn install() -> Store {
             for action in crate::window::take_tray_actions() {
                 match action {
                     crate::window::TrayAction::Show => crate::window::show(),
-                    crate::window::TrayAction::Toggle => player().toggle(),
+                    crate::window::TrayAction::Toggle => toggle(),
                     crate::window::TrayAction::Previous => player().previous(),
                     crate::window::TrayAction::Next => player().next(),
                     crate::window::TrayAction::Quit => crate::window::quit(),
@@ -345,15 +389,19 @@ pub fn install() -> Store {
         let (title, artist, has_track) = s
             .track
             .with(|t| (t.title.clone(), t.artist.clone(), t.path.is_some()));
-        (title, artist, s.playback.with(|p| p.playing), has_track)
+        // macOS 菜单栏文字的开关（Windows 读了不用）；memo 按值判重，无关的
+        // 配置写不会触发重发。
+        let show_title = s.library.with(|l| l.config.show_tray_title);
+        (title, artist, shown_playing(), has_track, show_title)
     });
     effect(move || {
-        let (title, artist, playing, has_track) = tray_key.get();
+        let (title, artist, playing, has_track, show_title) = tray_key.get();
         crate::window::update_tray(crate::window::TrayState {
             title,
             artist,
             playing,
             has_track,
+            show_title,
         });
     });
 
@@ -909,6 +957,12 @@ pub fn set_prefer_local_covers(on: bool) {
 pub fn set_show_covers(on: bool) {
     update_config(|c| c.show_covers = on);
     std::thread::spawn(move || library_store().set_show_covers(on));
+}
+
+/// macOS 菜单栏是否在托盘图标旁显示曲名（保存，立即生效）。
+pub fn set_show_tray_title(on: bool) {
+    update_config(|c| c.show_tray_title = on);
+    std::thread::spawn(move || library_store().set_show_tray_title(on));
 }
 
 /// 关闭窗口时的行为（保存）。
@@ -1633,7 +1687,9 @@ pub fn save_tags(
             // 当前曲目的详情元数据（`s.meta`）只在换曲时重读——保存后
             // 同一路径不触发，这里手动刷。
             if result.is_ok()
-                && store().track.with(|t| t.path.as_deref() == Some(path.as_str()))
+                && store()
+                    .track
+                    .with(|t| t.path.as_deref() == Some(path.as_str()))
                 && let Ok(meta) = MetaCache::global().get(Path::new(&path))
             {
                 store().meta.set(Some(Same(meta)));
@@ -1642,8 +1698,7 @@ pub fn save_tags(
             // 重发封面请求——按已请求过的尺寸直接重发（缓存键折了侧车
             // 指纹，必然重新生成；内嵌写走音频指纹重发，这里是去重的）。
             if result.is_ok()
-                && let Some((side, _)) =
-                    COVERS.with(|c| c.borrow().get(path.as_str()).copied())
+                && let Some((side, _)) = COVERS.with(|c| c.borrow().get(path.as_str()).copied())
             {
                 crate::metadata::covers::request(&path, side);
             }

@@ -130,11 +130,14 @@ pub struct TrayState {
     pub artist: String,
     pub playing: bool,
     pub has_track: bool,
+    /// macOS 菜单栏是否在图标旁显示曲名（设置「菜单栏显示曲名」）。
+    pub show_title: bool,
 }
 
 // --- 托盘文案（纯函数，两平台共用，直接可单测） ------------------------------
 
-/// 「曲名 — 歌手」（无歌手只留曲名）：菜单行、悬停提示、菜单栏文字共用。
+/// 「曲名 — 歌手」（无歌手只留曲名）：菜单行与悬停提示共用（macOS 菜单栏
+/// 文字走 `bar_title`，只放曲名）。
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn track_label(s: &TrayState) -> String {
     if s.artist.is_empty() {
@@ -154,57 +157,31 @@ fn tray_tooltip(s: &TrayState) -> String {
     }
 }
 
-/// 菜单栏文字（macOS）的宽度预算：全角按 2 列、半角按 1 列。状态栏空间
-/// 宝贵，超了先丢歌手、再截歌名。
+/// 菜单栏文字（macOS）的长度上限：含省略号共 30 个字符。状态栏空间
+/// 宝贵，太长会挤掉旁边的菜单项。
 #[cfg(any(target_os = "macos", test))]
-const BAR_TITLE_WIDTH: usize = 40;
+const BAR_TITLE_MAX_CHARS: usize = 30;
 
-/// CJK 与 emoji 等全角字符区间（近似 wcwidth，够预算判断用）。
+/// 按字符数截断：超过 `max` 个字符时留下 `max - 1` 个再加 `…`。
 #[cfg(any(target_os = "macos", test))]
-fn is_wide(c: char) -> bool {
-    matches!(c as u32,
-        0x1100..=0x115F | 0x2E80..=0xA4CF | 0xAC00..=0xD7A3 | 0xF900..=0xFAFF
-        | 0xFE30..=0xFE6B | 0xFF00..=0xFF60 | 0xFFE0..=0xFFE6
-        | 0x1F300..=0x1FAFF | 0x20000..=0x3FFFD)
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn text_width(s: &str) -> usize {
-    s.chars().map(|c| if is_wide(c) { 2 } else { 1 }).sum()
-}
-
-/// 按显示宽度截断：超 `budget` 列时末尾加 `…`（占 1 列）。
-#[cfg(any(target_os = "macos", test))]
-fn truncate_width(s: &str, budget: usize) -> String {
-    if text_width(s) <= budget {
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
         return s.to_string();
     }
-    let mut out = String::new();
-    let mut used = 0;
-    for c in s.chars() {
-        let w = if is_wide(c) { 2 } else { 1 };
-        if used + w > budget.saturating_sub(1) {
-            break;
-        }
-        out.push(c);
-        used += w;
-    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
     out.push('…');
     out
 }
 
-/// 菜单栏文字（macOS）：「曲名 — 歌手」放得下就全显示，放不下只留曲名
-///（仍超宽再截断）；无曲目返回 `None`，状态栏只留图标。
+/// 菜单栏文字（macOS）：只放曲名（`meta.title` 在标签缺失时已回退
+/// 文件名主干），超长截断；无曲目或「菜单栏显示曲名」关掉时返回
+/// `None`，状态栏只留图标。
 #[cfg(any(target_os = "macos", test))]
 fn bar_title(s: &TrayState) -> Option<String> {
-    if !s.has_track {
+    if !s.has_track || !s.show_title {
         return None;
     }
-    let full = track_label(s);
-    if text_width(&full) <= BAR_TITLE_WIDTH {
-        return Some(full);
-    }
-    Some(truncate_width(&s.title, BAR_TITLE_WIDTH))
+    Some(truncate_chars(&s.title, BAR_TITLE_MAX_CHARS))
 }
 
 /// 取走托盘上发生的操作（菜单项、Windows 上单击图标）。
@@ -260,131 +237,16 @@ fn install_tray_handlers() {
     tray_icon::TrayIconEvent::set_event_handler(Some(
         |event: tray_icon::TrayIconEvent| match event {
             // 左键点图标 = 播放 / 暂停（两平台一致；右键出菜单，
-            // `menu_on_right_click` 默认开）。双击序列里也带 Click(Up)
-            // （Windows：Up → DblClk → Up；macOS 不发 DoubleClick，是
-            // 两个 Up），所以 Toggle 先挂起一个系统双击时长——期内来了
-            // 第二击改判双击：发 Show（两平台一致）并吞掉尾巴上的 Up。
+            // `menu_on_right_click` 默认开）。不做双击判别——单击即时
+            // toggle，快速双击就是两次 toggle（净状态不变）。
             tray_icon::TrayIconEvent::Click {
                 button: tray_icon::MouseButton::Left,
                 button_state: tray_icon::MouseButtonState::Up,
                 ..
-            } => left_click_up(),
-            tray_icon::TrayIconEvent::DoubleClick {
-                button: tray_icon::MouseButton::Left,
-                ..
-            } => double_click(),
+            } => push_tray(TrayAction::Toggle),
             _ => {}
         },
     ));
-}
-
-/// 单击 / 双击判别（纯状态机，可单测）。
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-#[derive(Default)]
-struct ClickDebounce {
-    /// 已派单未发的单击代次。
-    armed: Option<u64>,
-    /// 吞掉 Click(Up) 的截止时刻（双击尾巴；单调递增代次让晚到的
-    /// 计时器不会误发新派的单击）。
-    swallow_until: Option<std::time::Instant>,
-    seq: u64,
-}
-
-/// `on_up` 的裁决。
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-#[derive(Debug, PartialEq, Eq)]
-enum UpDecision {
-    /// 派一个延时单击：到点无第二击发 Toggle。
-    Arm(u64),
-    /// 双击尾巴上的 Up：吞掉。
-    Swallow,
-    /// 双击（第二个 Up）：发 Show。
-    Double,
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-impl ClickDebounce {
-    fn on_up(&mut self, now: std::time::Instant, window: std::time::Duration) -> UpDecision {
-        if self.swallow_until.is_some_and(|t| now < t) {
-            return UpDecision::Swallow;
-        }
-        if self.armed.take().is_some() {
-            self.swallow_until = Some(now + window);
-            return UpDecision::Double;
-        }
-        self.seq += 1;
-        self.armed = Some(self.seq);
-        UpDecision::Arm(self.seq)
-    }
-
-    fn on_double(&mut self, now: std::time::Instant, window: std::time::Duration) {
-        self.armed = None;
-        self.swallow_until = Some(now + window);
-    }
-
-    /// 延时到点：仍是当前代次才发（`true`）。
-    fn disarm(&mut self, seq: u64) -> bool {
-        if self.armed == Some(seq) {
-            self.armed = None;
-            return true;
-        }
-        false
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-static CLICK: std::sync::Mutex<ClickDebounce> = std::sync::Mutex::new(ClickDebounce {
-    armed: None,
-    swallow_until: None,
-    seq: 0,
-});
-
-/// 系统双击时长（Windows 控制面板 / macOS 辅助功能里可调）。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn dbl_click_time() -> std::time::Duration {
-    #[cfg(target_os = "windows")]
-    {
-        // SAFETY: 无参系统查询。
-        let ms =
-            unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
-        return std::time::Duration::from_millis(u64::from(ms.max(1)));
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let secs = objc2_app_kit::NSEvent::doubleClickInterval();
-        return std::time::Duration::from_secs_f64(secs.clamp(0.05, 2.0));
-    }
-    #[allow(unreachable_code)]
-    std::time::Duration::from_millis(400)
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn left_click_up() {
-    let window = dbl_click_time();
-    let seq = match CLICK
-        .lock()
-        .unwrap()
-        .on_up(std::time::Instant::now(), window)
-    {
-        UpDecision::Swallow => return,
-        UpDecision::Double => return push_tray(TrayAction::Show),
-        UpDecision::Arm(seq) => seq,
-    };
-    std::thread::spawn(move || {
-        std::thread::sleep(window);
-        if CLICK.lock().unwrap().disarm(seq) {
-            push_tray(TrayAction::Toggle);
-        }
-    });
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn double_click() {
-    CLICK
-        .lock()
-        .unwrap()
-        .on_double(std::time::Instant::now(), dbl_click_time());
-    push_tray(TrayAction::Show);
 }
 
 /// 启动：挂上关闭拦截、创建托盘图标。可以多次调用（只做一次）。
@@ -454,7 +316,6 @@ pub use platform::{caption_ready, close, is_full_screen, is_maximized, minimize,
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod tray {
     use std::cell::RefCell;
-    use std::sync::OnceLock;
 
     use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -479,114 +340,42 @@ mod tray {
         static LAST: RefCell<Option<TrayState>> = const { RefCell::new(None) };
     }
 
-    /// 字形：播放三角 / 暂停双杠，`pause` 为 true 画双杠。`u`/`v` 是
-    /// 画布归一化坐标（0..1）。
-    pub(super) fn in_glyph(pause: bool, u: f32, v: f32) -> bool {
-        if pause {
-            (0.26..=0.74).contains(&v) && ((0.30..=0.42).contains(&u) || (0.58..=0.70).contains(&u))
-        } else {
-            // 三角（略右移做视觉居中）：左竖边 + 右尖。
-            let (ax, ay, bx, by, cx, cy) = (0.36, 0.25, 0.36, 0.75, 0.74, 0.50);
-            let s =
-                |x0: f32, y0: f32, x1: f32, y1: f32| (u - x0) * (y1 - y0) - (v - y0) * (x1 - x0);
-            let (d1, d2, d3) = (s(ax, ay, bx, by), s(bx, by, cx, cy), s(cx, cy, ax, ay));
-            (d1 >= 0.0 && d2 >= 0.0 && d3 >= 0.0) || (d1 <= 0.0 && d2 <= 0.0 && d3 <= 0.0)
-        }
-    }
-
-    /// Windows 图标的圆角方块底（半径 18%，角外透明）。
-    pub(super) fn in_tile(u: f32, v: f32) -> bool {
-        const R: f32 = 0.18;
-        let (du, dv) = (u - u.clamp(R, 1.0 - R), v - v.clamp(R, 1.0 - R));
-        du * du + dv * dv <= R * R
-    }
-
-    /// Windows 图标底色：应用图标同款浅绿渐变（`icon.svg` 的对角渐变
-    /// #f0ffd1 → #deffe5 → #dafff6）。
-    pub(super) fn tile_color(u: f32, v: f32) -> [u8; 3] {
-        const STOPS: [[u8; 3]; 3] = [[0xf0, 0xff, 0xd1], [0xde, 0xff, 0xe5], [0xda, 0xff, 0xf6]];
-        let t = ((u + v) * 0.5).clamp(0.0, 1.0) * 2.0;
-        let (a, b, t) = if t <= 1.0 {
-            (STOPS[0], STOPS[1], t)
-        } else {
-            (STOPS[1], STOPS[2], t - 1.0)
-        };
-        std::array::from_fn(|c| (a[c] as f32 + (b[c] as f32 - a[c] as f32) * t).round() as u8)
-    }
-
-    /// 播放三角、暂停双杠、圆角方块底的覆盖率掩码（每像素 0..=255，
-    /// 4× 超采样出抗锯齿）。形状只光栅一次：`OnceLock` 缓存，换图标 /
-    /// 叠色都不再重算。
-    fn masks(size: u32) -> &'static [Vec<u8>; 3] {
-        static MASKS: OnceLock<([Vec<u8>; 3], u32)> = OnceLock::new();
-        let (masks, cached_size) = MASKS.get_or_init(|| {
-            const SS: usize = 4;
-            let hi = (size as usize * SS) as f32;
-            let pixels = (size * size) as usize;
-            let mut out = [vec![0u8; pixels], vec![0u8; pixels], vec![0u8; pixels]];
-            for y in 0..size as usize {
-                for x in 0..size as usize {
-                    let (mut p, mut q, mut t) = (0u32, 0u32, 0u32);
-                    for sy in 0..SS {
-                        for sx in 0..SS {
-                            let u = ((x * SS + sx) as f32 + 0.5) / hi;
-                            let v = ((y * SS + sy) as f32 + 0.5) / hi;
-                            p += in_glyph(false, u, v) as u32;
-                            q += in_glyph(true, u, v) as u32;
-                            t += in_tile(u, v) as u32;
-                        }
-                    }
-                    let i = y * size as usize + x;
-                    let s = (SS * SS) as f32;
-                    out[0][i] = (p as f32 / s * 255.0).round() as u8;
-                    out[1][i] = (q as f32 / s * 255.0).round() as u8;
-                    out[2][i] = (t as f32 / s * 255.0).round() as u8;
-                }
-            }
-            (out, size)
-        });
-        debug_assert_eq!(*cached_size, size, "托盘图标尺寸随平台固定");
-        masks
-    }
-
-    /// 托盘图标：缓存的形状掩码上叠色。macOS 是模板图（黑形 + alpha，
-    /// 系统按菜单栏明暗反色成黑白）；Windows 和应用图标一样「外浅内
-    /// 深」——浅绿渐变圆角方块底 + 深绿字形（#246449），深浅任务栏都可见。
+    /// 托盘图标：播放 / 暂停按钮的同一图形（`icons::play_pause_svg`——
+    /// 同一组顶点 + 同款圆角描边）交给 `nsh_core::svg` 光栅化。macOS 是
+    /// 模板图（只取 alpha，系统按菜单栏明暗反色成黑白）；Windows 的 svg
+    /// 在字形下垫了应用图标同款的浅绿渐变圆角方块（`tile`），深浅任务栏
+    /// 都可见。
     fn glyph_icon(pause: bool) -> Option<Icon> {
         // 44px：菜单栏 22pt @2x（tray-icon 会把更高的缩到 22pt）；
         // 64px：Windows 按 DPI 缩到 16–32px。
         let size = if cfg!(target_os = "macos") { 44 } else { 64 };
-        let m = masks(size);
-        let glyph = if pause { &m[1] } else { &m[0] };
-        let tile = &m[2];
-        let mut rgba = vec![0u8; size as usize * size as usize * 4];
-        for y in 0..size as usize {
-            for x in 0..size as usize {
-                let i = y * size as usize + x;
-                let fa = glyph[i] as f32 / 255.0;
-                let ba = if cfg!(target_os = "macos") {
-                    0.0
-                } else {
-                    tile[i] as f32 / 255.0
-                };
-                let alpha = fa + ba * (1.0 - fa);
-                if alpha <= 0.0 {
-                    continue;
+        // macOS 图标旁带曲名：文字的光学中心比格子中心高约 1 单位，
+        // 字形上移对齐；Windows 没有旁排文字，图形居中。
+        let dy = if cfg!(target_os = "macos") { -1.0 } else { 0.0 };
+        // macOS 字形缩到格子的 80%（满格顶着菜单栏上下沿显挤）；
+        // Windows 的字形垫着底砖，保持满格。
+        let scale = if cfg!(target_os = "macos") { 0.8 } else { 1.0 };
+        let svg = crate::ui::components::icons::play_pause_svg(
+            pause,
+            cfg!(target_os = "windows"),
+            dy,
+            scale,
+        );
+        let raster = nsh_core::svg::rasterize(svg.as_bytes(), size).ok()?;
+        // Raster 是预乘 RGBA，`Icon::from_rgba` 要非预乘——半透明边缘不
+        // 除回 alpha 会发黑。macOS 模板图只看 alpha，RGB 给黑即可。
+        let mut rgba = raster.pixels;
+        for px in rgba.chunks_exact_mut(4) {
+            let a = px[3] as u32;
+            if a == 0 {
+                continue;
+            }
+            if cfg!(target_os = "macos") {
+                px[..3].fill(0);
+            } else {
+                for c in &mut px[..3] {
+                    *c = ((*c as u32 * 255 + a / 2) / a).min(255) as u8;
                 }
-                let (fg, bg) = if cfg!(target_os = "macos") {
-                    ([0, 0, 0], [0, 0, 0])
-                } else {
-                    let u = (x as f32 + 0.5) / size as f32;
-                    let v = (y as f32 + 0.5) / size as f32;
-                    ([0x24, 0x64, 0x49], tile_color(u, v))
-                };
-                let o = i * 4;
-                for c in 0..3 {
-                    rgba[o + c] = (fg[c] as f32 * fa / alpha
-                        + bg[c] as f32 * ba * (1.0 - fa) / alpha)
-                        .round() as u8;
-                }
-                rgba[o + 3] = (alpha * 255.0).round() as u8;
             }
         }
         Icon::from_rgba(rgba, size, size).ok()
@@ -679,7 +468,8 @@ mod tray {
                 #[cfg(target_os = "windows")]
                 let _ = t.icon.set_icon(Some(glyph));
             }
-            // macOS：图标旁带曲名（放得下连歌手），无曲目只留图标。
+            // macOS：图标旁带曲名（`bar_title` 决定文字与开关），
+            // 无曲目或关掉时只留图标。
             #[cfg(target_os = "macos")]
             t.icon.set_title(super::bar_title(state));
         });
@@ -1536,6 +1326,7 @@ mod tests {
             artist: artist.into(),
             playing: true,
             has_track: true,
+            show_title: true,
         }
     }
 
@@ -1547,92 +1338,59 @@ mod tests {
     }
 
     #[test]
-    fn tray_bar_title_shows_artist_when_it_fits() {
-        assert_eq!(
-            bar_title(&track("歌名", "歌手")).as_deref(),
-            Some("歌名 — 歌手")
-        );
-        // 「曲名 — 歌手」整体超预算就只留曲名。
-        let s = track("一首名字很长的歌曲标题", "一个非常长的歌手名字让整体超宽");
-        assert_eq!(bar_title(&s).as_deref(), Some("一首名字很长的歌曲标题"));
+    fn tray_bar_title_shows_title_only() {
+        // 菜单栏只放曲名，不带歌手。
+        assert_eq!(bar_title(&track("歌名", "歌手")).as_deref(), Some("歌名"));
         // 无曲目：菜单栏只留图标。
         assert_eq!(bar_title(&TrayState::default()), None);
+        // 「菜单栏显示曲名」关掉：同样只留图标。
+        let mut s = track("歌名", "歌手");
+        s.show_title = false;
+        assert_eq!(bar_title(&s), None);
     }
 
     #[test]
     fn tray_bar_title_truncates_long_title() {
         let t = bar_title(&track(&"长".repeat(40), "")).unwrap();
         assert!(t.ends_with('…'));
-        assert!(text_width(&t) <= BAR_TITLE_WIDTH);
+        assert_eq!(t.chars().count(), BAR_TITLE_MAX_CHARS);
     }
 
     #[test]
-    fn tray_text_width_and_truncate() {
-        assert_eq!(text_width("abc"), 3);
-        assert_eq!(text_width("中文测试"), 8);
-        assert_eq!(truncate_width("short", 10), "short");
-        assert_eq!(truncate_width("abcdefghijkl", 10), "abcdefghi…");
-        assert_eq!(truncate_width("一二三四五六", 5), "一二…");
-    }
-
-    /// 单击 / 双击判别：单 Up 派延时单击、到点可发；双击序列
-    /// （Windows Up→DblClk→Up、macOS Up→Up）里第二击改判 Show、
-    /// 尾巴上的 Up 被吞。
-    #[test]
-    fn click_debounce_single_vs_double() {
-        let w = std::time::Duration::from_millis(400);
-        let t0 = std::time::Instant::now();
-        // 单击：Arm → 到点 disarm 成功。
-        let mut d = ClickDebounce::default();
-        let UpDecision::Arm(seq) = d.on_up(t0, w) else {
-            panic!("单击应派单")
-        };
-        assert!(d.disarm(seq));
-        // Windows 双击：Up(Arm) → DblClk → Up(Swallow)。
-        let mut d = ClickDebounce::default();
-        assert!(matches!(d.on_up(t0, w), UpDecision::Arm(_)));
-        d.on_double(t0 + w / 2, w);
-        assert_eq!(
-            d.on_up(t0 + w / 2 + std::time::Duration::from_millis(20), w),
-            UpDecision::Swallow
-        );
-        // macOS 双击：Up(Arm) → Up(Double) → 再来的 Up 仍吞。
-        let mut d = ClickDebounce::default();
-        assert!(matches!(d.on_up(t0, w), UpDecision::Arm(_)));
-        assert_eq!(d.on_up(t0 + w / 2, w), UpDecision::Double);
-        assert_eq!(
-            d.on_up(t0 + w / 2 + std::time::Duration::from_millis(20), w),
-            UpDecision::Swallow
-        );
-        // 晚到的单击计时器不会误发新派的单击（代次校验）。
-        let mut d = ClickDebounce::default();
-        let UpDecision::Arm(seq1) = d.on_up(t0, w) else {
-            panic!()
-        };
-        d.on_double(t0 + w / 2, w);
-        assert!(!d.disarm(seq1), "旧代次不得再发");
-        let UpDecision::Arm(seq2) = d.on_up(t0 + w * 2, w) else {
-            panic!("窗口期外的 Up 应重新派单")
-        };
-        assert_ne!(seq1, seq2);
-        assert!(d.disarm(seq2));
+    fn tray_truncate_chars() {
+        assert_eq!(truncate_chars("short", 10), "short");
+        assert_eq!(truncate_chars("abcdefghijkl", 10), "abcdefghi…");
+        assert_eq!(truncate_chars("一二三四五六", 5), "一二三四…");
     }
 
     #[test]
-    fn tray_glyph_hit_tests() {
+    fn tray_glyph_svg_rasterizes() {
+        use crate::ui::components::icons::play_pause_svg;
+        let px = |pause: bool, tile: bool, scale: f32, u: f32, v: f32| -> [u8; 4] {
+            let r =
+                nsh_core::svg::rasterize(play_pause_svg(pause, tile, 0.0, scale).as_bytes(), 44)
+                    .unwrap();
+            let (x, y) = ((u * 44.0).min(43.0) as usize, (v * 44.0).min(43.0) as usize);
+            let i = (y * 44 + x) * 4;
+            [
+                r.pixels[i],
+                r.pixels[i + 1],
+                r.pixels[i + 2],
+                r.pixels[i + 3],
+            ]
+        };
         // 暂停双杠：左杠、右杠在里面，中间缝不在。
-        assert!(tray::in_glyph(true, 0.36, 0.5));
-        assert!(tray::in_glyph(true, 0.64, 0.5));
-        assert!(!tray::in_glyph(true, 0.5, 0.5));
-        // 播放三角：内部在外，右下角外。
-        assert!(tray::in_glyph(false, 0.45, 0.5));
-        assert!(!tray::in_glyph(false, 0.6, 0.72));
-        // 圆角方块底：角外透明。
-        assert!(tray::in_tile(0.5, 0.5));
-        assert!(!tray::in_tile(0.02, 0.02));
-        // 底色：icon.svg 的对角渐变端点与中点。
-        assert_eq!(tray::tile_color(0.0, 0.0), [0xf0, 0xff, 0xd1]);
-        assert_eq!(tray::tile_color(0.5, 0.5), [0xde, 0xff, 0xe5]);
-        assert_eq!(tray::tile_color(1.0, 1.0), [0xda, 0xff, 0xf6]);
+        assert!(px(true, false, 1.0, 0.30, 0.5)[3] > 200);
+        assert!(px(true, false, 1.0, 0.64, 0.5)[3] > 200);
+        assert!(px(true, false, 1.0, 0.5, 0.5)[3] < 40);
+        // 播放三角：内部实、右下外。
+        assert!(px(false, false, 1.0, 0.45, 0.5)[3] > 200);
+        assert!(px(false, false, 1.0, 0.6, 0.72)[3] < 40);
+        // 0.8 缩（macOS）：满格时在左杠内的点被缩出去。
+        assert!(px(true, false, 0.8, 0.24, 0.5)[3] < 40);
+        // Windows 砖：角外透明，砖内字形外的点是浅绿渐变（绿通道最高）。
+        assert!(px(false, true, 1.0, 0.02, 0.02)[3] < 40);
+        let c = px(false, true, 1.0, 0.5, 0.9);
+        assert!(c[3] > 200 && c[1] > c[0] && c[1] > 200);
     }
 }

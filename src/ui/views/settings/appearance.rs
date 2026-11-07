@@ -2,6 +2,8 @@
 
 use nsh_core::prelude::*;
 
+use super::super::super::components::button::RADIUS_MD;
+use super::super::super::components::form::trigger_chevron;
 use super::super::super::components::icons::{Icon, icon, icon_dyn};
 use super::super::super::store::{Same, set_theme_color, store};
 use super::super::super::theme::*;
@@ -181,34 +183,42 @@ pub(super) fn font_section() -> View {
         Some(font_select()),
     )
 }
-/// 「字体」的下拉：nsh-base `select` —— 触发器用当前字体写自己的名字；
-/// 内置搜索框（`searchable`），「系统字体」作为第一项，已安装字体懒加载
-/// （`on_open` 才枚举，离开设置页随本节销毁）。行内容自绘：显示名用它
-/// 自己的字体渲染 + 「歌词 Aa あ」样例，选中行有主题色底与对勾。
+/// 「字体」的 combobox：输入框即搜索框，输入即过滤已安装字体（`on_open`
+/// 才枚举，离开设置页随本节销毁），点选 / 回车确认；「系统字体」固定第
+/// 一项，清除钮回到它。输入框显示选中项的名字、用它自己的字体渲染
+/// （根上的 `font_family` 继承进内部 input），所见即所得。行内容自绘：
+/// 显示名 + 「歌词 Aa あ」样例，选中行有主题色底与对勾。
 fn font_select() -> AnyElement {
     const SYSTEM: &str = "system-ui";
     let s = store();
     let current = move || s.library.with(|l| l.config.font.clone());
     // None：还没读取过（打开弹层才枚举已安装字体）。
     let installed = signal(None::<Same<Vec<String>>>);
-    // 触发器是普通 view（select 接管按压）：select_trigger 的外壳 +
-    // chevron，名字用所选字体渲染，所见即所得。
-    let trigger = super::super::super::components::form::trigger_shell("字体", 200.0)
-        .child(
-            text(move || current().unwrap_or_else(|| "系统字体".to_owned()))
-                .flex_1()
-                .min_w(px(0.0))
-                .number_of_lines(1)
-                .text_size(px(14.0))
-                .line_height(px(14.0))
-                .font_family(move || {
-                    SharedString::from(current().unwrap_or_else(|| "system-ui".to_owned()))
-                })
-                .text_color(fg()),
-        )
-        .child(super::super::super::components::form::trigger_chevron());
+    let t = nsh_base::theme();
+    let (input_c, ring, card_c) = (t.input, t.ring, t.card);
     let gate = super::super::super::store::menu_control();
-    nsh_base::select()
+    nsh_base::combobox()
+        // combobox 的根是 input 所在的行：外壳复刻输入框（同编辑信息的
+        // 流派行），chevron 在行内、清除钮在其左。
+        .w(px(200.0))
+        .h(px(32.0))
+        .items_center()
+        .gap(px(4.0))
+        .pl(px(12.0))
+        .pr(px(8.0))
+        .rounded(px(RADIUS_MD))
+        .border_1()
+        .border_color(input_c)
+        .shadow_xs()
+        .bg(card_c)
+        .font_family(move || {
+            SharedString::from(current().unwrap_or_else(|| SYSTEM.to_owned()))
+        })
+        .focus_within(move |st| {
+            st.border_color(ring)
+                .ring(px(3.0))
+                .ring_color(ring.opacity(0.5))
+        })
         .items(move || {
             let mut items = vec![nsh_base::SelectItem::new(SYSTEM, "系统字体")];
             if let Some(list) = installed.get() {
@@ -217,23 +227,40 @@ fn font_select() -> AnyElement {
                         .map(|f| nsh_base::SelectItem::new(f.clone(), f.clone())),
                 );
             }
+            // 当前字体还没枚举到 / 已卸载时也留一项：输入框显示选中项的
+            // title，找不到项会空白。
+            if let Some(font) = current()
+                && !items.iter().any(|i| i.value.as_str() == font)
+            {
+                items.push(nsh_base::SelectItem::new(font.clone(), font));
+            }
             items
         })
         .value(move || {
-            nsh_base::SelectValue::Controlled(Some(
-                current().unwrap_or_else(|| SYSTEM.into()).into(),
-            ))
+            Some(vec![SharedString::from(
+                current().unwrap_or_else(|| SYSTEM.to_owned()),
+            )])
         })
-        .accessibility_label("字体")
-        .searchable(true)
-        .search_placeholder("搜索已安装的字体")
-        .search_accessibility_label("搜索字体")
+        .placeholder(Some(SharedString::from("搜索或输入字体")))
+        .accessibility_label(Some(SharedString::from("字体")))
+        // 清除 = 回到系统字体（受控值复位为 system-ui）；已是系统默认时
+        // 不出清除钮。
+        .cleanable(move || current().is_some())
+        .clear_button(
+            view()
+                .w(px(20.0))
+                .h(px(20.0))
+                .items_center()
+                .justify_center()
+                .child(icon(Icon::Close, 12.0, muted_fg)),
+        )
+        .clear_button_accessibility_label(Some(SharedString::from("重置为系统字体")))
         .placement(Placement::Bottom)
         .align(Align::End)
         .offset(px(4.0))
         .margin(px(8.0))
         .open(gate.open())
-        .on_open_change(gate.select_change())
+        .on_open_change(gate.combobox_change())
         // 打开才枚举已安装字体；离开设置页本节销毁，数据与任务一起释放。
         .on_open(move || {
             if installed.get_untracked().is_some() {
@@ -245,7 +272,7 @@ fn font_select() -> AnyElement {
                 }
             });
         })
-        .on_change(move |v: &Option<SharedString>| match v.as_deref() {
+        .on_change(move |v: &Vec<SharedString>| match v.first().map(|v| v.as_str()) {
             Some(SYSTEM) | None => super::super::super::store::set_font(None),
             Some(f) => super::super::super::store::set_font(Some(f.to_owned())),
         })
@@ -293,13 +320,14 @@ fn font_select() -> AnyElement {
         .list_style(|st| st.max_h(px(216.0)))
         .item_class("focus:bg-hover")
         .item_style(|st| st.rounded(px(6.0)))
-        .search_style(|st| {
-            st.h(px(32.0))
-                .px(px(10.0))
-                .text_size(px(13.0))
-                .line_height(px(13.0))
+        .input_style(move |st| {
+            st.flex_1()
+                .min_w(px(0.0))
+                .text_size(px(14.0))
+                .line_height(px(14.0))
                 .text_color(fg())
         })
+        .trigger_button(trigger_chevron())
         .empty(
             view().h(px(64.0)).items_center().justify_center().child(
                 text(move || {
@@ -314,6 +342,5 @@ fn font_select() -> AnyElement {
                 .text_color(muted_fg()),
             ),
         )
-        .trigger(trigger)
         .into_element()
 }

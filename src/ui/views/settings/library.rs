@@ -94,7 +94,7 @@ pub(super) fn folders_section() -> View {
                     .h(px(56.0))
                     .px(px(12.0))
                     .rounded(px(10.0))
-                    .bg(muted())
+                    .bg(primary().opacity(0.08))
                     .child(
                         view()
                             .size(px(36.0))

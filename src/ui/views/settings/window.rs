@@ -40,3 +40,20 @@ pub(super) fn window_section() -> View {
         super::super::super::store::set_remember_frame,
     ))
 }
+
+/// 菜单栏（macOS）：托盘图标旁是否显示当前曲名。
+#[cfg(target_os = "macos")]
+pub(super) fn menubar_section() -> View {
+    let s = store();
+    setting_section(
+        "菜单栏",
+        "菜单栏的托盘图标是播放 / 暂停按钮：左键播放 / 暂停，右键打开菜单；图标旁可以显示当前曲目。",
+        None,
+    )
+    .child(pref_row(
+        "显示曲名",
+        "在菜单栏图标旁显示当前曲名（没有标题时显示文件名，最长 30 个字符）；关掉后只留图标。",
+        move || s.library.with(|l| l.config.show_tray_title),
+        super::super::super::store::set_show_tray_title,
+    ))
+}

@@ -1,14 +1,17 @@
-//! 「编辑元数据」弹窗布局回归：用挂载批次还原控件绝对位置与底色——
-//! 流派输入框紧跟最后一个 chip（同一行）；输入框与选中 tab 用不随封面
-//! 染色的 card 底色，未选中 tab 透明。
+//! 「编辑元数据」弹窗与「新建智能歌单」条件编辑器的布局回归：用挂载
+//! 批次还原控件绝对位置与底色——流派输入框紧跟最后一个 chip（同一
+//! 行）；输入框与选中 tab 的 indicator 用不随封面染色的 card 底色，
+//! tab 自身透明。条件行里的「值」触发器高度应是 h-8（select 列容器
+//! 里 flex_1 长纵轴会把它压没）；弹层重开时选中行盖在触发器上
+//! （cover 对齐，滚动收敛前的采样由宽度脉冲重采修正）。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 
 use nsh_core::geometry::{Bounds, Points, Size, px, size};
 use nsh_core::platform::Os;
-use nsh_core::{MountItem, NodeId};
+use nsh_core::{Command, MountItem, NodeId};
 use nsh_engine::{EngineConfig, Root};
 use nsh_testing::Headless;
 use zeo_player::App;
@@ -61,7 +64,8 @@ struct Probed {
     placeholders: HashMap<NodeId, String>,
     texts: HashMap<NodeId, String>,
     images: HashMap<NodeId, String>,
-    scrolls: HashSet<NodeId>,
+    scrolls: HashMap<NodeId, Size<Points>>,
+    scroll_by: HashMap<NodeId, f32>,
     styles: HashMap<NodeId, (u32, u32, f32)>, // bg, border color, border width
 }
 
@@ -85,6 +89,7 @@ fn probe(app: &mut Headless) -> Arc<Mutex<Probed>> {
                     p.images.remove(id);
                     p.styles.remove(id);
                     p.scrolls.remove(id);
+                    p.scroll_by.remove(id);
                 }
                 MountItem::Frame { id, frame } => {
                     p.frames.insert(*id, *frame);
@@ -111,8 +116,25 @@ fn probe(app: &mut Headless) -> Arc<Mutex<Probed>> {
                 MountItem::Image { id, source, .. } => {
                     p.images.insert(*id, format!("{source:?}"));
                 }
-                MountItem::ScrollContent { id, .. } => {
-                    p.scrolls.insert(*id);
+                MountItem::ScrollContent { id, size } => {
+                    p.scrolls.insert(*id, *size);
+                }
+                MountItem::ScrollBy { id, dy, .. } => {
+                    *p.scroll_by.entry(*id).or_default() += dy.0;
+                }
+                MountItem::Command {
+                    id,
+                    command: Command::ScrollTo { y, .. },
+                } => {
+                    let end = scroll_end(&p, *id);
+                    p.scroll_by.insert(*id, y.0.clamp(0.0, end));
+                }
+                MountItem::Command {
+                    id,
+                    command: Command::ScrollToEnd { .. },
+                } => {
+                    let end = scroll_end(&p, *id);
+                    p.scroll_by.insert(*id, end);
                 }
                 MountItem::ViewStyle { id, style } => {
                     p.styles.insert(
@@ -131,8 +153,8 @@ fn probe(app: &mut Headless) -> Arc<Mutex<Probed>> {
     probed
 }
 
-/// 沿父链累加 frame 原点，得到相对根的绝对位置（无滚动偏移的前提：
-/// 弹窗内容不用滚）。
+/// 沿父链累加 frame 原点并减去祖先滚动偏移，得到相对根的绝对位置
+/// （同 headless 的 bounds_in_root）。
 fn abs(p: &Probed, id: NodeId) -> Option<(f32, f32, Size<Points>)> {
     let (mut x, mut y, mut size) = (0.0f32, 0.0f32, None);
     let mut cur = id;
@@ -144,12 +166,22 @@ fn abs(p: &Probed, id: NodeId) -> Option<(f32, f32, Size<Points>)> {
             x += f.origin.x.0;
             y += f.origin.y.0;
         }
+        if let Some(&off) = p.scroll_by.get(&cur) {
+            y -= off;
+        }
         match p.parents.get(&cur) {
             Some(&parent) => cur = parent,
             None => break,
         }
     }
     size.map(|s| (x, y, s))
+}
+
+/// 滚动尽头：内容高 - 视口高（同 headless 的 scroll_end，垂直向）。
+fn scroll_end(p: &Probed, id: NodeId) -> f32 {
+    let content = p.scrolls.get(&id).map(|s| s.height.0).unwrap_or(0.0);
+    let viewport = p.frames.get(&id).map(|f| f.size.height.0).unwrap_or(0.0);
+    (content - viewport).max(0.0)
 }
 
 #[test]
@@ -205,8 +237,10 @@ fn edit_dialog_layout_probe() {
         "输入框应与 chips 同一行（iy={iy:.1}, chip_y={chip_y:.1}）"
     );
 
-    // 底色（测试主题为浅色）：标题输入框 / 选中 tab「基础」= card
-    // 白（不随封面染色），选中 tab 带 1pt 边框；未选中 tab「封面」透明。
+    // 底色（测试主题为浅色）：标题输入框 = card 白（不随封面染色）。
+    // tab 的选中凸起画在列表的 indicator 上：tablist 里唯一无 label 的
+    // 孩子，card 白底 + 1pt 边框，与选中 tab「基础」同 frame；tab 自身
+    // 一律透明。
     let style_of = |label: &str| {
         p.labels
             .iter()
@@ -214,14 +248,45 @@ fn edit_dialog_layout_probe() {
             .and_then(|(id, _)| p.styles.get(id).copied())
             .unwrap_or_else(|| panic!("找不到 {label} 的样式"))
     };
+    let tab_of = |p: &Probed, label: &str| {
+        p.labels
+            .iter()
+            .find(|(_, l)| l.as_str() == label)
+            .map(|(id, _)| *id)
+            .unwrap_or_else(|| panic!("找不到 {label}"))
+    };
     const WHITE: u32 = 0xFFFF_FFFF;
     let (input_bg, ..) = style_of("标题");
     assert_eq!(input_bg, WHITE, "输入框底色应为 card 白（不随封面染色）");
-    let (sel_bg, sel_border, sel_bw) = style_of("基础");
-    assert_eq!(sel_bg, WHITE, "选中 tab 应为 card 白");
+    let list_id = *p.parents.get(&tab_of(&p, "基础")).expect("tab 没有父节点");
+    let indicator_id = p
+        .parents
+        .iter()
+        .filter(|(_, parent)| **parent == list_id)
+        .map(|(id, _)| *id)
+        .find(|id| !p.labels.contains_key(id))
+        .expect("tablist 里没有 indicator");
+    let (ind_bg, ind_border, ind_bw) = p
+        .styles
+        .get(&indicator_id)
+        .copied()
+        .expect("indicator 没有样式");
+    assert_eq!(ind_bg, WHITE, "indicator 应为 card 白");
     assert!(
-        sel_bw >= 1.0 && sel_border != 0,
-        "选中 tab 应有可见边框（bw={sel_bw}, color={sel_border:#x}）"
+        ind_bw >= 1.0 && ind_border != 0,
+        "indicator 应有可见边框（bw={ind_bw}, color={ind_border:#x}）"
+    );
+    let same_frame = |p: &Probed, a: NodeId, b: NodeId| {
+        let (ax, ay, asz) = abs(p, a).expect("没有 frame");
+        let (bx, by, bsz) = abs(p, b).expect("没有 frame");
+        (ax - bx).abs() <= 1.0
+            && (ay - by).abs() <= 1.0
+            && (asz.width.0 - bsz.width.0).abs() <= 1.0
+            && (asz.height.0 - bsz.height.0).abs() <= 1.0
+    };
+    assert!(
+        same_frame(&p, indicator_id, tab_of(&p, "基础")),
+        "indicator 应与选中 tab「基础」同 frame"
     );
     let (unsel_bg, ..) = style_of("封面");
     assert_eq!(unsel_bg, 0, "未选中 tab 应透明");
@@ -233,8 +298,15 @@ fn edit_dialog_layout_probe() {
     drop(p);
     app.press("label:封面").unwrap();
     app.wait_for("label:更换图片…").unwrap();
-    app.wait(Duration::from_millis(200)).unwrap();
+    // indicator 的跟随弹簧约 362ms，等它落定。
+    app.wait(Duration::from_millis(500)).unwrap();
     let p = probed.lock().unwrap();
+
+    // indicator 跟到新选中的「封面」，仍与同 frame。
+    assert!(
+        same_frame(&p, indicator_id, tab_of(&p, "封面")),
+        "indicator 应跟到选中 tab「封面」"
+    );
 
     // 「保存到」下拉存在且显示「同名图片」（同名文件已有时默认写它）。
     assert!(
@@ -290,7 +362,7 @@ fn edit_dialog_layout_probe() {
     let mut scroll_vp = None;
     let mut cur = row_id;
     for _ in 0..16 {
-        if p.scrolls.contains(&cur) {
+        if p.scrolls.contains_key(&cur) {
             scroll_vp = p.frames.get(&cur).map(|f| {
                 let (x, y, _) = abs(&p, cur).unwrap_or_default();
                 (x, y, f.size)
@@ -370,5 +442,93 @@ fn edit_dialog_layout_probe() {
     assert!(
         (item_w + 8.0 - trig_w).abs() <= 4.0,
         "弹层应与 trigger 同宽：选项 {item_w:.0}+8 vs trigger {trig_w:.0}"
+    );
+}
+
+#[test]
+fn smart_playlist_select_probe() {
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    let mut app = start(1200.0, 800.0);
+    let probed = probe(&mut app);
+
+    // 「新建智能歌单」对话框。
+    app.press("label:添加歌单").unwrap();
+    app.press("role:menuitem[新建智能歌单]").unwrap();
+    app.wait_for("label:歌单名称").unwrap();
+    app.wait(Duration::from_millis(200)).unwrap();
+
+    // 字段换成「标签」：值框变成标签选择器（tag_select）。
+    app.press("label:字段").unwrap();
+    app.wait_for("role:option[标签]").unwrap();
+    app.press("role:option[标签]").unwrap();
+    app.wait(Duration::from_millis(200)).unwrap();
+
+    // 值 trigger（label「值」）：弹性宽度，高度应仍是 h-8（32）。
+    {
+        let p = probed.lock().unwrap();
+        let hs: Vec<f32> = p
+            .labels
+            .iter()
+            .filter(|(_, l)| l.as_str() == "值")
+            .filter_map(|(id, _)| abs(&p, *id))
+            .map(|(_, _, s)| s.height.0)
+            .collect();
+        assert!(!hs.is_empty(), "找不到值 trigger");
+        assert!(
+            hs.iter().all(|h| *h >= 30.0),
+            "值 trigger 高度应≈32，实际 {:?}",
+            hs
+        );
+    }
+
+    // 字段换成「文件大小」：列表不限高，整列一次铺开不滚动——末行
+    // 「修改时间」也应立即可见。
+    app.press("label:字段").unwrap();
+    app.wait_for("role:option[修改时间]").unwrap();
+    app.press("role:option[文件大小]").unwrap();
+    app.wait(Duration::from_millis(200)).unwrap();
+
+    // 再开弹层：仍整列铺开；列表比触发器上方空间高时弹层贴窗口边
+    // （cover 对齐放不下就贴边，与原生菜单一致）——整列可见、弹层盖着
+    // trigger 即可。
+    app.press("label:字段").unwrap();
+    app.wait_for("role:option[文件大小]").unwrap();
+    app.wait_for("role:option[修改时间]").unwrap();
+    app.wait(Duration::from_millis(300)).unwrap();
+    let p = probed.lock().unwrap();
+    let trig = p
+        .labels
+        .iter()
+        .find(|(_, l)| l.as_str() == "字段")
+        .map(|(id, _)| *id)
+        .expect("找不到字段 trigger");
+    let option = |title: &str| {
+        p.labels
+            .iter()
+            .find(|(_, l)| l.as_str() == title)
+            .and_then(|(id, _)| abs(&p, *id))
+            .unwrap_or_else(|| panic!("选项 {title} 没有 frame"))
+    };
+    let (_, ty, ts) = abs(&p, trig).expect("trigger 没有 frame");
+    let trig_mid = ty + ts.height.0 / 2.0;
+    let (_, first_y, _) = option("标题");
+    let (_, last_y, last_s) = option("修改时间");
+    let (_, sel_y, sel_s) = option("文件大小");
+    assert!(first_y >= 4.0, "弹层顶应贴窗口内：首行 y={first_y:.1}");
+    assert!(
+        last_y + last_s.height.0 <= 800.0,
+        "末行应在窗口内：底={:.1}",
+        last_y + last_s.height.0
+    );
+    assert!(
+        first_y <= trig_mid && last_y + last_s.height.0 >= trig_mid,
+        "弹层应覆盖 trigger：行区间 {first_y:.1}..{:.1} vs trigger 中 {trig_mid:.1}",
+        last_y + last_s.height.0
+    );
+    assert!(
+        sel_y >= first_y && sel_y + sel_s.height.0 <= last_y + last_s.height.0,
+        "选中行应在列表内"
     );
 }

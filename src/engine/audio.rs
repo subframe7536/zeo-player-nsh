@@ -1347,21 +1347,107 @@ fn ordered_queue(base: &Arc<Vec<String>>, mode: LoopMode) -> Arc<Vec<String>> {
     }
 }
 
-/// Fisher–Yates 洗牌（xorshift64 做种子，不必引入 rand）。
+/// 随机队列（参考 audio0 的 `createSmartShuffle`）：同一歌手的曲目按
+/// 黄金比例近似均匀摊开——连续撞上一个歌手的概率大降；组内纯随机
+/// （权重先按 audio0 的默认固定为 3，不按播放次数加权）。歌手从曲库
+/// 索引一次取好（不在索引里的归空组，不读文件标签）。
 fn shuffled(base: &[String]) -> Vec<String> {
-    let mut out = base.to_vec();
-    let mut seed = std::time::SystemTime::now()
+    let tracks = crate::config::library_store()
+        .tracks
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let artist_of: std::collections::HashMap<&str, &str> = tracks
+        .iter()
+        .map(|t| {
+            let a = if t.artist.is_empty() {
+                t.album_artist.as_str()
+            } else {
+                t.artist.as_str()
+            };
+            (t.path.as_str(), a)
+        })
+        .collect();
+    let seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0)
-        | 0x9e37_79b9_7f4a_7c15;
-    for i in (1..out.len()).rev() {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        let j = (seed % (i as u64 + 1)) as usize;
-        out.swap(i, j);
+        .unwrap_or(0);
+    let order = spread_order(
+        base.len(),
+        |i| artist_of.get(base[i].as_str()).copied().unwrap_or(""),
+        |_| 3.0,
+        seed,
+    );
+    order.into_iter().map(|i| base[i].clone()).collect()
+}
+
+/// 黄金比例（audio0 smart shuffle 同款常数）。
+const GOLDEN: f64 = 0.618033988749895;
+
+fn frac(x: f64) -> f64 {
+    x - x.floor()
+}
+
+/// audio0 的字符串散列：`h = h*31 + c` 按 int32 溢出滚动，归一到 0..1。
+fn string_hash(s: &str) -> f64 {
+    let mut h: i32 = 0;
+    for c in s.chars() {
+        h = h.wrapping_mul(31).wrapping_add(c as i32);
     }
+    (h as i64).unsigned_abs() as f64 / 2147483648.0
+}
+
+/// 把 `0..n` 重排成「同组摊开」的顺序：每组（歌手）按
+/// `散列(组名)×黄金比例` 定环上偏移，组内第 j 个落在
+/// `偏移 + j/组大小 + 抖动`（模 1），全体按落点排序即得队列——同一
+/// 组自然近似均匀摊开（audio0 `createSmartShuffle`）。组内顺序按
+/// `rand × (score+1)` 加权（audio0 `weightedShuffle`，+1 让零播放
+/// 曲目也有机会）。同 `seed` 同输入必同输出（组键先排序再遍历）。
+fn spread_order<'a>(
+    n: usize,
+    group: impl Fn(usize) -> &'a str,
+    score: impl Fn(usize) -> f64,
+    seed: u64,
+) -> Vec<usize> {
+    let mut groups: std::collections::HashMap<&'a str, Vec<usize>> =
+        std::collections::HashMap::new();
+    for i in 0..n {
+        groups.entry(group(i)).or_default().push(i);
+    }
+    let mut keys: Vec<&&str> = groups.keys().collect();
+    keys.sort();
+    let mut rng = seed | 0x9e37_79b9_7f4a_7c15;
+    let mut next = move || {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        (rng >> 11) as f64 / ((1u64 << 53) as f64)
+    };
+    let global_offset = frac((seed as f64).sin().abs() * 10000.0);
+    let mut positions = vec![0.0_f64; n];
+    for key in keys {
+        let items = &groups[key];
+        let len = items.len();
+        let density = len as f64 / n.max(1) as f64;
+        let base = frac(frac(string_hash(key) + global_offset) * GOLDEN) % (1.0 - density + 0.001);
+        // 组内加权序：`rand × (score+1)` 降序，得分高的靠前占位。
+        let mut order: Vec<(usize, f64)> = items
+            .iter()
+            .map(|&i| (i, next() * (1.0 + score(i))))
+            .collect();
+        order.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let len_f = len as f64;
+        for (j, &(i, _)) in order.iter().enumerate() {
+            let jitter = next() * 0.1 / len_f;
+            positions[i] = frac(base + j as f64 / len_f + jitter);
+        }
+    }
+    let mut out: Vec<usize> = (0..n).collect();
+    out.sort_by(|a, b| {
+        positions[*a]
+            .partial_cmp(&positions[*b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     out
 }
 
@@ -2181,11 +2267,23 @@ mod tests {
         );
         // 上限更小 / 下限更高时分别钳到端点。
         assert_eq!(
-            desired_buffer_size(&SupportedBufferSize::Range { min: 128, max: 1024 }, 48_000),
+            desired_buffer_size(
+                &SupportedBufferSize::Range {
+                    min: 128,
+                    max: 1024
+                },
+                48_000
+            ),
             BufferSize::Fixed(1024)
         );
         assert_eq!(
-            desired_buffer_size(&SupportedBufferSize::Range { min: 4096, max: 8192 }, 44_100),
+            desired_buffer_size(
+                &SupportedBufferSize::Range {
+                    min: 4096,
+                    max: 8192
+                },
+                44_100
+            ),
             BufferSize::Fixed(4096)
         );
         // 范围未知（WASAPI 软栈常态）也要固定值——失败由调用方退默认。
@@ -2216,5 +2314,57 @@ mod tests {
             1.0 / 0.8
         );
         assert!(factor <= 4.0);
+    }
+
+    /// 智能洗牌：同 seed 同输入必同输出；结果是全排列；同一歌手的曲目
+    /// 不再连成大段（对照均匀摊开的环上落点）。
+    #[test]
+    fn spread_order_is_deterministic_and_spreads_artists() {
+        let artists: Vec<&str> = (0..30).map(|i| ["A", "B", "C"][i % 3]).collect();
+        let order = spread_order(30, |i| artists[i], |_| 0.0, 42);
+        assert_eq!(
+            order,
+            spread_order(30, |i| artists[i], |_| 0.0, 42),
+            "同 seed 必须确定"
+        );
+        let mut sorted = order.clone();
+        sorted.sort();
+        assert_eq!(sorted, (0..30).collect::<Vec<_>>(), "必须是全排列");
+        // 相邻同歌手的最长连段：纯随机 30 首 3 歌手常见连段 ≥4；摊开应 ≤2。
+        let mut run = 1;
+        let mut worst = 1;
+        for w in order.windows(2) {
+            run = if artists[w[0]] == artists[w[1]] {
+                run + 1
+            } else {
+                1
+            };
+            worst = worst.max(run);
+        }
+        assert!(worst <= 2, "同歌手最长连段 {worst} > 2");
+        // 换 seed 应得不同顺序（极小概率相同就再换一个）。
+        let other = spread_order(30, |i| artists[i], |_| 0.0, 7);
+        assert_ne!(order, other, "不同 seed 顺序应不同");
+    }
+
+    /// 组内按 `rand × (score+1)` 加权：同一歌手的高分曲目更常占组内
+    /// 前位（多 seed 汇总，避免单次偶然）。
+    #[test]
+    fn spread_order_weights_high_score_first_within_group() {
+        // 一个歌手 4 首：index 0 得分 100，其余 0。
+        let artists = vec!["S"; 4];
+        let mut first = 0usize;
+        for seed in 0..64u64 {
+            let order = spread_order(
+                4,
+                |i| artists[i],
+                |i| if i == 0 { 100.0 } else { 0.0 },
+                seed,
+            );
+            if order[0] == 0 {
+                first += 1;
+            }
+        }
+        assert!(first >= 40, "高分曲在队首 {first}/64 次，加权应明显偏前");
     }
 }

@@ -383,3 +383,39 @@ pub fn play_pause(
     .size(px(size))
     .pointer_events(PointerEvents::None)
 }
+
+/// `play_pause` 的静态 SVG 版：要位图的场景（托盘图标）拿去
+/// `nsh_core::svg::rasterize` 光栅化，图形与按钮完全一致——同一组顶点、
+/// 同样的填充 + `MORPH_STROKE` 圆角描边。`tile` 为真时在字形下垫一层和
+/// 应用图标同款的浅绿渐变圆角方块（22% 圆角 ≈ 其 squircle；Windows 托盘
+/// 「外浅内深」需要底，底砖不随 `scale` 缩）。`dy` 把字形在 24 格里整体
+/// 竖移（正向下）：macOS 菜单栏的文字光学中心比格子几何中心高约 1 单位，
+/// 图标要跟着抬。`scale` 把字形绕格子中心 (12,12) 缩放（macOS 菜单栏图标
+/// 用 0.8 让字形比满格小一号）。
+pub(crate) fn play_pause_svg(pause: bool, tile: bool, dy: f32, scale: f32) -> String {
+    let mut d = String::new();
+    for [a, b, c, e] in if pause { PAUSE_SHAPES } else { PLAY_SHAPES } {
+        d += &format!(
+            "M{} {}L{} {}L{} {}L{} {}Z",
+            a.0, a.1, b.0, b.1, c.0, c.1, e.0, e.1
+        );
+    }
+    let tile = tile
+        .then_some(
+            "<defs><linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"24\" y2=\"24\" \
+             gradientUnits=\"userSpaceOnUse\"><stop stop-color=\"#f0ffd1\"/>\
+             <stop offset=\".5\" stop-color=\"#deffe5\"/><stop offset=\"1\" stop-color=\"#dafff6\"/>\
+             </linearGradient></defs><rect width=\"24\" height=\"24\" rx=\"5.3\" fill=\"url(#g)\"/>",
+        )
+        .unwrap_or_default();
+    // 字形包一层 transform：translate 把缩放中心 (12,12) 对回原点再附加
+    // `dy` 竖移；p' = t + scale·p，中心落在 (12, 12+dy)。
+    let tx = 12.0 * (1.0 - scale);
+    let ty = tx + dy;
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\">\
+         {tile}<g transform=\"translate({tx},{ty}) scale({scale})\">\
+         <path d=\"{d}\" fill=\"#246449\" stroke=\"#246449\" \
+         stroke-width=\"{MORPH_STROKE}\" stroke-linejoin=\"round\"/></g></svg>"
+    )
+}

@@ -540,14 +540,12 @@ pub(crate) fn embedded_cover_file(path: &Path, side: u32) -> Option<PathBuf> {
 /// 变化不该让内嵌缩略图重算。
 fn embedded_key(path: &Path) -> Option<u64> {
     let meta = std::fs::metadata(path).ok()?;
-    Some(fnv(
-        format!(
-            "{}|{}|emb",
-            path.display(),
-            crate::metadata::file_stamp(&meta)
-        )
-        .as_bytes(),
-    ))
+    Some(fnv(format!(
+        "{}|{}|emb",
+        path.display(),
+        crate::metadata::file_stamp(&meta)
+    )
+    .as_bytes()))
 }
 
 fn cover_file_keyed(

@@ -88,31 +88,13 @@ pub fn edit_info_dialog() -> AnyElement {
         .child(
             tab_list()
                 .child(
-                    tab_trigger(
-                        move || tab.get() == 0,
-                        None,
-                        "基础",
-                        move || tab.set(0),
-                    )
-                    .flex_1(),
+                    tab_trigger(move || tab.get() == 0, None, "基础", move || tab.set(0)).flex_1(),
                 )
                 .child(
-                    tab_trigger(
-                        move || tab.get() == 1,
-                        None,
-                        "封面",
-                        move || tab.set(1),
-                    )
-                    .flex_1(),
+                    tab_trigger(move || tab.get() == 1, None, "封面", move || tab.set(1)).flex_1(),
                 )
                 .child(
-                    tab_trigger(
-                        move || tab.get() == 2,
-                        None,
-                        "歌词",
-                        move || tab.set(2),
-                    )
-                    .flex_1(),
+                    tab_trigger(move || tab.get() == 2, None, "歌词", move || tab.set(2)).flex_1(),
                 ),
         )
         .child(
@@ -123,23 +105,19 @@ pub fn edit_info_dialog() -> AnyElement {
                 .h(px(448.0))
                 .min_h(px(160.0))
                 .flex_shrink(1.0)
-                .child(view().p(px(4.0)).child(dynamic(move || {
-                    match tab.get() {
-                        1 => cover_pane(draft).into_element(),
-                        2 => lyrics_pane(draft).into_element(),
-                        _ => basic_pane(draft).into_element(),
-                    }
+                .child(view().p(px(4.0)).child(dynamic(move || match tab.get() {
+                    1 => cover_pane(draft).into_element(),
+                    2 => lyrics_pane(draft).into_element(),
+                    _ => basic_pane(draft).into_element(),
                 }))),
         )
         .child(when(
             move || draft.with(|d| d.error.is_some()),
             move || {
-                text(move || {
-                    draft.with(|d| d.error.clone().unwrap_or_default())
-                })
-                .text_size(px(12.0))
-                .line_height(px(16.0))
-                .text_color(nsh_base::theme().destructive)
+                text(move || draft.with(|d| d.error.clone().unwrap_or_default()))
+                    .text_size(px(12.0))
+                    .line_height(px(16.0))
+                    .text_color(nsh_base::theme().destructive)
             },
         ))
         .child(
@@ -197,7 +175,11 @@ fn build_edits(d: &TagDraft) -> TagEdits {
     TagEdits {
         fields,
         // 只写选中的目标；另一头的草稿留着（切回去内容还在），不生效。
-        cover: if d.cover_target { None } else { d.cover.clone() },
+        cover: if d.cover_target {
+            None
+        } else {
+            d.cover.clone()
+        },
         cover_file: if d.cover_target {
             d.cover_file.clone()
         } else {
@@ -218,7 +200,9 @@ fn valid(d: &TagDraft) -> bool {
         TagField::DiscTotal,
     ];
     numeric.iter().all(|f| {
-        let Some(v) = d.values.get(f) else { return true };
+        let Some(v) = d.values.get(f) else {
+            return true;
+        };
         let v = v.trim();
         if v.is_empty() {
             return true;
@@ -238,13 +222,17 @@ fn save(draft: Signal<TagDraft>) {
         d.saving = true;
         d.error = None;
     });
-    store::save_tags(d.path.clone(), build_edits(&d), move |result| match result {
-        Ok(()) => s.edit_info.set(None),
-        Err(error) => draft.update(|d| {
-            d.saving = false;
-            d.error = Some(error);
-        }),
-    });
+    store::save_tags(
+        d.path.clone(),
+        build_edits(&d),
+        move |result| match result {
+            Ok(()) => s.edit_info.set(None),
+            Err(error) => draft.update(|d| {
+                d.saving = false;
+                d.error = Some(error);
+            }),
+        },
+    );
 }
 
 // --- 基础元数据 ----------------------------------------------------------------
@@ -546,11 +534,7 @@ fn genre_row(draft: Signal<TagDraft>) -> View {
                 // 不会在弹层底边把最后一行切成半行。
                 .list_style(|st| st.max_h(px(224.0)))
                 .item_class("focus:bg-hover")
-                .item_style(|st| {
-                    st.px(px(8.0))
-                        .py(px(6.0))
-                        .rounded(px(6.0))
-                })
+                .item_style(|st| st.px(px(8.0)).py(px(6.0)).rounded(px(6.0)))
                 .render_item(move |entry: &nsh_base::SelectEntry| genre_item(draft, entry))
                 .input_style(move |st| {
                     // 紧跟最后一个 chip 并吃掉该行剩余宽度；放不下 72
@@ -734,8 +718,9 @@ fn cover_pane(draft: Signal<TagDraft>) -> View {
             .flatten();
             let Some(file) = picked else { return };
             let outcome = (|| {
-                let mime = write::cover_mime(&file)
-                    .ok_or_else(|| "不支持的图片格式（PNG / JPEG / WebP / BMP / GIF）".to_owned())?;
+                let mime = write::cover_mime(&file).ok_or_else(|| {
+                    "不支持的图片格式（PNG / JPEG / WebP / BMP / GIF）".to_owned()
+                })?;
                 std::fs::read(&file)
                     .map_err(|e| format!("读取图片失败: {e}"))
                     .map(|data| (data, mime))
@@ -777,78 +762,86 @@ fn cover_pane(draft: Signal<TagDraft>) -> View {
             file_mode,
             "同名图片",
         ))
-        .child(when(move || file_mode(), move || {
-            text(if art_exists {
-                "保存到同名图片文件；「移除封面」会删除它。"
-            } else {
-                "保存时新建同名图片文件。"
-            })
-            .text_size(px(12.0))
-            .text_color(faint())
-        }))
-        .child(when(move || file_mode(), move || {
-            text("同名图片在「封面来源」本地优先时先于内嵌封面显示。")
+        .child(when(
+            move || file_mode(),
+            move || {
+                text(if art_exists {
+                    "保存到同名图片文件；「移除封面」会删除它。"
+                } else {
+                    "保存时新建同名图片文件。"
+                })
                 .text_size(px(12.0))
                 .text_color(faint())
-        }))
-        .child(when(move || !file_mode(), move || {
-            text("保存后替换文件里的全部内嵌图片。")
-                .text_size(px(12.0))
-                .text_color(faint())
-        }))
-        .child(when(move || !file_mode() && art_exists, move || {
-            text("检测到同名图片——「封面来源」本地优先时，显示它而不是内嵌封面。")
-                .text_size(px(12.0))
-                .text_color(faint())
-        }))
+            },
+        ))
+        .child(when(
+            move || file_mode(),
+            move || {
+                text("同名图片在「封面来源」本地优先时先于内嵌封面显示。")
+                    .text_size(px(12.0))
+                    .text_color(faint())
+            },
+        ))
+        .child(when(
+            move || !file_mode(),
+            move || {
+                text("保存后替换文件里的全部内嵌图片。")
+                    .text_size(px(12.0))
+                    .text_color(faint())
+            },
+        ))
+        .child(when(
+            move || !file_mode() && art_exists,
+            move || {
+                text("检测到同名图片——「封面来源」本地优先时，显示它而不是内嵌封面。")
+                    .text_size(px(12.0))
+                    .text_color(faint())
+            },
+        ))
         .child(
-            view()
-                .flex_1()
-                .items_center()
-                .justify_center()
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(20.0))
-                        .child(cover(src, Some(192.0), 10.0))
-                        .child(
-                            view()
-                                .gap(px(8.0))
-                                .child(
-                                    text_button(
-                                        Variant::Outline,
-                                        Size::Default,
-                                        None,
-                                        "更换图片…",
-                                        pick,
-                                    )
-                                    .w(px(112.0)),
+            view().flex_1().items_center().justify_center().child(
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(20.0))
+                    .child(cover(src, Some(192.0), 10.0))
+                    .child(
+                        view()
+                            .gap(px(8.0))
+                            .child(
+                                text_button(
+                                    Variant::Outline,
+                                    Size::Default,
+                                    None,
+                                    "更换图片…",
+                                    pick,
                                 )
-                                .child(
-                                    text_button(
-                                        Variant::Outline,
-                                        Size::Default,
-                                        None,
-                                        "移除封面",
-                                        remove,
-                                    )
-                                    .w(px(112.0))
-                                    .disabled(move || {
-                                        draft.with(|d| {
-                                            if d.saving {
-                                                return true;
-                                            }
-                                            if d.cover_target {
-                                                !d.art_exists && d.cover_file.is_none()
-                                            } else {
-                                                !has_art && d.cover.is_none()
-                                            }
-                                        })
-                                    }),
-                                ),
-                        ),
-                ),
+                                .w(px(112.0)),
+                            )
+                            .child(
+                                text_button(
+                                    Variant::Outline,
+                                    Size::Default,
+                                    None,
+                                    "移除封面",
+                                    remove,
+                                )
+                                .w(px(112.0))
+                                .disabled(move || {
+                                    draft.with(|d| {
+                                        if d.saving {
+                                            return true;
+                                        }
+                                        if d.cover_target {
+                                            !d.art_exists && d.cover_file.is_none()
+                                        } else {
+                                            !has_art && d.cover.is_none()
+                                        }
+                                    })
+                                }),
+                            ),
+                    ),
+            ),
         )
 }
 
@@ -863,9 +856,8 @@ fn target_row(
     file_mode: impl Fn() -> bool + Copy + 'static,
     file_name: &'static str,
 ) -> View {
-    let target = move |file: bool| -> Box<dyn Fn()> {
-        Box::new(move || draft.update(|d| set(d, file)))
-    };
+    let target =
+        move |file: bool| -> Box<dyn Fn()> { Box::new(move || draft.update(|d| set(d, file))) };
     view()
         .flex_row()
         .items_center()
@@ -911,20 +903,26 @@ fn lyrics_pane(draft: Signal<TagDraft>) -> View {
             file_mode,
             ".lrc 文件",
         ))
-        .child(when(move || file_mode(), move || {
-            text(if lrc_exists {
-                "保存到同名 .lrc 文件；清空会删除它。"
-            } else {
-                "保存时新建同名 .lrc 文件。"
-            })
-            .text_size(px(12.0))
-            .text_color(faint())
-        }))
-        .child(when(move || !file_mode() && lrc_exists, move || {
-            text("检测到同名 .lrc——「歌词来源」本地优先时，播放页显示它而不是内嵌歌词。")
+        .child(when(
+            move || file_mode(),
+            move || {
+                text(if lrc_exists {
+                    "保存到同名 .lrc 文件；清空会删除它。"
+                } else {
+                    "保存时新建同名 .lrc 文件。"
+                })
                 .text_size(px(12.0))
                 .text_color(faint())
-        }))
+            },
+        ))
+        .child(when(
+            move || !file_mode() && lrc_exists,
+            move || {
+                text("检测到同名 .lrc——「歌词来源」本地优先时，播放页显示它而不是内嵌歌词。")
+                    .text_size(px(12.0))
+                    .text_color(faint())
+            },
+        ))
         .child(
             text("歌词")
                 .text_size(px(13.0))

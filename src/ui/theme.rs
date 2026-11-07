@@ -93,17 +93,17 @@ pub fn accent_of(hue: f32, saturation: f32) -> AdaptiveColor {
 ///（0..1），`light` 是亮度加减（非 0 时夹在 0.04..0.96，让白底变成
 /// 仍有色的粉彩）。
 fn tinted(base: AdaptiveColor, sat_add: f32, light: f32) -> AdaptiveColor {
-    match super::store::tint() {
-        Some((h, s)) => base.map(|c| {
-            let l = if light == 0.0 {
-                c.l
-            } else {
-                (c.l + light).clamp(0.04, 0.96)
-            };
-            hsla(h, (s * 0.35 + sat_add).min(0.5), l, c.a)
-        }),
-        None => base,
-    }
+    let Some((h, s)) = super::store::tint() else {
+        return base;
+    };
+    base.map(|c| {
+        let l = if light == 0.0 {
+            c.l
+        } else {
+            (c.l + light).clamp(0.04, 0.96)
+        };
+        hsla(h, (s * 0.35 + sat_add).min(0.5), l, c.a)
+    })
 }
 /// 主侧边栏与设置弹窗左栏的底色：压暗一档，比右侧内容区深（也多一点饱和）。
 pub fn sidebar() -> AdaptiveColor {

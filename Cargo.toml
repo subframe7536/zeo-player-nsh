@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 # NSH：与 nsh CLI 同版本（nsh --version），dev-dependencies 里的 nsh-engine / nsh-testing 一起改。
 # 见 https://nsh.dev/docs/installation
-nsh-core = "0.4.0"
+nsh-core = { version = "0.4.0", features = ["svg"] }
 nsh-base = "0.4.0"
 
 # 音频：解码、输出、重采样、系统媒体会话。
