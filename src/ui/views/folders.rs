@@ -403,7 +403,8 @@ impl DragCtx {
         if !(ox..=ox + w).contains(&page.x.0) {
             return None;
         }
-        let index = ((page.y.0 - oy + self.scroll.get_untracked()) / TREE_ROW).floor();
+        let row_h = if sidebar_collapsed() { 34.0 } else { TREE_ROW };
+        let index = ((page.y.0 - oy + self.scroll.get_untracked()) / row_h).floor();
         if index < 0.0 {
             return None;
         }
@@ -988,7 +989,7 @@ fn tree_menu(trigger: View, row: Memo<Option<TreeRow>>, ops: Rc<Ops>) -> AnyElem
 #[derive(Clone)]
 struct FolderUi {
     here: Memo<Place>,
-    rows: Memo<Rc<Vec<TreeRow>>>,
+    all_rows: Memo<Rc<Vec<TreeRow>>>,
     files: Memo<Rc<Vec<usize>>>,
     select: Rc<dyn Fn(&str)>,
     toggle: Rc<dyn Fn(&str, bool)>,
@@ -1044,9 +1045,17 @@ fn create_folder_ui() -> FolderUi {
         let tree = tree.get();
         place(&tree, s.folder_sel.get().as_deref())
     });
-    let rows = computed(move || {
+    let all_rows = computed(move || {
         let r = flatten_with(&tree.get(), &s.folder_expanded.get());
         Rc::new(r)
+    });
+    let rows = computed(move || {
+        let all = all_rows.get();
+        if sidebar_collapsed() {
+            Rc::new(all.iter().filter(|r| r.depth == 0).cloned().collect())
+        } else {
+            all
+        }
     });
     let files = computed(move || here.with(|p| p.files.clone()));
 
@@ -1075,7 +1084,7 @@ fn create_folder_ui() -> FolderUi {
 
     FolderUi {
         here,
-        rows,
+        all_rows,
         files,
         select,
         toggle,
@@ -1103,10 +1112,18 @@ fn folder_ui() -> FolderUi {
 }
 
 /// 侧栏文件夹树列表。
-pub(crate) fn tree_sidebar_list(_rail: impl Fn() -> bool + Copy + 'static) -> View {
+pub(crate) fn tree_sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> View {
     let ui = folder_ui();
     let s = store();
-    let rows = ui.rows;
+    let all_rows = ui.all_rows;
+    let visible_rows = computed(move || {
+        let all = all_rows.get();
+        if rail() {
+            Rc::new(all.iter().filter(|r| r.depth == 0).cloned().collect())
+        } else {
+            all
+        }
+    });
     let here = ui.here;
     let ctx = ui.ctx.clone();
     let ops = ui.ops.clone();
@@ -1115,19 +1132,24 @@ pub(crate) fn tree_sidebar_list(_rail: impl Fn() -> bool + Copy + 'static) -> Vi
     let scroll_sig = ui.scroll;
     let cell_select = select.clone();
     let cell_toggle = toggle.clone();
-    let tree_list = virtual_list(computed(move || rows.with(|r| r.len())), move |at| {
-        let row = computed(move || rows.with(|r| r.get(at.index()).cloned()));
-        tree_cell(
-            row,
-            here,
-            ctx.clone(),
-            ops.clone(),
-            cell_select.clone(),
-            cell_toggle.clone(),
-        )
-    })
+    let tree_list = virtual_list(
+        computed(move || visible_rows.with(|r| r.len())),
+        move |at| {
+            let row = computed(move || visible_rows.with(|r| r.get(at.index()).cloned()));
+            tree_cell(
+                row,
+                here,
+                ctx.clone(),
+                ops.clone(),
+                cell_select.clone(),
+                cell_toggle.clone(),
+                rail,
+            )
+        },
+    )
     .keys(move || {
-        rows.get()
+        visible_rows
+            .get()
             .iter()
             .map(|r| r.path.clone())
             .collect::<Vec<_>>()
@@ -1804,6 +1826,13 @@ pub(crate) fn rescan_button() -> nsh_base::ButtonElement {
         .disabled(move || s.library.with(|l| l.progress.scanning))
 }
 
+fn is_descendant(path: &str, dir: &str) -> bool {
+    let sep = std::path::MAIN_SEPARATOR;
+    path.len() > dir.len()
+        && path.starts_with(dir)
+        && (dir.ends_with('/') || dir.ends_with('\\') || path.as_bytes()[dir.len()] == sep as u8)
+}
+
 /// 树里的一行：缩进 + 折叠箭头（叶子为占位）+ 文件夹图标 + 名字 + 曲目
 /// 数。行是整宽的可点区（选中），箭头单独可点（折叠 / 展开）；行也能拖
 /// 起这个文件夹，或作为别的拖动落下的目标（`over` 命中时高亮）；右键
@@ -1815,7 +1844,9 @@ fn tree_cell(
     ops: Rc<Ops>,
     select: Rc<dyn Fn(&str)>,
     toggle: Rc<dyn Fn(&str, bool)>,
+    rail: impl Fn() -> bool + Copy + 'static,
 ) -> AnyElement {
+    let fade = super::super::frame::label_fade(rail);
     let name = move || row.with(|r| r.as_ref().map(|r| r.name.clone()).unwrap_or_default());
     let depth = move || row.with(|r| r.as_ref().map(|r| r.depth).unwrap_or(0));
     let has_children = move || row.with(|r| r.as_ref().is_some_and(|r| r.has_children));
@@ -1825,8 +1856,19 @@ fn tree_cell(
     let selected = move || {
         nav.get() == crate::ui::Nav::Folders
             && row.with(|r| {
-                r.as_ref()
-                    .is_some_and(|r| here.with(|p| p.path.as_deref() == Some(r.path.as_str())))
+                let Some(r) = r.as_ref() else { return false };
+                here.with(|p| {
+                    let Some(p_path) = p.path.as_deref() else {
+                        return false;
+                    };
+                    if p_path == r.path {
+                        return true;
+                    }
+                    if rail() && r.depth == 0 {
+                        return is_descendant(p_path, &r.path);
+                    }
+                    false
+                })
             })
     };
     let over = ctx.over;
@@ -1837,13 +1879,21 @@ fn tree_cell(
         })
     };
     let cell = view()
-        .h(px(TREE_ROW))
-        .pl(move || px(6.0 + depth() as f32 * INDENT))
-        .pr(px(8.0))
+        .w_full()
+        .h(move || px(if rail() { 34.0 } else { TREE_ROW }))
+        .pl(move || {
+            if rail() {
+                px(16.0)
+            } else {
+                px(6.0 + depth() as f32 * INDENT)
+            }
+        })
+        .pr(move || px(if rail() { 16.0 } else { 8.0 }))
         .flex_row()
         .items_center()
-        .gap(px(6.0))
+        .gap(move || px(if rail() { 0.0 } else { 6.0 }))
         .rounded(px(8.0))
+        .overflow_hidden()
         .role(AccessibilityRole::Button)
         .label(move || SharedString::from(name()))
         .accessibility_state(move || AccessibilityState {
@@ -1866,60 +1916,80 @@ fn tree_cell(
                 select(&r.path);
             }
         })
-        .child(
-            when(has_children, move || {
-                let toggle = toggle.clone();
-                view()
-                    .size(px(16.0))
-                    .flex_shrink_0()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(4.0))
-                    .role(AccessibilityRole::Button)
-                    .label(move || format!("{}{}", if open() { "收起 " } else { "展开 " }, name()))
-                    .hover(|st| st.bg(hover()))
-                    .on_press(move |_: &()| {
-                        if let Some(r) = row.get_untracked() {
-                            toggle(&r.path, r.open);
-                        }
-                    })
-                    .child(icon_dyn(
-                        move || {
-                            if open() {
-                                Icon::ChevronDown
-                            } else {
-                                Icon::ChevronRight
-                            }
-                        },
-                        12.0,
-                        faint,
-                    ))
-            })
-            .otherwise(|| view().w(px(16.0)).flex_shrink_0()),
-        )
-        .child(icon(Icon::Folder, 15.0, move || {
-            if selected() { primary() } else { muted_fg() }
-        }))
-        .child(
-            view().flex_1().min_w(px(0.0)).child(
-                text(name)
-                    .number_of_lines(1)
-                    .text_size(px(13.0))
-                    .line_height(px(13.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(move || if selected() { fg() } else { muted_fg() }),
-            ),
-        )
         .child(when(
-            move || count() > 0,
+            move || !rail(),
             move || {
-                text(move || count().to_string())
-                    .text_size(px(11.0))
-                    .line_height(px(11.0))
-                    .tabular_nums()
-                    .text_color(faint())
+                let toggle = toggle.clone();
+                when(has_children, move || {
+                    let toggle = toggle.clone();
+                    view()
+                        .size(px(16.0))
+                        .flex_shrink_0()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(4.0))
+                        .role(AccessibilityRole::Button)
+                        .label(move || {
+                            format!("{}{}", if open() { "收起 " } else { "展开 " }, name())
+                        })
+                        .hover(|st| st.bg(hover()))
+                        .on_press(move |_: &()| {
+                            if let Some(r) = row.get_untracked() {
+                                toggle(&r.path, r.open);
+                            }
+                        })
+                        .child(icon_dyn(
+                            move || {
+                                if open() {
+                                    Icon::ChevronDown
+                                } else {
+                                    Icon::ChevronRight
+                                }
+                            },
+                            12.0,
+                            faint,
+                        ))
+                })
+                .otherwise(|| view().w(px(16.0)).flex_shrink_0())
             },
-        ));
+        ))
+        .child(
+            view()
+                .size(px(20.0))
+                .flex_shrink_0()
+                .items_center()
+                .justify_center()
+                .child(icon(Icon::Folder, 16.0, move || {
+                    if selected() { primary() } else { sidebar_fg() }
+                })),
+        )
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .opacity(fade)
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .child(
+                    text(name)
+                        .number_of_lines(1)
+                        .text_size(px(13.0))
+                        .line_height(px(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(move || if selected() { fg() } else { muted_fg() }),
+                )
+                .child(when(
+                    move || count() > 0,
+                    move || {
+                        text(move || count().to_string())
+                            .text_size(px(11.0))
+                            .line_height(px(11.0))
+                            .tabular_nums()
+                            .text_color(faint())
+                    },
+                )),
+        );
     tree_menu(
         cell.pan_values(Some(&ctx.gx), Some(&ctx.gy))
             .claim_touches(ctx.claim())

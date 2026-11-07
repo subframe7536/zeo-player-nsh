@@ -73,12 +73,6 @@ fn start_inner(width: f32, height: f32) -> Headless {
 }
 
 fn goto_folders(app: &mut Headless) {
-    if app
-        .wait_for_within("label:切换视图 >> text:文件夹", Duration::from_millis(50))
-        .is_ok()
-    {
-        return;
-    }
     app.press("label:切换视图").unwrap();
     app.wait_for("role:option[文件夹]").unwrap();
     app.press("role:option[文件夹]").unwrap();
@@ -677,9 +671,33 @@ fn folders_page_shows_tree_and_files() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
     goto_folders(&mut app);
-    // 子文件夹要等扫描完曲目才出现在树里，顺带等到曲库就绪。
-    app.wait_for_within("text:sub", Duration::from_secs(20))
+    let root = root_name();
+    // 默认不打开：根文件夹处于折叠状态，子文件夹 sub 初始不显示
+    app.wait_for_within(&format!("label:展开 {root}"), Duration::from_secs(20))
         .unwrap();
+    assert!(!texts(&app).iter().any(|t| t == "sub"));
+
+    // 点击展开根文件夹，子文件夹 sub 出现
+    app.press(&format!("label:展开 {root}")).unwrap();
+    app.wait_for("text:sub").unwrap();
+
+    // 侧栏缩小时，目录树只显示根文件夹，子文件夹隐藏
+    app.set_viewport(size(px(640.0), px(800.0))).unwrap();
+    app.wait_until(
+        "侧栏缩小时子文件夹应隐藏",
+        Duration::from_secs(5),
+        |s| !s.texts().iter().any(|t| *t == "sub"),
+    )
+    .unwrap();
+    assert!(
+        app.screen()
+            .count(&format!("label:{}", root_name()))
+            .unwrap_or(0)
+            > 0,
+        "缩小时根文件夹仍应显示"
+    );
+    app.set_viewport(size(px(1200.0), px(800.0))).unwrap();
+    app.wait_for("text:sub").unwrap();
     let t = texts(&app);
     assert!(t.iter().any(|s| s == &root_name()), "{t:?}");
     for label in ["大小", "时长", "格式"] {
@@ -742,8 +760,11 @@ fn folders_page_selection_and_multi_selection() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
     goto_folders(&mut app);
-    app.wait_for_within("text:sub", Duration::from_secs(20))
+    let root = root_name();
+    app.wait_for_within(&format!("label:展开 {root}"), Duration::from_secs(20))
         .unwrap();
+    app.press(&format!("label:展开 {root}")).unwrap();
+    app.wait_for("text:sub").unwrap();
 
     // 切换到 sub 目录（内含 mono 与 short 两个曲目）
     app.press("sub").unwrap();
@@ -916,8 +937,11 @@ fn folders_page_tree_ops() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
     goto_folders(&mut app);
-    app.wait_for_within("text:sub", Duration::from_secs(20))
+    let root = root_name();
+    app.wait_for_within(&format!("label:展开 {root}"), Duration::from_secs(20))
         .unwrap();
+    app.press(&format!("label:展开 {root}")).unwrap();
+    app.wait_for("text:sub").unwrap();
     let sub = dunce::canonicalize(CORPUS).unwrap().join("sub");
     let made = sub.join("临时文件夹");
     let renamed = sub.join("改名后");
@@ -987,7 +1011,14 @@ fn sidebar_switchable_views_and_auto_linkage() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
-    // 默认展示「我喜欢」歌单
+    if app
+        .wait_for_within("label:我喜欢", Duration::from_millis(50))
+        .is_err()
+    {
+        app.press("label:切换视图").unwrap();
+        app.wait_for("role:option[歌单]").unwrap();
+        app.press("role:option[歌单]").unwrap();
+    }
     app.wait_for("label:我喜欢").unwrap();
 
     // 1. 手动切换：通过下拉切到「标签」
@@ -1000,7 +1031,8 @@ fn sidebar_switchable_views_and_auto_linkage() {
     app.press("label:切换视图").unwrap();
     app.wait_for("role:option[文件夹]").unwrap();
     app.press("role:option[文件夹]").unwrap();
-    app.wait_for_within("text:sub", Duration::from_secs(20))
+    let root = root_name();
+    app.wait_for_within(&format!("label:展开 {root}"), Duration::from_secs(20))
         .unwrap();
     app.wait_for("label:切换视图 >> text:文件夹").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
@@ -1024,8 +1056,11 @@ fn context_menus_replace_each_other() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
     goto_folders(&mut app);
-    app.wait_for_within("text:sub", Duration::from_secs(20))
+    let root = root_name();
+    app.wait_for_within(&format!("label:展开 {root}"), Duration::from_secs(20))
         .unwrap();
+    app.press(&format!("label:展开 {root}")).unwrap();
+    app.wait_for("text:sub").unwrap();
     app.press("sub").unwrap();
     app.wait_for("text:mono").unwrap();
 
@@ -1140,15 +1175,16 @@ fn number_column_only_in_album_detail() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
     goto_folders(&mut app);
-    // 等扫描完（树里的 sub 出现即曲库就绪）。
-    app.wait_for_within("text:sub", Duration::from_secs(20))
+    // 等扫描完（根目录出现即曲库就绪）。
+    let root = root_name();
+    app.wait_for_within(&format!("label:展开 {root}"), Duration::from_secs(20))
         .unwrap();
     // 文件夹页：没有 `#` 列头。
     assert!(!has(&app, "#"), "{:?}", texts(&app));
     // 艺术家详情：也没有。
     app.press("label:艺术家").unwrap();
-    app.wait_for("role:button[测试歌手 A; 测试歌手 B]").unwrap();
-    app.press("role:button[测试歌手 A; 测试歌手 B]").unwrap();
+    app.wait_for("role:button[测试歌手 A]").unwrap();
+    app.press("role:button[测试歌手 A]").unwrap();
     app.wait_for("label:返回").unwrap();
     assert!(!has(&app, "#"), "歌手详情: {:?}", texts(&app));
     app.press("label:返回").unwrap();
@@ -1229,6 +1265,14 @@ fn playlists_manual_and_smart() {
     let corpus = isolate();
     assert!(has(&app, "歌单"), "{:?}", texts(&app));
 
+    if app
+        .wait_for_within("label:添加歌单", Duration::from_millis(50))
+        .is_err()
+    {
+        app.press("label:切换视图").unwrap();
+        app.wait_for("role:option[歌单]").unwrap();
+        app.press("role:option[歌单]").unwrap();
+    }
     // 新建手动歌单：打开页面，空状态。
     app.press("label:添加歌单").unwrap();
     app.press("role:menuitem[新建歌单]").unwrap();
@@ -1511,8 +1555,11 @@ fn folder_parent_collapses_even_when_child_is_selected() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
     goto_folders(&mut app);
-    app.wait_for_within("text:sub", Duration::from_secs(20))
+    let root = root_name();
+    app.wait_for_within(&format!("label:展开 {root}"), Duration::from_secs(20))
         .unwrap();
+    app.press(&format!("label:展开 {root}")).unwrap();
+    app.wait_for("text:sub").unwrap();
     // 选中子文件夹 sub，主视图展示 sub 里的曲目
     app.press("sub").unwrap();
     app.wait_for("text:mono").unwrap();

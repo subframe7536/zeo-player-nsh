@@ -29,8 +29,13 @@ fn isolate() -> bool {
         let _ = std::fs::remove_dir_all(&data);
         std::fs::create_dir_all(&data).unwrap();
         if corpus {
+            let empty_dir = data.join("zz_empty_folder");
+            let _ = std::fs::create_dir_all(&empty_dir);
             let config = serde_json::json!({
-                "roots": [dunce::canonicalize(CORPUS).unwrap()],
+                "roots": [
+                    dunce::canonicalize(CORPUS).unwrap(),
+                    dunce::canonicalize(&empty_dir).unwrap(),
+                ],
                 "min_duration_secs": 0,
                 "min_size_kb": 0,
             });
@@ -532,5 +537,87 @@ fn smart_playlist_select_probe() {
     assert!(
         sel_y >= first_y && sel_y + sel_s.height.0 <= last_y + last_s.height.0,
         "选中行应在列表内"
+    );
+}
+
+/// 侧栏收起（窄窗口 rail 模式）时，文件树各行图标必须完全水平对齐：
+/// 之前因为 `when(!rail() && has_children)` 的 otherwise 分支在无子目录行上
+/// 不会触发条件翻转，导致 16px 的占位 spacer 未被移除，产生错位。
+#[test]
+fn sidebar_collapsed_tree_alignment_probe() {
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    let mut app = start(1200.0, 800.0);
+    let probed = probe(&mut app);
+
+    // 切到「文件夹」
+    app.press("label:切换视图").unwrap();
+    app.wait_for("role:option[文件夹]").unwrap();
+    app.press("role:option[文件夹]").unwrap();
+    app.wait_for_within("text:测试歌曲", Duration::from_secs(20))
+        .unwrap();
+
+    // 窗口收窄到 800（小于 SIDEBAR_COLLAPSE 900），侧栏变为 60pt rail 模式
+    app.set_viewport(size(px(800.0), px(800.0))).unwrap();
+    app.wait(Duration::from_millis(300)).unwrap();
+
+    let p = probed.lock().unwrap();
+
+    // 两个根目录行：zeo-player-test-music 有子目录 sub，zz_empty_folder 没有子目录
+    let corpus_root = dunce::canonicalize(CORPUS)
+        .unwrap()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let empty_root = "zz_empty_folder".to_string();
+
+    let root1_id = p
+        .labels
+        .iter()
+        .find(|(_, l)| l.as_str() == corpus_root)
+        .map(|(id, _)| *id)
+        .unwrap_or_else(|| panic!("找不到根目录行 {corpus_root}"));
+
+    let root2_id = p
+        .labels
+        .iter()
+        .find(|(_, l)| l.as_str() == empty_root)
+        .map(|(id, _)| *id)
+        .unwrap_or_else(|| panic!("找不到空目录行 {empty_root}"));
+
+    let is_descendant = |mut id: NodeId, ancestor: NodeId| {
+        for _ in 0..16 {
+            if id == ancestor {
+                return true;
+            }
+            match p.parents.get(&id) {
+                Some(&par) => id = par,
+                None => break,
+            }
+        }
+        false
+    };
+
+    let img1 = p
+        .images
+        .keys()
+        .find(|&&id| is_descendant(id, root1_id))
+        .copied()
+        .expect("root1 中找不到文件夹图标");
+    let img2 = p
+        .images
+        .keys()
+        .find(|&&id| is_descendant(id, root2_id))
+        .copied()
+        .expect("root2 中找不到文件夹图标");
+
+    let (x1, _, _) = abs(&p, img1).expect("img1 没有 frame");
+    let (x2, _, _) = abs(&p, img2).expect("img2 没有 frame");
+
+    assert_eq!(
+        x1, x2,
+        "侧栏收起时有子目录的文件夹 ({x1:.1}) 与无子目录的文件夹 ({x2:.1}) 图标应完全水平对齐"
     );
 }

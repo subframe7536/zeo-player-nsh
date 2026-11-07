@@ -325,13 +325,7 @@ pub fn install() -> Store {
         sidebar_section: signal(lib.config().sidebar_section),
         genre_sel: signal(None),
         folder_sel: signal(None),
-        folder_expanded: signal(
-            lib.config()
-                .roots
-                .iter()
-                .cloned()
-                .collect::<BTreeSet<String>>(),
-        ),
+        folder_expanded: signal(BTreeSet::new()),
         folder_extra: signal(BTreeSet::new()),
         folder_message: signal(String::new()),
         folder_op: signal(None),
