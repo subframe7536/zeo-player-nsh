@@ -326,7 +326,6 @@ mod tray {
 
     struct Tray {
         icon: TrayIcon,
-        now: MenuItem,
         toggle: MenuItem,
         prev: MenuItem,
         next: MenuItem,
@@ -386,15 +385,12 @@ mod tray {
     /// 在托盘所属线程上创建（macOS 主线程；Windows 托盘线程）。
     pub fn create() {
         let menu = Menu::new();
-        let now = MenuItem::with_id("now", "未在播放", false, None);
         let toggle = MenuItem::with_id("toggle", "播放", false, None);
         let prev = MenuItem::with_id("prev", "上一首", false, None);
         let next = MenuItem::with_id("next", "下一首", false, None);
         let show = MenuItem::with_id("show", "显示 Zeo Player", true, None);
         let quit = MenuItem::with_id("quit", "退出 Zeo Player", true, None);
         let _ = menu.append_items(&[
-            &now,
-            &PredefinedMenuItem::separator(),
             &toggle,
             &prev,
             &next,
@@ -422,7 +418,6 @@ mod tray {
             Ok(icon) => TRAY.with(|t| {
                 *t.borrow_mut() = Some(Tray {
                     icon,
-                    now,
                     toggle,
                     prev,
                     next,
@@ -451,11 +446,6 @@ mod tray {
             let Some(t) = t.as_ref() else {
                 return;
             };
-            t.now.set_text(if state.has_track {
-                super::track_label(state)
-            } else {
-                "未在播放".to_string()
-            });
             t.toggle
                 .set_text(if state.playing { "暂停" } else { "播放" });
             for item in [&t.toggle, &t.prev, &t.next] {
