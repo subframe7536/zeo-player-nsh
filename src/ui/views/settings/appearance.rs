@@ -211,9 +211,7 @@ fn font_select() -> AnyElement {
         .border_color(input_c)
         .shadow_xs()
         .bg(card_c)
-        .font_family(move || {
-            SharedString::from(current().unwrap_or_else(|| SYSTEM.to_owned()))
-        })
+        .font_family(move || SharedString::from(current().unwrap_or_else(|| SYSTEM.to_owned())))
         .focus_within(move |st| {
             st.border_color(ring)
                 .ring(px(3.0))
@@ -272,10 +270,12 @@ fn font_select() -> AnyElement {
                 }
             });
         })
-        .on_change(move |v: &Vec<SharedString>| match v.first().map(|v| v.as_str()) {
-            Some(SYSTEM) | None => super::super::super::store::set_font(None),
-            Some(f) => super::super::super::store::set_font(Some(f.to_owned())),
-        })
+        .on_change(
+            move |v: &Vec<SharedString>| match v.first().map(|v| v.as_str()) {
+                Some(SYSTEM) | None => super::super::super::store::set_font(None),
+                Some(f) => super::super::super::store::set_font(Some(f.to_owned())),
+            },
+        )
         .render_item(move |e: &nsh_base::SelectEntry| {
             let family = e.value.clone();
             let title = e.title.to_string();

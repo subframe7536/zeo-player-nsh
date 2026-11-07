@@ -214,9 +214,10 @@ const INTENT_TTL_MS: u64 = 600;
 /// 快速连点按意图取反——真实状态还没回传时连续点不会被旧值顶回。
 pub fn toggle() {
     let s = store();
-    let now = s
-        .intent
-        .with(|i| i.map(|(v, _)| v).unwrap_or_else(|| s.playback.with(|p| p.playing)));
+    let now = s.intent.with(|i| {
+        i.map(|(v, _)| v)
+            .unwrap_or_else(|| s.playback.with(|p| p.playing))
+    });
     s.intent.set(Some((
         !now,
         Instant::now() + Duration::from_millis(INTENT_TTL_MS),

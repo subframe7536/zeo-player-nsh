@@ -272,7 +272,10 @@ pub(crate) fn cover_realign(pulse: Signal<f32>) {
 /// 监听（元素间互不覆盖，`select` 自己也在触发器上记宽）。
 pub(crate) fn cover_realign_flex(
     pulse: Signal<f32>,
-) -> (impl Fn() -> Length + Copy + 'static, impl Fn(&Bounds<Points>) + Copy + 'static) {
+) -> (
+    impl Fn() -> Length + Copy + 'static,
+    impl Fn(&Bounds<Points>) + Copy + 'static,
+) {
     let held = signal(0.0f32);
     let min_w = move || {
         if pulse.get() > 0.0 {
@@ -362,11 +365,7 @@ pub fn select(
             // 不写死，交给 listbox 的 `.w(触发器实测宽)` 绑定——宽度脉冲
             // （cover_realign）才能传到弹层尺寸；width≤0 的弹性触发器
             // 宽度未知，退回 140 下限。
-            let st = if width > 0.0 {
-                st
-            } else {
-                st.min_w(px(140.0))
-            };
+            let st = if width > 0.0 { st } else { st.min_w(px(140.0)) };
             st.p(px(4.0))
                 .rounded(px(10.0))
                 .overflow_hidden()

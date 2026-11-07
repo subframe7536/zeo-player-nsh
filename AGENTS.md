@@ -9,6 +9,7 @@ ZeoPlayer is a local-first desktop music player written as a pure-Rust NSH (Nati
 - Keep both platforms building. Platform code goes behind `cfg(target_os = ...)`; don't add a macOS-only path without a Windows counterpart or a documented gap.
 - When behavior changes, update `README.md` (it's the user-facing feature list). Record upstream NSH limitations under "待上游（NSH）" below.
 - Don't patch NSH crates locally to work around problems. Work around them in the app and document the limitation.
+- Run `cargo fmt` before ending every turn so the tree stays rustfmt-clean.
 
 ## Conventions
 

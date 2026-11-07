@@ -12,8 +12,8 @@ use super::super::components::button::{
     Size, Variant, icon_button, outline_button, pill_button, text_button,
 };
 use super::super::components::form::{
-    cover_realign, cover_realign_flex, dialog_content, dialog_footer,
-    dialog_header, input_field, modal, select, select_trigger, tab_list, tab_trigger,
+    cover_realign, cover_realign_flex, dialog_content, dialog_footer, dialog_header, input_field,
+    modal, select, select_trigger, tab_list, tab_trigger,
 };
 use super::super::components::icons::{Icon, icon};
 use super::super::components::page::{empty_state, page_header};
