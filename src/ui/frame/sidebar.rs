@@ -354,9 +354,9 @@ fn sidebar_lower_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
     let nav = global::<Nav>();
     // 主视图变化时自动联动侧栏下半部
     effect(move || match nav.get() {
-        Nav::Folders => s.sidebar_section.set(store::SidebarSection::Folders),
-        Nav::Genres => s.sidebar_section.set(store::SidebarSection::Tags),
-        Nav::Playlist(_) => s.sidebar_section.set(store::SidebarSection::Playlists),
+        Nav::Folders => store::set_sidebar_section(store::SidebarSection::Folders),
+        Nav::Genres => store::set_sidebar_section(store::SidebarSection::Tags),
+        Nav::Playlist(_) => store::set_sidebar_section(store::SidebarSection::Playlists),
         _ => {}
     });
 
@@ -386,31 +386,28 @@ fn sidebar_lower_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
 
     let options = vec![
         super::super::components::form::SelectOption::new("歌单", move || {
-            s.sidebar_section.set(store::SidebarSection::Playlists);
+            store::set_sidebar_section(store::SidebarSection::Playlists);
             let nav = global::<Nav>();
             if matches!(nav.get_untracked(), Nav::Folders | Nav::Genres) {
                 if let Some(first) = s.playlists.with(|p| p.first().map(|pl| pl.id)) {
                     nav.set(Nav::Playlist(first));
                 }
             }
-        })
-        .with_glyph(Icon::Playlist),
+        }),
         super::super::components::form::SelectOption::new("标签", move || {
-            s.sidebar_section.set(store::SidebarSection::Tags);
+            store::set_sidebar_section(store::SidebarSection::Tags);
             let nav = global::<Nav>();
             if nav.get_untracked() != Nav::Genres {
                 nav.set(Nav::Genres);
             }
-        })
-        .with_glyph(Icon::Tag),
+        }),
         super::super::components::form::SelectOption::new("文件夹", move || {
-            s.sidebar_section.set(store::SidebarSection::Folders);
+            store::set_sidebar_section(store::SidebarSection::Folders);
             let nav = global::<Nav>();
             if nav.get_untracked() != Nav::Folders {
                 nav.set(Nav::Folders);
             }
-        })
-        .with_glyph(Icon::Folder),
+        }),
     ];
 
     let current = move || match s.sidebar_section.get() {

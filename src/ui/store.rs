@@ -186,17 +186,7 @@ pub struct Store {
     pub menu_open: Signal<Option<u64>>,
 }
 
-/// 侧栏下半部当前显示的视图。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SidebarSection {
-    /// 歌单列表。
-    #[default]
-    Playlists,
-    /// 标签（流派）列表。
-    Tags,
-    /// 文件夹树。
-    Folders,
-}
+pub use crate::config::SidebarSection;
 
 /// 文件夹增删改的操作请求（弹窗状态）。
 #[derive(Debug, Clone, PartialEq)]
@@ -332,7 +322,7 @@ pub fn install() -> Store {
         accent: signal(None),
         tint: signal(None),
         artist_sel: signal(None),
-        sidebar_section: signal(SidebarSection::Playlists),
+        sidebar_section: signal(lib.config().sidebar_section),
         genre_sel: signal(None),
         folder_sel: signal(None),
         folder_expanded: signal(
@@ -761,6 +751,17 @@ pub fn set_theme_color(color: crate::config::ThemeColor) {
     update_config(|c| c.theme_color = color);
     apply_accent();
     std::thread::spawn(move || library_store().set_theme_color(color));
+}
+
+/// 侧栏下半部当前显示的视图（歌单 / 标签 / 文件夹），立即生效并保存。
+pub fn set_sidebar_section(section: SidebarSection) {
+    let s = store();
+    if s.sidebar_section.get_untracked() == section {
+        return;
+    }
+    s.sidebar_section.set(section);
+    update_config(|c| c.sidebar_section = section);
+    std::thread::spawn(move || library_store().set_sidebar_section(section));
 }
 
 /// 按 `theme_color` 刷新覆盖色：预设色直接写；跟随封面时对当前曲目

@@ -103,6 +103,19 @@ pub enum Appearance {
     Dark,
 }
 
+/// 侧栏下半部当前显示的视图（歌单 / 标签 / 文件夹）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarSection {
+    /// 歌单列表。
+    #[default]
+    Playlists,
+    /// 标签（流派）列表。
+    Tags,
+    /// 文件夹树。
+    Folders,
+}
+
 /// 出厂流派分隔符。
 pub const DEFAULT_SEPARATORS: &[&str] = &[";"];
 
@@ -251,6 +264,9 @@ pub struct LibraryConfig {
     /// 主题色（强调色）。
     #[serde(default)]
     pub theme_color: ThemeColor,
+    /// 侧栏下半部当前显示的视图（歌单 / 标签 / 文件夹）。
+    #[serde(default)]
+    pub sidebar_section: SidebarSection,
     /// 过滤：短于此时长（秒）的音频不进曲库（0 不过滤）。
     #[serde(default = "default_min_duration_secs")]
     pub min_duration_secs: u32,
@@ -352,6 +368,7 @@ impl Default for LibraryConfig {
             lyrics_align: LyricsAlign::default(),
             appearance: Appearance::default(),
             theme_color: ThemeColor::default(),
+            sidebar_section: SidebarSection::default(),
             min_duration_secs: default_min_duration_secs(),
             min_size_kb: default_min_size_kb(),
             prefer_local_lyrics: default_true(),
@@ -621,6 +638,16 @@ impl LibraryStore {
     /// 设置界面外观（保存）。
     pub fn set_appearance(&self, appearance: Appearance) {
         self.update_config(|c| c.appearance = appearance);
+    }
+
+    #[allow(dead_code)]
+    pub fn sidebar_section(&self) -> SidebarSection {
+        self.config().sidebar_section
+    }
+
+    /// 设置侧栏下半部显示的视图（保存）。
+    pub fn set_sidebar_section(&self, section: SidebarSection) {
+        self.update_config(|c| c.sidebar_section = section);
     }
 
     pub fn loop_mode(&self) -> crate::engine::audio::LoopMode {
@@ -1195,6 +1222,11 @@ mod tests {
             "缺主题色字段时出厂为跟随封面"
         );
         assert_eq!(
+            fresh.sidebar_section,
+            SidebarSection::Playlists,
+            "缺侧栏视图字段时出厂为歌单"
+        );
+        assert_eq!(
             fresh.normalized().genre_separators,
             vec![";"],
             "缺字段用出厂值"
@@ -1248,6 +1280,34 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&ThemeColor::Custom(0x123456)).unwrap(),
             r##""#123456""##
+        );
+    }
+
+    #[test]
+    fn sidebar_section_serde_roundtrip() {
+        assert_eq!(
+            serde_json::from_str::<SidebarSection>(r#""playlists""#).unwrap(),
+            SidebarSection::Playlists
+        );
+        assert_eq!(
+            serde_json::from_str::<SidebarSection>(r#""tags""#).unwrap(),
+            SidebarSection::Tags
+        );
+        assert_eq!(
+            serde_json::from_str::<SidebarSection>(r#""folders""#).unwrap(),
+            SidebarSection::Folders
+        );
+        assert_eq!(
+            serde_json::to_string(&SidebarSection::Playlists).unwrap(),
+            r#""playlists""#
+        );
+        assert_eq!(
+            serde_json::to_string(&SidebarSection::Tags).unwrap(),
+            r#""tags""#
+        );
+        assert_eq!(
+            serde_json::to_string(&SidebarSection::Folders).unwrap(),
+            r#""folders""#
         );
     }
 

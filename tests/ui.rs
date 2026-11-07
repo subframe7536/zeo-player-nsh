@@ -727,6 +727,118 @@ fn folders_page_shows_tree_and_files() {
     app.wait_for("text:筛选").unwrap();
 }
 
+/// 文件夹页：列表支持单选与多选（Cmd/Ctrl+单击切换、Shift+单击范围选择）。
+#[test]
+fn folders_page_selection_and_multi_selection() {
+    let mut app = start(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    goto_folders(&mut app);
+    app.wait_for_within("text:sub", Duration::from_secs(20))
+        .unwrap();
+
+    // 切换到 sub 目录（内含 mono 与 short 两个曲目）
+    app.press("sub").unwrap();
+    app.wait_for("text:mono").unwrap();
+    app.wait_for("text:short").unwrap();
+
+    let mono = "role:button[mono]";
+    let short = "role:button[short]";
+
+    // 初始状态：未选中任何行
+    assert_eq!(app.screen().selected(mono).unwrap(), false);
+    assert_eq!(app.screen().selected(short).unwrap(), false);
+
+    // 单击 mono：单选 mono
+    app.press(mono).unwrap();
+    assert_eq!(app.screen().selected(mono).unwrap(), true);
+    assert_eq!(app.screen().selected(short).unwrap(), false);
+    app.wait_for("text:已选 1 首（共 2 首）").unwrap();
+
+    // 单击 short：单选 short（mono 取消选中）
+    app.press(short).unwrap();
+    assert_eq!(app.screen().selected(mono).unwrap(), false);
+    assert_eq!(app.screen().selected(short).unwrap(), true);
+    app.wait_for("text:已选 1 首（共 2 首）").unwrap();
+
+    // Cmd / Ctrl + 单击 mono：多选（同时选中 mono 和 short）
+    app.hold_keys("mod", true).unwrap();
+    app.press(mono).unwrap();
+    app.hold_keys("mod", false).unwrap();
+    assert_eq!(app.screen().selected(mono).unwrap(), true);
+    assert_eq!(app.screen().selected(short).unwrap(), true);
+    app.wait_for("text:已选 2 首（共 2 首）").unwrap();
+
+    // Cmd / Ctrl + 单击 mono：取消选中 mono，保留 short
+    app.hold_keys("mod", true).unwrap();
+    app.press(mono).unwrap();
+    app.hold_keys("mod", false).unwrap();
+    assert_eq!(app.screen().selected(mono).unwrap(), false);
+    assert_eq!(app.screen().selected(short).unwrap(), true);
+    app.wait_for("text:已选 1 首（共 2 首）").unwrap();
+
+    // 单击 mono（设为锚点），然后 Shift + 单击 short：范围选择
+    app.press(mono).unwrap();
+    assert_eq!(app.screen().selected(mono).unwrap(), true);
+    assert_eq!(app.screen().selected(short).unwrap(), false);
+    app.hold_keys("shift", true).unwrap();
+    app.press(short).unwrap();
+    app.hold_keys("shift", false).unwrap();
+    assert_eq!(app.screen().selected(mono).unwrap(), true);
+    assert_eq!(app.screen().selected(short).unwrap(), true);
+    app.wait_for("text:已选 2 首（共 2 首）").unwrap();
+
+    // 切换文件夹时清空选择状态
+    app.press(&root_name()).unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+    assert_eq!(
+        app.screen().selected("role:button[测试歌曲]").unwrap(),
+        false
+    );
+    zeo_player::engine::Player::global().pause();
+}
+
+/// 侧栏下半部：切换视图（歌单/标签/文件夹）选择项保存在全局状态。
+#[test]
+fn sidebar_section_select_switches_and_persists() {
+    let mut app = start(1200.0, 800.0);
+    let file =
+        std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap()).join("library.json");
+    let saved = |section: &str| {
+        std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .is_some_and(|v| v["sidebar_section"] == section)
+    };
+    // 打开切换视图下拉
+    app.press("label:切换视图").unwrap();
+    app.wait_for("role:option[标签]").unwrap();
+    app.wait_for("role:option[文件夹]").unwrap();
+    // 切换到文件夹
+    app.press("role:option[文件夹]").unwrap();
+    app.wait_for("label:切换视图 >> text:文件夹").unwrap();
+    for _ in 0..40 {
+        if saved("folders") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(saved("folders"));
+
+    // 换回歌单（避免影响后续测试环境）
+    app.press("label:切换视图").unwrap();
+    app.press("role:option[歌单]").unwrap();
+    app.wait_for("label:切换视图 >> text:歌单").unwrap();
+    for _ in 0..40 {
+        if saved("playlists") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(saved("playlists"));
+}
+
 /// 目录树增删改：右键新建 → 磁盘上真建出来并进树（空文件夹也显示）；
 /// 重命名 → 路径换名；删除走「移到回收站」确认（先取消后确认）。曲目
 /// 行右键里有「重命名文件…」。语料是共享的，只动自己建的文件夹。
@@ -1130,13 +1242,15 @@ fn track_row_double_click_like_and_menu() {
     app.press("zeo-player-test-music").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
     let row = "role:button[测试歌曲]";
-    // 共享播放器：别的用例可能已把它播成当前曲目——那下单击断言无从
-    // 区分「没播」与「本来就选着」，只跑双击那半。
-    let was_current = app.screen().selected(row).unwrap_or(false);
+    // 单击选中行但不播放，双击才播放。
+    let was_playing = zeo_player::engine::Player::global().state().is_playing;
     app.press(row).unwrap();
-    if !was_current {
-        assert!(!app.screen().selected(row).unwrap_or(false), "单击不应播放");
-    }
+    assert!(app.screen().selected(row).unwrap_or(false), "单击应选中");
+    assert_eq!(
+        zeo_player::engine::Player::global().state().is_playing,
+        was_playing,
+        "单击不应播放"
+    );
     double_press(&mut app, row);
     zeo_player::engine::Player::global().pause();
 

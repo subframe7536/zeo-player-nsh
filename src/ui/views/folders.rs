@@ -24,7 +24,9 @@ use super::super::components::form::{
 };
 use super::super::components::icons::{Icon, icon, icon_dyn};
 use super::super::components::page::{empty_state, page_header};
-use super::super::components::tracks::{Columns, ROW, format_bytes, track_columns, track_row};
+use super::super::components::tracks::{
+    Columns, ROW, format_bytes, track_columns, track_row_selectable,
+};
 use super::super::now_playing::{REVEAL_LABEL, reveal};
 use super::super::store::{self, Same, play_list, player, scan, store};
 use super::super::theme::*;
@@ -1183,13 +1185,17 @@ pub fn Folders() -> impl IntoElement {
     let filter_conditions = signal(vec![Condition::default()]);
     let match_all = signal(true);
     let filter_open = signal(false);
+    let selected_paths = signal(BTreeSet::<String>::new());
+    let anchor_path = signal(None::<String>);
 
-    // 切换文件夹时清空过滤条件并收起筛选
+    // 切换文件夹时清空过滤条件并收起筛选，清空选择状态
     effect(move || {
         let _ = here.get();
         filter_conditions.set(vec![Condition::default()]);
         match_all.set(true);
         filter_open.set(false);
+        selected_paths.set(BTreeSet::new());
+        anchor_path.set(None);
     });
 
     let filtered_files = computed(move || {
@@ -1221,6 +1227,24 @@ pub fn Folders() -> impl IntoElement {
         Rc::new(kept)
     });
 
+    // 筛选发生变化时，剔除不再可见的选中曲目与锚点
+    effect(move || {
+        let cur_files = filtered_files.get();
+        let all = s.tracks.get();
+        let visible: BTreeSet<String> = cur_files
+            .iter()
+            .filter_map(|&idx| all.get(idx).map(|t| t.path.clone()))
+            .collect();
+        selected_paths.update(|paths| {
+            paths.retain(|p| visible.contains(p));
+        });
+        if let Some(ref a) = anchor_path.get_untracked() {
+            if !visible.contains(a) {
+                anchor_path.set(None);
+            }
+        }
+    });
+
     view().flex_1().on_file_drop(on_drop).child(
         when(
             move || s.library.with(|l| l.config.roots.is_empty()),
@@ -1234,10 +1258,21 @@ pub fn Folders() -> impl IntoElement {
                 if !note.is_empty() {
                     return note;
                 }
+                let sel_count = selected_paths.with(|s| s.len());
                 let has_active = filter_open.get()
                     && filter_conditions.with(|cs| cs.iter().any(|c| c.is_complete()));
                 let total = files.with(|f| f.len());
                 let shown = filtered_files.with(|f| f.len());
+                if sel_count > 0 {
+                    if has_active {
+                        return format!(
+                            "已选 {} 首 · 筛选出 {} 首（共 {} 首）",
+                            sel_count, shown, total
+                        );
+                    } else {
+                        return format!("已选 {} 首（共 {} 首）", sel_count, total);
+                    }
+                }
                 if has_active {
                     return format!("筛选出 {} 首（共 {} 首）", shown, total);
                 }
@@ -1411,10 +1446,90 @@ pub fn Folders() -> impl IntoElement {
                         let files = filtered_files.get_untracked();
                         play_indices(&files, at.index());
                     });
-                    let row = track_row(track, number, FOLDER_COLS, {
-                        let play = play.clone();
-                        move || play()
-                    })
+                    let is_selected = {
+                        let track = track.clone();
+                        let selected_paths = selected_paths;
+                        move || {
+                            track.with(|t| {
+                                t.as_ref().is_some_and(|t| {
+                                    selected_paths.with(|paths| paths.contains(&t.path))
+                                })
+                            })
+                        }
+                    };
+                    let on_select_press = {
+                        let track = track.clone();
+                        let selected_paths = selected_paths;
+                        let anchor_path = anchor_path;
+                        let filtered_files = filtered_files;
+                        let s = s.clone();
+                        move |e: &PressEvent| {
+                            let Some(t) = track.get_untracked() else {
+                                return;
+                            };
+                            let p = t.path.clone();
+                            let toggle = if cfg!(target_os = "macos") {
+                                e.modifiers.cmd || e.modifiers.ctrl
+                            } else {
+                                e.modifiers.ctrl
+                            };
+                            let range = e.modifiers.shift;
+
+                            if range {
+                                let files = filtered_files.get_untracked();
+                                let all = s.tracks.get_untracked();
+                                let cur_idx = files
+                                    .iter()
+                                    .position(|&idx| all.get(idx).map(|tr| &tr.path) == Some(&p));
+                                let a_idx = anchor_path.with_untracked(|a| {
+                                    a.as_ref().and_then(|a_path| {
+                                        files.iter().position(|&idx| {
+                                            all.get(idx).map(|tr| &tr.path) == Some(a_path)
+                                        })
+                                    })
+                                });
+                                if let (Some(cur_idx), Some(a_idx)) = (cur_idx, a_idx) {
+                                    let start = cur_idx.min(a_idx);
+                                    let end = cur_idx.max(a_idx);
+                                    let range_paths: BTreeSet<String> = files[start..=end]
+                                        .iter()
+                                        .filter_map(|&idx| all.get(idx).map(|tr| tr.path.clone()))
+                                        .collect();
+                                    selected_paths.update(|set| {
+                                        if toggle {
+                                            set.extend(range_paths);
+                                        } else {
+                                            *set = range_paths;
+                                        }
+                                    });
+                                } else {
+                                    selected_paths.set(BTreeSet::from([p.clone()]));
+                                    anchor_path.set(Some(p));
+                                }
+                            } else if toggle {
+                                selected_paths.update(|set| {
+                                    if !set.remove(&p) {
+                                        set.insert(p.clone());
+                                    }
+                                });
+                                anchor_path.set(Some(p));
+                            } else {
+                                selected_paths.set(BTreeSet::from([p.clone()]));
+                                anchor_path.set(Some(p));
+                            }
+                        }
+                    };
+                    let row = track_row_selectable(
+                        track,
+                        number,
+                        FOLDER_COLS,
+                        is_selected,
+                        on_select_press,
+                        {
+                            let play = play.clone();
+                            move || play()
+                        },
+                    )
                     .pan_values(Some(&list_ctx.gx), Some(&list_ctx.gy))
                     .claim_touches(list_ctx.claim())
                     .keep_touches(true)
@@ -1437,6 +1552,22 @@ pub fn Folders() -> impl IntoElement {
                     .on_responder_terminate({
                         let ctx = list_ctx.clone();
                         move |_: &ResponderEvent| ctx.cancel()
+                    })
+                    .on_context_menu({
+                        let selected_paths = selected_paths;
+                        let anchor_path = anchor_path;
+                        let track = track.clone();
+                        move |_: &ContextMenuEvent| {
+                            if let Some(t) = track.get_untracked() {
+                                selected_paths.update(|set| {
+                                    if !set.contains(&t.path) {
+                                        set.clear();
+                                        set.insert(t.path.clone());
+                                        anchor_path.set(Some(t.path.clone()));
+                                    }
+                                });
+                            }
+                        }
                     });
                     super::playlists::track_menu(row, track, None, move || play(), {
                         let ops = list_ops.clone();

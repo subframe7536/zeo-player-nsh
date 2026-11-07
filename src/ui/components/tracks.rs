@@ -191,6 +191,26 @@ pub fn track_row(
                 .with(|now| now.path.as_deref() == Some(t.path.as_str()))
         })
     });
+    track_row_selectable(track, number, cols, move || current.get(), |_| {}, on_play)
+}
+
+/// 支持外部控制选中态与点击事件的曲目行变体。
+pub fn track_row_selectable(
+    track: Memo<Option<TrackEntry>>,
+    number: Memo<String>,
+    cols: Columns,
+    selected: impl Fn() -> bool + Clone + 'static,
+    on_press: impl Fn(&PressEvent) + 'static,
+    on_play: impl Fn() + 'static,
+) -> View {
+    let s = store();
+    let current = computed(move || {
+        track.with(|t| {
+            let Some(t) = t else { return false };
+            s.track
+                .with(|now| now.path.as_deref() == Some(t.path.as_str()))
+        })
+    });
     let playing = move || current.get() && shown_playing();
     let field = move |f: fn(&TrackEntry) -> String| {
         move || track.with(|t| t.as_ref().map(f).unwrap_or_default())
@@ -202,6 +222,9 @@ pub fn track_row(
     // 单击不播放：记下曲目与时间，同一首在 `DOUBLE_CLICK` 内再按一次才播。
     let on_play = Rc::new(on_play);
     let last = Rc::new(RefCell::new(None::<(String, Instant)>));
+    let sel_bg = selected.clone();
+    let sel_hover = selected.clone();
+    let sel_state = selected.clone();
     view()
         .h(px(ROW))
         .flex_row()
@@ -212,29 +235,45 @@ pub fn track_row(
         .role(AccessibilityRole::Button)
         .label(move || SharedString::from(title()))
         .accessibility_state(move || AccessibilityState {
-            selected: current.get(),
+            selected: sel_state(),
             ..AccessibilityState::default()
         })
         .bg(move || {
-            if current.get() {
+            if sel_bg() {
+                primary().opacity(0.12)
+            } else if current.get() {
                 hover()
             } else {
                 AdaptiveColor::TRANSPARENT
             }
         })
-        .hover(|st| st.bg(hover()))
+        .hover(move |st| {
+            st.bg(move || {
+                if sel_hover() {
+                    primary().opacity(0.18)
+                } else {
+                    hover()
+                }
+            })
+        })
         .on_mouse_enter(move |_: &MouseEvent| hovering.set(true))
         .on_mouse_leave(move |_: &MouseEvent| hovering.set(false))
-        .on_press(move |_: &()| {
+        .on_press(move |e: &PressEvent| {
             let now = Instant::now();
-            let hit = last.borrow().as_ref().is_some_and(|(p, t)| {
-                path().as_deref() == Some(p.as_str()) && now.duration_since(*t) <= DOUBLE_CLICK
-            });
+            let is_plain =
+                !e.modifiers.cmd && !e.modifiers.ctrl && !e.modifiers.shift && !e.modifiers.alt;
+            let hit = is_plain
+                && last.borrow().as_ref().is_some_and(|(p, t)| {
+                    path().as_deref() == Some(p.as_str()) && now.duration_since(*t) <= DOUBLE_CLICK
+                });
+            on_press(e);
             if hit {
                 *last.borrow_mut() = None;
                 on_play();
-            } else {
+            } else if is_plain {
                 *last.borrow_mut() = path().map(|p| (p, now));
+            } else {
+                *last.borrow_mut() = None;
             }
         })
         .child(cols.number.then(|| {
