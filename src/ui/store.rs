@@ -899,7 +899,7 @@ pub fn set_eq(cfg: crate::engine::eq::EqConfig) {
 /// 「删除文件」确认弹窗的请求：记下路径与当前的删除方式（回收站 / 直接删）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeleteAsk {
-    pub path: String,
+    pub paths: Vec<String>,
     pub permanent: bool,
 }
 
@@ -970,12 +970,18 @@ pub fn remove_playlist_paths_under(path: &str) {
 }
 
 /// 「删除文件…」菜单项：打开确认弹窗（回收站 / 直接删按当前设置）。
+#[allow(dead_code)]
 pub fn ask_delete_file(path: &str) {
+    ask_delete_files(vec![path.to_owned()]);
+}
+
+/// 批量「删除文件…」菜单项：打开确认弹窗。
+pub fn ask_delete_files(paths: Vec<String>) {
+    if paths.is_empty() {
+        return;
+    }
     let permanent = library_store().delete_permanently();
-    store().delete_ask.set(Some(DeleteAsk {
-        path: path.to_owned(),
-        permanent,
-    }));
+    store().delete_ask.set(Some(DeleteAsk { paths, permanent }));
 }
 
 /// 确认删除：后台线程做文件操作（解码器可能还握着文件——Windows 上开着
@@ -987,24 +993,33 @@ pub fn confirm_delete_file() {
     let ui = poster();
     std::thread::spawn(move || {
         // 工作线程拿不到 store()（线程局部），用播放器快照看当前曲。
-        if player().state().track.path.as_deref() == Some(ask.path.as_str()) {
-            player().stop();
-        }
-        let path = Path::new(&ask.path);
-        let mut gone = !path.exists();
-        for _ in 0..10 {
-            if gone {
-                break;
+        let current = player().state().track.path.clone();
+        if let Some(ref cur) = current {
+            if ask.paths.iter().any(|p| p == cur) {
+                player().stop();
             }
-            if crate::provider::local::delete_file(path, ask.permanent).is_ok() {
-                gone = true;
-            } else {
-                std::thread::sleep(Duration::from_millis(150));
+        }
+        let mut gone_paths = Vec::new();
+        for p in &ask.paths {
+            let path = Path::new(p);
+            let mut gone = !path.exists();
+            for _ in 0..10 {
+                if gone {
+                    break;
+                }
+                if crate::provider::local::delete_file(path, ask.permanent).is_ok() {
+                    gone = true;
+                } else {
+                    std::thread::sleep(Duration::from_millis(150));
+                }
+            }
+            if gone {
+                gone_paths.push(p.clone());
             }
         }
         ui.post(move || {
-            if gone {
-                remove_record(&ask.path);
+            for p in gone_paths {
+                remove_record(&p);
             }
         });
     });

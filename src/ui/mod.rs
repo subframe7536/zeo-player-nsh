@@ -254,13 +254,17 @@ fn delete_prompt() -> AnyElement {
     };
     let name = move || {
         s.delete_ask.with(|a| {
-            a.as_ref()
-                .and_then(|a| {
-                    std::path::Path::new(&a.path)
-                        .file_name()
-                        .map(|f| f.to_string_lossy().into_owned())
-                })
-                .unwrap_or_default()
+            let Some(a) = a.as_ref() else {
+                return String::new();
+            };
+            if a.paths.len() == 1 {
+                std::path::Path::new(&a.paths[0])
+                    .file_name()
+                    .map(|f| f.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            } else {
+                format!("选中的 {} 个文件", a.paths.len())
+            }
         })
     };
     let content = components::form::dialog_content(440.0)

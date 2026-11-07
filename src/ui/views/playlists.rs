@@ -90,57 +90,116 @@ pub fn track_menu(
     play: impl Fn() + 'static,
     rename: Option<Rc<dyn Fn(&str)>>,
 ) -> AnyElement {
+    track_menu_selectable(row, track, from, play, rename, None)
+}
+
+/// 支持外部多选曲目集合的曲目右键菜单变体。
+pub fn track_menu_selectable(
+    row: impl IntoElement,
+    track: Memo<Option<TrackEntry>>,
+    from: Option<u64>,
+    play: impl Fn() + 'static,
+    rename: Option<Rc<dyn Fn(&str)>>,
+    selected_paths: Option<Rc<dyn Fn() -> Vec<String>>>,
+) -> AnyElement {
     let gate = store::menu_control();
-    let path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
-    let paths = move || path().into_iter().collect::<Vec<_>>();
+    let single_path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
+    let multi_paths = {
+        let selected_paths = selected_paths.clone();
+        move || {
+            let single = single_path();
+            if let Some(sel_fn) = &selected_paths {
+                let list = sel_fn();
+                if let Some(ref s) = single {
+                    if list.contains(s) && list.len() > 1 {
+                        return list;
+                    }
+                }
+            }
+            single.into_iter().collect::<Vec<_>>()
+        }
+    };
     let menu = context_menu()
         .trigger(row)
         .open(gate.open())
         .on_open_change(gate.menu_change());
+    let single_items = {
+        let multi_paths = multi_paths.clone();
+        let single_path = single_path.clone();
+        let rename = rename.clone();
+        dynamic(move || {
+            if multi_paths().len() > 1 {
+                return Vec::new();
+            }
+            let mut list = Vec::new();
+            list.push(separator());
+            list.push(item("编辑元数据…", Some(Icon::Edit), {
+                let single_path = single_path.clone();
+                move || {
+                    if let Some(p) = single_path() {
+                        store::open_edit_info(&p);
+                    }
+                }
+            }));
+            list.push(item(
+                super::super::now_playing::REVEAL_LABEL,
+                Some(Icon::Reveal),
+                {
+                    let single_path = single_path.clone();
+                    move || {
+                        if let Some(p) = single_path() {
+                            super::super::now_playing::reveal(&p);
+                        }
+                    }
+                },
+            ));
+            if let Some(rename) = &rename {
+                let rename = rename.clone();
+                let single_path = single_path.clone();
+                list.push(item("重命名文件…", Some(Icon::Edit), move || {
+                    if let Some(p) = single_path() {
+                        rename(&p);
+                    }
+                }));
+            }
+            list
+        })
+    };
     popup!(menu, 220.0)
         .child(item("播放", Some(Icon::Play), play))
         .child(separator())
-        .child(add_to_submenu(paths))
+        .child(add_to_submenu(multi_paths.clone()))
         .child(from.map(|id| {
+            let multi_paths = multi_paths.clone();
             item("从歌单中移除", Some(Icon::Close), move || {
-                // 等菜单关掉再移除：移除会拆掉这一行（连同它的菜单）。
-                if let Some(p) = path() {
-                    store::later(move || store::remove_from_playlist(id, &p));
-                }
+                let paths = multi_paths();
+                store::later(move || {
+                    for p in paths {
+                        store::remove_from_playlist(id, &p);
+                    }
+                });
             })
         }))
+        .child(single_items)
         .child(separator())
-        .child(item("编辑元数据…", Some(Icon::Edit), move || {
-            if let Some(p) = path() {
-                store::open_edit_info(&p);
-            }
-        }))
-        .child(item(
-            super::super::now_playing::REVEAL_LABEL,
-            Some(Icon::Reveal),
+        .child(item("从曲库中删除", Some(Icon::Close), {
+            let multi_paths = multi_paths.clone();
             move || {
-                if let Some(p) = path() {
-                    super::super::now_playing::reveal(&p);
-                }
-            },
-        ))
-        .child(rename.map(|rename| {
-            item("重命名文件…", Some(Icon::Edit), move || {
-                if let Some(p) = path() {
-                    rename(&p);
-                }
-            })
-        }))
-        .child(separator())
-        .child(item("从曲库中删除", Some(Icon::Close), move || {
-            // 等菜单关掉再删：删掉会拆掉这一行（连同它的菜单）。
-            if let Some(p) = path() {
-                store::later(move || store::remove_record(&p));
+                let paths = multi_paths();
+                store::later(move || {
+                    for p in paths {
+                        store::remove_record(&p);
+                    }
+                });
             }
         }))
-        .child(item("删除文件…", Some(Icon::Trash), move || {
-            if let Some(p) = path() {
-                store::ask_delete_file(&p);
+        .child(item("删除文件…", Some(Icon::Trash), {
+            let multi_paths = multi_paths.clone();
+            move || {
+                let paths = multi_paths();
+                if !paths.is_empty() {
+                    store::ask_delete_files(paths);
+                }
             }
         }))
         .into_element()

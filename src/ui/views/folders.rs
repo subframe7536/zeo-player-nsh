@@ -341,8 +341,8 @@ fn move_into(source: &str, target: &str, sep: char) -> Result<String, String> {
 /// 一次拖动中的源条目。
 #[derive(Clone, PartialEq)]
 struct DragState {
-    /// 被拖的文件 / 文件夹的绝对路径。
-    source: String,
+    /// 被拖的文件 / 文件夹的绝对路径集合。
+    sources: Vec<String>,
     /// 拖的是文件夹（移动后要修根目录、校验子树）。
     dir: bool,
     /// 拖动浮层上的名字。
@@ -411,8 +411,8 @@ impl DragCtx {
             .with_untracked(|r| r.get(index as usize).map(|r| r.path.clone()))
     }
 
-    fn begin(&self, source: String, dir: bool, name: String) {
-        self.active.set(Some(DragState { source, dir, name }));
+    fn begin(&self, sources: Vec<String>, dir: bool, name: String) {
+        self.active.set(Some(DragState { sources, dir, name }));
         self.over.set(None);
         // 量出来之前把 ghost 停在窗外，免得沿上次的锚点闪一下。
         self.anchor.set((-10000.0, -10000.0));
@@ -434,7 +434,7 @@ impl DragCtx {
         let over = self.target_at(page).filter(|target| {
             self.active.with_untracked(|a| {
                 a.as_ref()
-                    .is_some_and(|d| drop_ok(&d.source, d.dir, target, SEP))
+                    .is_some_and(|d| d.sources.iter().all(|s| drop_ok(s, d.dir, target, SEP)))
             })
         });
         self.over.set(over);
@@ -450,17 +450,48 @@ impl DragCtx {
             return;
         };
         self.cancel();
-        // 正在播的条目先停掉：Windows 上解码器还握着文件会移不动。
-        stop_if_playing_under(&d.source);
-        match move_into(&d.source, &target, SEP) {
-            Ok(dest) => {
-                // 被移走的是曲库根目录、装着根目录或在歌单 / 空文件夹
-                // 记录里：引用与索引记录跟着改路径（不重扫不重读）。
-                move_refs(&d.source, &dest, &self.extra);
-                (self.select)(if d.dir { &dest } else { &target });
-                show_message(self.message, format!("已把 {} 移到 {target}", d.name));
+        let mut moved_count = 0;
+        let mut last_error = None;
+        let mut last_dest = None;
+        for src in &d.sources {
+            // 正在播的条目先停掉：Windows 上解码器还握着文件会移不动。
+            stop_if_playing_under(src);
+            match move_into(src, &target, SEP) {
+                Ok(dest) => {
+                    // 被移走的是曲库根目录、装着根目录或在歌单 / 空文件夹
+                    // 记录里：引用与索引记录跟着改路径（不重扫不重读）。
+                    move_refs(src, &dest, &self.extra);
+                    last_dest = Some(dest);
+                    moved_count += 1;
+                }
+                Err(error) => {
+                    last_error = Some(error);
+                }
             }
-            Err(error) => show_message(self.message, error),
+        }
+        if moved_count > 0 {
+            if d.dir {
+                if let Some(dest) = last_dest {
+                    (self.select)(&dest);
+                }
+            } else {
+                (self.select)(&target);
+            }
+            if let Some(error) = last_error {
+                show_message(
+                    self.message,
+                    format!("已移动 {moved_count} 项，部分失败：{error}"),
+                );
+            } else if d.sources.len() == 1 {
+                show_message(self.message, format!("已把 {} 移到 {target}", d.name));
+            } else {
+                show_message(
+                    self.message,
+                    format!("已把 {} 个文件移到 {target}", moved_count),
+                );
+            }
+        } else if let Some(error) = last_error {
+            show_message(self.message, error);
         }
     }
 
@@ -1519,6 +1550,41 @@ pub fn Folders() -> impl IntoElement {
                             }
                         }
                     };
+                    let play_action = {
+                        let play = play.clone();
+                        let selected_paths = selected_paths;
+                        let files = files.clone();
+                        let track = track.clone();
+                        move || {
+                            let (is_multi, sel_set) = selected_paths.with_untracked(|sel| {
+                                let cur =
+                                    track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
+                                let is_multi =
+                                    cur.as_ref().is_some_and(|p| sel.contains(p)) && sel.len() > 1;
+                                (is_multi, sel.clone())
+                            });
+                            if is_multi {
+                                let all_tracks = s.tracks.get_untracked();
+                                let selected_tracks: Vec<TrackEntry> = files.with_untracked(|f| {
+                                    f.iter()
+                                        .filter_map(|&idx| all_tracks.get(idx).cloned())
+                                        .filter(|t| sel_set.contains(&t.path))
+                                        .collect()
+                                });
+                                if !selected_tracks.is_empty() {
+                                    let cur_path = track
+                                        .with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
+                                    let start_idx = selected_tracks
+                                        .iter()
+                                        .position(|t| Some(&t.path) == cur_path.as_ref())
+                                        .unwrap_or(0);
+                                    store::play_list(&selected_tracks, start_idx);
+                                    return;
+                                }
+                            }
+                            play();
+                        }
+                    };
                     let row = track_row_selectable(
                         track,
                         number,
@@ -1535,9 +1601,34 @@ pub fn Folders() -> impl IntoElement {
                     .keep_touches(true)
                     .on_responder_grant({
                         let ctx = list_ctx.clone();
+                        let selected_paths = selected_paths;
+                        let anchor_path = anchor_path;
+                        let files = files.clone();
+                        let track = track.clone();
                         move |_: &ResponderEvent| {
                             if let Some(t) = track.get_untracked() {
-                                ctx.begin(t.path.clone(), false, t.title.clone());
+                                let (sources, name) = selected_paths.with_untracked(|sel| {
+                                    if sel.contains(&t.path) && sel.len() > 1 {
+                                        let all_tracks = s.tracks.get_untracked();
+                                        let ordered_paths: Vec<String> =
+                                            files.with_untracked(|f| {
+                                                f.iter()
+                                                    .filter_map(|&idx| all_tracks.get(idx))
+                                                    .filter(|track| sel.contains(&track.path))
+                                                    .map(|track| track.path.clone())
+                                                    .collect()
+                                            });
+                                        let count = ordered_paths.len();
+                                        (ordered_paths, format!("{} 等 {} 个文件", t.title, count))
+                                    } else {
+                                        (vec![t.path.clone()], t.title.clone())
+                                    }
+                                });
+                                if !sources.contains(&t.path) {
+                                    selected_paths.set(BTreeSet::from([t.path.clone()]));
+                                    anchor_path.set(Some(t.path.clone()));
+                                }
+                                ctx.begin(sources, false, name);
                             }
                         }
                     })
@@ -1569,15 +1660,37 @@ pub fn Folders() -> impl IntoElement {
                             }
                         }
                     });
-                    super::playlists::track_menu(row, track, None, move || play(), {
-                        let ops = list_ops.clone();
-                        Some(Rc::new(move |p: &str| {
-                            ops.op.set(Some(FileOp::Rename {
-                                path: p.to_owned(),
-                                dir: false,
-                            }))
-                        }) as Rc<dyn Fn(&str)>)
-                    })
+                    let get_selected = {
+                        let selected_paths = selected_paths;
+                        let files = files.clone();
+                        Rc::new(move || {
+                            let set = selected_paths.get();
+                            let all_tracks = s.tracks.get_untracked();
+                            files.with_untracked(|f| {
+                                f.iter()
+                                    .filter_map(|&idx| all_tracks.get(idx))
+                                    .filter(|t| set.contains(&t.path))
+                                    .map(|t| t.path.clone())
+                                    .collect::<Vec<_>>()
+                            })
+                        }) as Rc<dyn Fn() -> Vec<String>>
+                    };
+                    super::playlists::track_menu_selectable(
+                        row,
+                        track,
+                        None,
+                        play_action,
+                        {
+                            let ops = list_ops.clone();
+                            Some(Rc::new(move |p: &str| {
+                                ops.op.set(Some(FileOp::Rename {
+                                    path: p.to_owned(),
+                                    dir: false,
+                                }))
+                            }) as Rc<dyn Fn(&str)>)
+                        },
+                        Some(get_selected),
+                    )
                 },
             )
             .keys(move || {
@@ -1815,7 +1928,7 @@ fn tree_cell(
                 let ctx = ctx.clone();
                 move |_: &ResponderEvent| {
                     if let Some(r) = row.get_untracked() {
-                        ctx.begin(r.path.clone(), true, r.name.clone());
+                        ctx.begin(vec![r.path.clone()], true, r.name.clone());
                     }
                 }
             })
@@ -1972,6 +2085,19 @@ mod tests {
         assert!(drop_ok("C:\\m\\a", true, "C:\\x", '\\'));
         assert!(!drop_ok("C:\\m\\a", true, "C:\\m\\a\\b", '\\'));
         assert!(!drop_ok("C:\\m\\a", true, "C:\\m", '\\'));
+    }
+
+    #[test]
+    fn multi_drop_target_validates_all_items() {
+        let sources = vec!["/m/a/1.mp3", "/m/a/2.mp3"];
+        // 目标为 /m/b：全部合法
+        assert!(sources.iter().all(|s| drop_ok(s, false, "/m/b", '/')));
+        // 目标为当前所在 /m/a：全不合法
+        assert!(!sources.iter().all(|s| drop_ok(s, false, "/m/a", '/')));
+
+        let mixed = vec!["/m/a/1.mp3", "/m/b/2.mp3"];
+        // 混合来源落到 /m/b：其中 2.mp3 原本就在 /m/b，整体不合法
+        assert!(!mixed.iter().all(|s| drop_ok(s, false, "/m/b", '/')));
     }
 
     #[test]

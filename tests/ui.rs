@@ -789,6 +789,53 @@ fn folders_page_selection_and_multi_selection() {
     assert_eq!(app.screen().selected(short).unwrap(), true);
     app.wait_for("text:已选 2 首（共 2 首）").unwrap();
 
+    // 多选状态下右键点击其中一项：保持多选，菜单精简（隐藏单文件专有项）
+    app.right_click("label:mono").unwrap();
+    app.wait_for("role:menuitem[播放]").unwrap();
+    app.wait_for("label:添加到歌单").unwrap();
+    app.wait_for("role:menuitem[从曲库中删除]").unwrap();
+    app.wait_for("role:menuitem[删除文件…]").unwrap();
+    assert!(
+        !texts(&app).iter().any(|t| t == "编辑元数据…"),
+        "多选时右键菜单不应出现「编辑元数据…」"
+    );
+    assert!(
+        !texts(&app).iter().any(|t| t == "重命名文件…"),
+        "多选时右键菜单不应出现「重命名文件…」"
+    );
+    assert!(
+        !texts(&app)
+            .iter()
+            .any(|t| t.starts_with("在访达中显示") || t.starts_with("在资源管理器中显示")),
+        "多选时右键菜单不应出现显示文件项"
+    );
+    app.press("label:添加到歌单").unwrap();
+    app.press("role:menuitem[我喜欢]").unwrap();
+    let pl_file =
+        std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap()).join("playlists.json");
+    let mut has_both = false;
+    for _ in 0..40 {
+        has_both = std::fs::read_to_string(&pl_file)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| v["playlists"].as_array().cloned())
+            .and_then(|arr| arr.into_iter().find(|p| p["favorite"] == true))
+            .and_then(|fav| fav["tracks"].as_array().cloned())
+            .is_some_and(|tracks| {
+                tracks
+                    .iter()
+                    .any(|t| t.as_str().is_some_and(|p| p.contains("mono")))
+                    && tracks
+                        .iter()
+                        .any(|t| t.as_str().is_some_and(|p| p.contains("short")))
+            });
+        if has_both {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(has_both, "多选添加到歌单应将选中的全部曲目加入歌单");
+
     // 切换文件夹时清空选择状态
     app.press(&root_name()).unwrap();
     app.wait_for("text:测试歌曲").unwrap();
@@ -796,6 +843,19 @@ fn folders_page_selection_and_multi_selection() {
         app.screen().selected("role:button[测试歌曲]").unwrap(),
         false
     );
+
+    // 单文件右键菜单包含单文件项
+    app.right_click("label:测试歌曲").unwrap();
+    app.wait_for("role:menuitem[编辑元数据…]").unwrap();
+    app.wait_for("role:menuitem[重命名文件…]").unwrap();
+    assert!(
+        texts(&app)
+            .iter()
+            .any(|t| t.starts_with("在访达中显示") || t.starts_with("在资源管理器中显示")),
+        "单选时右键菜单应出现显示文件项"
+    );
+    app.press("role:menuitem[播放]").unwrap();
+
     zeo_player::engine::Player::global().pause();
 }
 
