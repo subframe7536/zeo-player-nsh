@@ -16,9 +16,11 @@ use std::time::Duration;
 use nsh_base::context_menu;
 use nsh_core::prelude::*;
 
-use super::super::components::button::{Size, Variant, icon_button, pill_button, text_button};
+use super::super::components::button::{
+    Size, Variant, icon_button, outline_button, pill_button, text_button,
+};
 use super::super::components::form::{
-    dialog_content, dialog_footer, dialog_header, input_field, modal,
+    dialog_content, dialog_footer, dialog_header, input_field, modal, tab_list, tab_trigger,
 };
 use super::super::components::icons::{Icon, icon, icon_dyn};
 use super::super::components::page::{empty_state, page_header};
@@ -30,7 +32,8 @@ use super::{
     SEP, add_dropped, by_disc_track, compare, item, last_segment, no_library, popup, separator,
     url_to_path,
 };
-use crate::config::{TrackEntry, library_store};
+use crate::config::{TrackEntry, library_store, unix_now};
+use crate::playlists::Condition;
 
 /// 文件夹：面向文件，带大小列。
 const FOLDER_COLS: Columns = Columns {
@@ -1147,11 +1150,11 @@ pub fn Folders() -> impl IntoElement {
     let files = ui.files;
     let ctx = ui.ctx.clone();
     let ops = ui.ops.clone();
-    let select = ui.select.clone();
+    let select_folder = ui.select.clone();
     let message = s.folder_message;
 
     let on_drop = {
-        let select = select.clone();
+        let select_folder = select_folder.clone();
         move |event: &FileDropEvent| {
             let mut dir = None;
             let mut added = false;
@@ -1171,11 +1174,52 @@ pub fn Folders() -> impl IntoElement {
                 scan();
             }
             if let Some(dir) = dir {
-                select(&dir);
+                select_folder(&dir);
             }
             show_message(message, notes.join("；"));
         }
     };
+
+    let filter_conditions = signal(vec![Condition::default()]);
+    let match_all = signal(true);
+    let filter_open = signal(false);
+
+    // 切换文件夹时清空过滤条件并收起筛选
+    effect(move || {
+        let _ = here.get();
+        filter_conditions.set(vec![Condition::default()]);
+        match_all.set(true);
+        filter_open.set(false);
+    });
+
+    let filtered_files = computed(move || {
+        let current_files = files.get();
+        if !filter_open.get() {
+            return current_files;
+        }
+        let active: Vec<Condition> =
+            filter_conditions.with(|cs| cs.iter().filter(|c| c.is_complete()).cloned().collect());
+        if active.is_empty() {
+            return current_files;
+        }
+        let all_tracks = s.tracks.get();
+        let now = unix_now();
+        let all = match_all.get();
+        let kept: Vec<usize> = current_files
+            .iter()
+            .copied()
+            .filter(|&idx| {
+                all_tracks.get(idx).is_some_and(|track| {
+                    if all {
+                        active.iter().all(|c| c.matches(track, now))
+                    } else {
+                        active.iter().any(|c| c.matches(track, now))
+                    }
+                })
+            })
+            .collect();
+        Rc::new(kept)
+    });
 
     view().flex_1().on_file_drop(on_drop).child(
         when(
@@ -1189,6 +1233,13 @@ pub fn Folders() -> impl IntoElement {
                 let note = message.get();
                 if !note.is_empty() {
                     return note;
+                }
+                let has_active = filter_open.get()
+                    && filter_conditions.with(|cs| cs.iter().any(|c| c.is_complete()));
+                let total = files.with(|f| f.len());
+                let shown = filtered_files.with(|f| f.len());
+                if has_active {
+                    return format!("筛选出 {} 首（共 {} 首）", shown, total);
                 }
                 here.with(|p| {
                     let mut parts = Vec::new();
@@ -1213,10 +1264,131 @@ pub fn Folders() -> impl IntoElement {
                     move || here.with(|p| !p.all.is_empty()),
                     move || {
                         pill_button(Icon::Play, "播放全部", move || {
-                            here.with_untracked(|p| play_indices(&p.all, 0))
+                            let cur = filtered_files.get_untracked();
+                            if !cur.is_empty() {
+                                play_indices(&cur, 0);
+                            } else {
+                                here.with_untracked(|p| play_indices(&p.all, 0));
+                            }
+                        })
+                    },
+                ))
+                .child(when(
+                    move || here.with(|p| !p.all.is_empty()),
+                    move || {
+                        dynamic(move || {
+                            if filter_open.get() {
+                                outline_button(Icon::Close, "清除筛选", move || {
+                                    filter_conditions.set(vec![Condition::default()]);
+                                    match_all.set(true);
+                                    filter_open.set(false);
+                                })
+                                .into_element()
+                            } else {
+                                outline_button(Icon::Search, "筛选", move || {
+                                    filter_open.set(true);
+                                })
+                                .into_element()
+                            }
                         })
                     },
                 ));
+            let filter_bar = when(
+                move || filter_open.get(),
+                move || {
+                    let matched = computed(move || filtered_files.with(|f| f.len()));
+                    let chip = move |label: &'static str, all: bool| {
+                        tab_trigger(
+                            move || match_all.get() == all,
+                            None,
+                            label,
+                            move || match_all.set(all),
+                        )
+                    };
+                    let add = text_button(
+                        Variant::Ghost,
+                        Size::Sm,
+                        Some(Icon::Plus),
+                        "添加条件",
+                        move || filter_conditions.update(|cs| cs.push(Condition::default())),
+                    );
+                    let mode = view()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            text("符合以下")
+                                .text_size(px(14.0))
+                                .line_height(px(14.0))
+                                .text_color(muted_fg()),
+                        )
+                        .child(
+                            tab_list()
+                                .child(chip("全部", true))
+                                .child(chip("任一", false)),
+                        )
+                        .child(
+                            text("条件")
+                                .text_size(px(14.0))
+                                .line_height(px(14.0))
+                                .text_color(muted_fg()),
+                        )
+                        .child(add)
+                        .child(view().flex_1())
+                        .child(
+                            text(move || format!("匹配 {} 首", matched.get()))
+                                .text_size(px(14.0))
+                                .line_height(px(14.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .tabular_nums()
+                                .text_color(move || primary())
+                                .transition_colors()
+                                .duration(300.0),
+                        );
+
+                    let filter_count = computed(move || filter_conditions.with(|cs| cs.len()));
+                    let rows = dynamic(move || {
+                        let n = filter_count.get();
+                        (0..n)
+                            .map(|i| {
+                                let get = move || {
+                                    filter_conditions
+                                        .with(|cs| cs.get(i).cloned().unwrap_or_default())
+                                };
+                                let change = move |f: Box<dyn FnOnce(&mut Condition)>| {
+                                    filter_conditions.update(|cs| {
+                                        if let Some(c) = cs.get_mut(i) {
+                                            f(c);
+                                        }
+                                    });
+                                };
+                                let remove = Rc::new(move || {
+                                    filter_conditions.update(|cs| {
+                                        if cs.len() > 1 {
+                                            if i < cs.len() {
+                                                cs.remove(i);
+                                            }
+                                        } else if let Some(c) = cs.first_mut() {
+                                            *c = Condition::default();
+                                        }
+                                    });
+                                });
+                                super::playlists::condition_editor(get, change, Some(remove))
+                                    .into_element()
+                            })
+                            .collect::<Vec<_>>()
+                    });
+
+                    view()
+                        .px(px(32.0))
+                        .py(px(12.0))
+                        .gap(px(12.0))
+                        .border_b_1()
+                        .border_b_color(border())
+                        .child(mode)
+                        .child(view().gap(px(8.0)).child(rows))
+                },
+            );
             let header = view()
                 .child(page_header(
                     title,
@@ -1224,63 +1396,84 @@ pub fn Folders() -> impl IntoElement {
                     None,
                     Some(actions.into_element()),
                 ))
+                .child(filter_bar)
                 .child(track_columns(FOLDER_COLS));
-            let file_list = virtual_list(computed(move || files.with(|f| f.len())), move |at| {
-                let index = computed(move || files.with(|f| f.get(at.index()).copied()));
-                let track = computed(move || {
-                    index.with(|i| i.and_then(|i| s.tracks.with(|t| t.get(i).cloned())))
-                });
-                let number = computed(move || (at.index() + 1).to_string());
-                let play = Rc::new(move || {
-                    let files = files.get_untracked();
-                    play_indices(&files, at.index());
-                });
-                let row = track_row(track, number, FOLDER_COLS, {
-                    let play = play.clone();
-                    move || play()
-                })
-                .pan_values(Some(&list_ctx.gx), Some(&list_ctx.gy))
-                .claim_touches(list_ctx.claim())
-                .keep_touches(true)
-                .on_responder_grant({
-                    let ctx = list_ctx.clone();
-                    move |_: &ResponderEvent| {
-                        if let Some(t) = track.get_untracked() {
-                            ctx.begin(t.path.clone(), false, t.title.clone());
+            let file_list = virtual_list(
+                computed(move || filtered_files.with(|f| f.len())),
+                move |at| {
+                    let index =
+                        computed(move || filtered_files.with(|f| f.get(at.index()).copied()));
+                    let track = computed(move || {
+                        index.with(|i| i.and_then(|i| s.tracks.with(|t| t.get(i).cloned())))
+                    });
+                    let number = computed(move || (at.index() + 1).to_string());
+                    let play = Rc::new(move || {
+                        let files = filtered_files.get_untracked();
+                        play_indices(&files, at.index());
+                    });
+                    let row = track_row(track, number, FOLDER_COLS, {
+                        let play = play.clone();
+                        move || play()
+                    })
+                    .pan_values(Some(&list_ctx.gx), Some(&list_ctx.gy))
+                    .claim_touches(list_ctx.claim())
+                    .keep_touches(true)
+                    .on_responder_grant({
+                        let ctx = list_ctx.clone();
+                        move |_: &ResponderEvent| {
+                            if let Some(t) = track.get_untracked() {
+                                ctx.begin(t.path.clone(), false, t.title.clone());
+                            }
                         }
-                    }
-                })
-                .on_responder_move({
-                    let ctx = list_ctx.clone();
-                    move |e: &ResponderEvent| ctx.move_to(e.page)
-                })
-                .on_responder_release({
-                    let ctx = list_ctx.clone();
-                    move |e: &ResponderEvent| ctx.finish(e.page)
-                })
-                .on_responder_terminate({
-                    let ctx = list_ctx.clone();
-                    move |_: &ResponderEvent| ctx.cancel()
-                });
-                super::playlists::track_menu(row, track, None, move || play(), {
-                    let ops = list_ops.clone();
-                    Some(Rc::new(move |p: &str| {
-                        ops.op.set(Some(FileOp::Rename {
-                            path: p.to_owned(),
-                            dir: false,
-                        }))
-                    }) as Rc<dyn Fn(&str)>)
-                })
+                    })
+                    .on_responder_move({
+                        let ctx = list_ctx.clone();
+                        move |e: &ResponderEvent| ctx.move_to(e.page)
+                    })
+                    .on_responder_release({
+                        let ctx = list_ctx.clone();
+                        move |e: &ResponderEvent| ctx.finish(e.page)
+                    })
+                    .on_responder_terminate({
+                        let ctx = list_ctx.clone();
+                        move |_: &ResponderEvent| ctx.cancel()
+                    });
+                    super::playlists::track_menu(row, track, None, move || play(), {
+                        let ops = list_ops.clone();
+                        Some(Rc::new(move |p: &str| {
+                            ops.op.set(Some(FileOp::Rename {
+                                path: p.to_owned(),
+                                dir: false,
+                            }))
+                        }) as Rc<dyn Fn(&str)>)
+                    })
+                },
+            )
+            .keys(move || {
+                let all = s.tracks.get();
+                filtered_files
+                    .get()
+                    .iter()
+                    .map(|&i| all.get(i).map(|t| t.path.clone()).unwrap_or_default())
+                    .collect::<Vec<_>>()
             })
             .estimated_item_size(px(ROW))
             .content_padding_bottom(px(BAR_SPACE))
             .content_padding_x(px(20.0))
             .flex_1()
-            .empty(empty_state(
-                Icon::Folder,
-                "这个文件夹没有曲目",
-                "它包含的音乐可能在子文件夹里，在侧栏树里选一个子文件夹。",
-            ));
+            .empty(dynamic(move || {
+                let has_active = filter_open.get()
+                    && filter_conditions.with(|cs| cs.iter().any(|c| c.is_complete()));
+                if has_active {
+                    empty_state(Icon::Search, "没有符合条件的曲目", "尝试更换筛选条件或值。")
+                } else {
+                    empty_state(
+                        Icon::Folder,
+                        "这个文件夹没有曲目",
+                        "它包含的音乐可能在子文件夹里，在侧栏树里选一个子文件夹。",
+                    )
+                }
+            }));
             view()
                 .flex_1()
                 .min_w(px(0.0))
@@ -1516,6 +1709,7 @@ fn tree_cell(
 mod tests {
     use super::super::super::components::tracks::audio_format;
     use super::*;
+    use crate::playlists::{Field, Op};
 
     fn entry(path: &str) -> TrackEntry {
         TrackEntry(std::sync::Arc::new(crate::config::TrackShared {
@@ -1774,5 +1968,62 @@ mod tests {
             vec!["deep"]
         );
         assert_eq!(tree.len(), 1);
+    }
+
+    #[test]
+    fn folder_condition_filter_matches() {
+        let meta = std::sync::Arc::new(crate::metadata::MetaInfo {
+            title: "My Favorite Song".into(),
+            artist: "Awesome Singer".into(),
+            album: "Greatest Hits".into(),
+            duration: 215.0,
+            ..Default::default()
+        });
+        let t = TrackEntry(std::sync::Arc::new(crate::config::TrackShared {
+            provider: crate::config::ProviderId::Local,
+            path: "/music/artist/album/song.flac".into(),
+            file_name: "song.flac".into(),
+            album_artist: "Various Artists".into(),
+            genres: vec!["Pop".into(), "Rock".into()],
+            size_bytes: 1024,
+            modified: 0,
+            stamp: 0,
+            meta,
+        }));
+
+        let c_title = Condition {
+            field: Field::Title,
+            op: Op::Contains,
+            value: "favorite".into(),
+        };
+        assert!(c_title.matches(&t, 0));
+
+        let c_artist = Condition {
+            field: Field::Artist,
+            op: Op::Is,
+            value: "Awesome Singer".into(),
+        };
+        assert!(c_artist.matches(&t, 0));
+
+        let c_format = Condition {
+            field: Field::Format,
+            op: Op::Is,
+            value: "flac".into(),
+        };
+        assert!(c_format.matches(&t, 0));
+
+        let c_genre = Condition {
+            field: Field::Tag,
+            op: Op::Is,
+            value: "Pop".into(),
+        };
+        assert!(c_genre.matches(&t, 0));
+
+        let c_filename = Condition {
+            field: Field::FileName,
+            op: Op::Contains,
+            value: "song".into(),
+        };
+        assert!(c_filename.matches(&t, 0));
     }
 }

@@ -117,9 +117,13 @@ fn double_press(app: &mut Headless, sel: &str) {
 #[test]
 fn sidebar_navigates_between_library_views() {
     let mut app = start(1200.0, 800.0);
-    for label in ["首页", "歌手", "专辑"] {
+    for label in ["首页", "音乐库", "艺术家", "专辑"] {
         assert!(has(&app, label), "{label}: {:?}", texts(&app));
     }
+    app.press("音乐库").unwrap();
+    app.wait_for("text:音乐库").unwrap();
+    app.press("艺术家").unwrap();
+    app.wait_for("text:艺术家").unwrap();
     app.press("专辑").unwrap();
     // 播放条在（共享播放器可能已被别的用例装上曲目，不断言「未在播放」）。
     app.wait_for("label:播放队列").unwrap();
@@ -471,26 +475,29 @@ fn appearance_select_switches_the_color_scheme() {
     app.press("label:系统").unwrap();
 }
 
-/// 设置弹窗 →「外观」分类 →「主题色」色块：选中态即时生效并落盘。
+/// 设置弹窗 →「外观」分类 →「主题色」：支持配置黑白、封面、自定义。
 #[test]
 fn accent_swatches_switch_and_persist_the_theme_color() {
     let mut app = start(1200.0, 800.0);
     app.press("设置").unwrap();
     app.press("id:settings-nav >> role:button[外观]").unwrap();
     app.wait_for("id:settings-content >> text:主题色").unwrap();
+    let radio = |label: &str| format!("id:settings-content >> role:radio[{label}]");
     let swatch = |label: &str| format!("id:settings-content >> role:button[主题色：{label}]");
     app.wait_until(
         "「封面」选中（出厂默认）",
         Duration::from_secs(2),
-        |s| s.selected(&swatch("封面")).unwrap_or(false),
+        |s| s.selected(&radio("封面")).unwrap_or(false),
     )
     .unwrap();
+    app.press(&radio("自定义")).unwrap();
+    app.wait_for(&swatch("红")).unwrap();
     app.press(&swatch("红")).unwrap();
     app.wait_until("「红」选中", Duration::from_secs(2), |s| {
         s.selected(&swatch("红")).unwrap_or(false)
     })
     .unwrap();
-    assert!(!app.screen().selected(&swatch("封面")).unwrap());
+    assert!(!app.screen().selected(&radio("封面")).unwrap());
     // 配置在线程里落盘：等它写完再断言。
     let file =
         std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap()).join("library.json");
@@ -507,7 +514,22 @@ fn accent_swatches_switch_and_persist_the_theme_color() {
         std::thread::sleep(Duration::from_millis(50));
     }
     assert!(saved("red"));
-    app.press(&swatch("封面")).unwrap();
+    app.press(&radio("黑白")).unwrap();
+    for _ in 0..40 {
+        if saved("neutral") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(saved("neutral"));
+    app.press(&radio("封面")).unwrap();
+    for _ in 0..40 {
+        if saved("cover") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(saved("cover"));
 }
 
 /// 「跟随封面」（出厂默认）：播放带封面的曲目后强调色换成封面主色调——
@@ -661,6 +683,48 @@ fn folders_page_shows_tree_and_files() {
     app.press("sub").unwrap();
     app.wait_for("text:mono").unwrap();
     app.wait_for("text:short").unwrap();
+
+    // 头部字段筛选功能（点击「筛选」后展开，布局与智能歌单一致；按钮变为「清除筛选」）
+    app.wait_for("text:筛选").unwrap();
+    assert!(!texts(&app).contains(&"符合以下".to_string()));
+    app.press("筛选").unwrap();
+    app.wait_for("text:符合以下").unwrap();
+    app.wait_for("text:匹配 2 首").unwrap();
+    app.wait_for("text:清除筛选").unwrap();
+
+    app.press("label:字段").unwrap();
+    app.press("role:option[文件名]").unwrap();
+    app.type_text("label:值", "mono").unwrap();
+    app.wait_for("text:mono").unwrap();
+    app.wait_for("text:匹配 1 首").unwrap();
+    assert!(!texts(&app).contains(&"short".to_string()));
+
+    // 单规则删除按钮：不删除行，重置到默认状态（字段变回歌手，值清空，匹配数恢复为 2）
+    app.press("label:删除条件").unwrap();
+    app.wait_for("text:short").unwrap();
+    app.wait_for("text:匹配 2 首").unwrap();
+    app.wait_for("text:歌手").unwrap();
+
+    app.type_text("label:值", "nonexistent").unwrap();
+    app.wait_for("text:没有符合条件的曲目").unwrap();
+    app.wait_for("text:匹配 0 首").unwrap();
+
+    // 点击「清除筛选」：重置过滤条件并收起筛选面板，按钮变回「筛选」
+    app.press("清除筛选").unwrap();
+    app.wait_for("text:short").unwrap();
+    app.wait_for("text:筛选").unwrap();
+    assert!(!texts(&app).contains(&"符合以下".to_string()));
+
+    // 重新开启筛选，测试添加条件与模式切换
+    app.press("筛选").unwrap();
+    app.wait_for("text:符合以下").unwrap();
+    app.press("添加条件").unwrap();
+    app.press("任一").unwrap();
+    app.press("全部").unwrap();
+    // 多条规则时点击删除按钮：删除对应行
+    app.press("label:删除条件 >> nth=0").unwrap();
+    app.press("清除筛选").unwrap();
+    app.wait_for("text:筛选").unwrap();
 }
 
 /// 目录树增删改：右键新建 → 磁盘上真建出来并进树（空文件夹也显示）；
@@ -902,8 +966,8 @@ fn number_column_only_in_album_detail() {
         .unwrap();
     // 文件夹页：没有 `#` 列头。
     assert!(!has(&app, "#"), "{:?}", texts(&app));
-    // 歌手详情：也没有。
-    app.press("label:歌手").unwrap();
+    // 艺术家详情：也没有。
+    app.press("label:艺术家").unwrap();
     app.wait_for("role:button[测试歌手 A; 测试歌手 B]").unwrap();
     app.press("role:button[测试歌手 A; 测试歌手 B]").unwrap();
     app.wait_for("label:返回").unwrap();
@@ -957,7 +1021,7 @@ fn search_box_blurs_when_pressing_outside() {
     app.wait(Duration::from_millis(50)).unwrap();
     assert_eq!(blurs(&app), before, "点在搜索框里不失焦");
     app.type_text("label:搜索", "zz").unwrap();
-    app.press("label:歌手").unwrap();
+    app.press("label:艺术家").unwrap();
     app.wait(Duration::from_millis(50)).unwrap();
     assert_eq!(blurs(&app), before + 1, "点在框外失焦");
     app.press("label:专辑").unwrap();

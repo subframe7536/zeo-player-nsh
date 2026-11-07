@@ -24,6 +24,8 @@ pub enum Nav {
     /// 首页：随机推荐、曲库与播放统计（默认启动页）。
     #[default]
     Home,
+    /// 音乐库：显示全部曲目。
+    Library,
     Folders,
     Artists,
     Albums,
@@ -196,6 +198,7 @@ fn page(nav: Signal<Nav>, search_page: frame::SearchFocus) -> AnyElement {
             }
             match nav.get() {
                 Nav::Home => views::home().into_element(),
+                Nav::Library => views::library().into_element(),
                 Nav::Folders => views::folders().into_element(),
                 Nav::Artists => views::artists().into_element(),
                 Nav::Albums => views::albums().into_element(),

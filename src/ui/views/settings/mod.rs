@@ -301,7 +301,7 @@ const SECTIONS: &[Section] = &[
     Section {
         pane: Pane::Appearance,
         title: "主题色",
-        keys: "主题色 颜色 强调色 黑白 红 橙 绿 蓝 紫 封面 自动",
+        keys: "主题色 颜色 强调色 黑白 红 橙 绿 蓝 紫 封面 自动 自定义 代码",
         build: appearance::accent_section,
     },
     Section {

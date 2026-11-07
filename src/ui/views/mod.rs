@@ -17,7 +17,7 @@ use super::components::button::pill_button;
 use super::components::icons::{Icon, icon};
 use super::components::page::{empty_state, page_header};
 use super::components::tracks::{Columns, ROW, track_columns, track_row};
-use super::store::{play_list, store};
+use super::store::{format_total, play_list, store};
 use super::theme::*;
 use crate::config::{TrackEntry, library_store};
 
@@ -128,7 +128,12 @@ fn no_library() -> View {
 /// 曲目列表（虚拟化），`header` 随内容滚动。序号列（`cols.number`，
 /// 只有专辑详情开）显示标签曲目号，没有该列时 `number` 不会被读。
 fn track_list(items: Memo<Rc<Vec<TrackEntry>>>, cols: Columns, header: AnyElement) -> VirtualList {
-    list_of_tracks(items, cols, header, None)
+    list_of_tracks(items, cols, Some(header), None)
+}
+
+/// 无滚动页头的曲目列表（给页头外置粘滞在顶部的页面用，如音乐库）。
+fn track_list_bare(items: Memo<Rc<Vec<TrackEntry>>>, cols: Columns) -> VirtualList {
+    list_of_tracks(items, cols, None, None)
 }
 
 /// 歌单页的曲目列表：`from` 为手动歌单时右键菜单可从中移除。
@@ -138,17 +143,17 @@ pub(super) fn track_list_in(
     header: AnyElement,
     from: Option<u64>,
 ) -> VirtualList {
-    list_of_tracks(items, cols, header, from)
+    list_of_tracks(items, cols, Some(header), from)
 }
 
 fn list_of_tracks(
     items: Memo<Rc<Vec<TrackEntry>>>,
     cols: Columns,
-    header: AnyElement,
+    header: Option<AnyElement>,
     from: Option<u64>,
 ) -> VirtualList {
     let count = computed(move || items.with(|v| v.len()));
-    virtual_list(count, move |at| {
+    let mut list = virtual_list(count, move |at| {
         let track = computed(move || items.with(|v| v.get(at.index()).cloned()));
         let number = computed(move || {
             let index = at.index();
@@ -173,9 +178,12 @@ fn list_of_tracks(
         playlists::track_menu(row, track, from, move || play(), None)
     })
     .estimated_item_size(px(ROW))
-    .header(header)
     .content_padding_bottom(px(BAR_SPACE))
-    .flex_1()
+    .flex_1();
+    if let Some(h) = header {
+        list = list.header(h);
+    }
+    list
 }
 
 /// 详情页的大头部：封面（或头像）、类别、标题、说明、播放按钮。
@@ -289,6 +297,43 @@ pub(crate) fn search_hits(query: &str, tracks: &[TrackEntry]) -> Vec<TrackEntry>
         })
         .cloned()
         .collect()
+}
+
+/// 音乐库：展示全部歌曲（页头与列头固定粘滞在顶部，参考艺术家和专辑）。
+pub fn library() -> View {
+    let s = store();
+    let items = computed(move || {
+        let tracks = s.tracks.get();
+        Rc::new((*tracks.0).clone())
+    });
+    let count = computed(move || items.with(|v| v.len()));
+    let total_sec = computed(move || items.with(|v| total_duration(v)));
+    view().flex_1().child(dynamic(move || {
+        if s.tracks.with(|t| t.is_empty()) {
+            return no_library().into_element();
+        }
+        let play_all = {
+            let items = items.clone();
+            pill_button(Icon::Play, "播放全部", move || {
+                items.with_untracked(|v| play_list(v, 0));
+            })
+        };
+        let header = view()
+            .child(page_header(
+                || "音乐库".into(),
+                move || format!("{} 首曲目 · {}", count.get(), format_total(total_sec.get())),
+                None,
+                Some(play_all.into_element()),
+            ))
+            .child(track_columns(Columns::ALL));
+        let list = track_list_bare(items, Columns::ALL);
+        view()
+            .flex_1()
+            .min_w(px(0.0))
+            .child(header)
+            .child(list)
+            .into_element()
+    }))
 }
 
 /// 搜索页的结果列表：标题 / 歌手 / 专辑 / 文件名匹配（不分大小写）。

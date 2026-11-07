@@ -517,6 +517,13 @@ fn rule_editor(draft: Signal<Draft>) -> View {
             move || change(Box::new(move |r| r.match_all = all)),
         )
     };
+    let add = text_button(
+        Variant::Ghost,
+        Size::Sm,
+        Some(Icon::Plus),
+        "添加条件",
+        move || change(Box::new(|r| r.conditions.push(Condition::default()))),
+    );
     let mode = view()
         .flex_row()
         .items_center()
@@ -538,6 +545,7 @@ fn rule_editor(draft: Signal<Draft>) -> View {
                 .line_height(px(14.0))
                 .text_color(muted_fg()),
         )
+        .child(add)
         .child(view().flex_1())
         .child(
             text(move || format!("匹配 {} 首", matched.get()))
@@ -555,13 +563,6 @@ fn rule_editor(draft: Signal<Draft>) -> View {
             .map(|i| condition_row(draft, i).into_element())
             .collect::<Vec<_>>()
     });
-    let add = view().self_start().child(text_button(
-        Variant::Ghost,
-        Size::Sm,
-        Some(Icon::Plus),
-        "添加条件",
-        move || change(Box::new(|r| r.conditions.push(Condition::default()))),
-    ));
     let sort = select(
         move || rule(&|r| r.sort.label().to_owned()),
         "排序",
@@ -619,28 +620,16 @@ fn rule_editor(draft: Signal<Draft>) -> View {
                 .max_h(px(300.0))
                 .child(view().gap(px(8.0)).child(rows)),
         )
-        .child(add)
         .child(view().h(px(1.0)).bg(border()))
         .child(footer)
 }
 
-/// 一行条件：字段、比较方式、值、单位、删除。
-fn condition_row(draft: Signal<Draft>, index: usize) -> View {
-    let get = move || {
-        draft.with(|d| {
-            d.rule
-                .as_ref()
-                .and_then(|r| r.conditions.get(index).cloned())
-                .unwrap_or_default()
-        })
-    };
-    let change = move |f: Box<dyn FnOnce(&mut Condition)>| {
-        draft.update(|d| {
-            if let Some(c) = d.rule.as_mut().and_then(|r| r.conditions.get_mut(index)) {
-                f(c);
-            }
-        })
-    };
+/// 单个条件的编辑器行（字段、比较方式、值、单位、删除/清除）：智能歌单与文件夹筛选共用。
+pub(super) fn condition_editor(
+    get: impl Fn() -> Condition + Copy + 'static,
+    change: impl Fn(Box<dyn FnOnce(&mut Condition)>) + Copy + 'static,
+    remove: Option<Rc<dyn Fn()>>,
+) -> View {
     let field = computed(move || get().field);
     let field_options = Field::ALL
         .iter()
@@ -704,7 +693,7 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
             .flex_1()
             .min_w(px(80.0))
             .label("值")
-            .default_value(untracked(|| get().value))
+            .value(move || get().value)
             .placeholder(placeholder)
             .on_change(move |t: &str| {
                 let t = t.to_owned();
@@ -723,15 +712,31 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
         let c = get();
         !c.value.trim().is_empty() && !c.is_complete()
     };
-    view()
+    let mut row = view()
         .flex_row()
         .items_center()
         .gap(px(8.0))
         // 行比输入框高 8 pt：聚焦环（3 pt）才不会被滚动区裁掉。
-        .p(px(4.0))
-        .child(field_select)
+        .p(px(4.0));
+    if let Some(remove) = remove {
+        row = row.child(icon_button(
+            || Icon::Close,
+            16.0,
+            "删除条件",
+            muted_fg,
+            move || remove(),
+        ));
+    }
+    row.child(field_select)
         .child(op_select)
-        .child(view().flex_1().flex_row().items_center().child(value_input))
+        .child(
+            view()
+                .flex_1()
+                .max_w(px(320.0))
+                .flex_row()
+                .items_center()
+                .child(value_input),
+        )
         .child(
             text(move || {
                 if invalid() {
@@ -752,26 +757,44 @@ fn condition_row(draft: Signal<Draft>, index: usize) -> View {
                 }
             }),
         )
-        .child(icon_button(
-            || Icon::Close,
-            16.0,
-            "删除条件",
-            muted_fg,
-            move || {
-                draft.update(|d| {
-                    if let Some(r) = d.rule.as_mut()
-                        && index < r.conditions.len()
-                    {
+}
+
+/// 一行条件：字段、比较方式、值、单位、删除。
+fn condition_row(draft: Signal<Draft>, index: usize) -> View {
+    let get = move || {
+        draft.with(|d| {
+            d.rule
+                .as_ref()
+                .and_then(|r| r.conditions.get(index).cloned())
+                .unwrap_or_default()
+        })
+    };
+    let change = move |f: Box<dyn FnOnce(&mut Condition)>| {
+        draft.update(|d| {
+            if let Some(c) = d.rule.as_mut().and_then(|r| r.conditions.get_mut(index)) {
+                f(c);
+            }
+        })
+    };
+    let remove = Rc::new(move || {
+        draft.update(|d| {
+            if let Some(r) = d.rule.as_mut() {
+                if r.conditions.len() > 1 {
+                    if index < r.conditions.len() {
                         r.conditions.remove(index);
                     }
-                })
-            },
-        ))
+                } else if let Some(c) = r.conditions.first_mut() {
+                    *c = Condition::default();
+                }
+            }
+        });
+    });
+    condition_editor(get, change, Some(remove))
 }
 
 /// 标签条件的值：从曲库现有标签里选（按小写名排序，忽略大小写去重）。
 /// nsh-base `select`：可搜索（标签多了以后），列表虚拟化。
-fn tag_select(
+pub(super) fn tag_select(
     current: impl Fn() -> String + Copy + 'static,
     pick: impl Fn(String) + Copy + 'static,
 ) -> AnyElement {

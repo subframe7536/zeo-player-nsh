@@ -25,7 +25,7 @@ const ALBUM_COLS: Columns = Columns {
     format: false,
 };
 
-// --- 歌手 ---------------------------------------------------------------------
+// --- 艺术家 ---------------------------------------------------------------------
 
 #[derive(Clone, PartialEq)]
 struct Group {
@@ -153,7 +153,7 @@ pub fn Artists() -> impl IntoElement {
                 let cover_path = stored(group.cover.clone());
                 let art_name = stored(group.title.clone());
                 let header = hero(
-                    "歌手",
+                    "艺术家",
                     when(covers_on, move || {
                         avatar(
                             move || cover_path.get(),
@@ -236,8 +236,8 @@ pub fn Artists() -> impl IntoElement {
                 view()
                     .flex_1()
                     .child(page_header(
-                        || "歌手".into(),
-                        move || format!("{} 位歌手", count.get()),
+                        || "艺术家".into(),
+                        move || format!("{} 位艺术家", count.get()),
                         None,
                         None,
                     ))

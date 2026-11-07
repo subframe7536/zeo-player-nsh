@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::metadata::MetaCache;
 
@@ -112,20 +112,109 @@ pub const DEFAULT_MIN_DURATION_SECS: u32 = 10;
 pub const DEFAULT_MIN_SIZE_KB: u32 = 100;
 
 /// 主题色（强调色）：默认跟随当前曲目封面的主色调（没有封面或封面
-/// 不饱和时回黑白），也可钉住黑白或预设色。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// 不饱和时回黑白），也可钉住黑白或自定义强调色（0xRRGGBB）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeColor {
-    /// 黑白。
+    /// 黑白（主题默认）。
     Neutral,
-    Red,
-    Orange,
-    Green,
-    Blue,
-    Purple,
     /// 当前曲目封面的主色调。
-    #[default]
     Cover,
+    /// 自定义颜色（24-bit RGB，如 0x16a34a）。
+    Custom(u32),
+}
+
+impl Default for ThemeColor {
+    fn default() -> Self {
+        Self::Cover
+    }
+}
+
+impl Serialize for ThemeColor {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Neutral => serializer.serialize_str("neutral"),
+            Self::Cover => serializer.serialize_str("cover"),
+            Self::Custom(rgb) => match *rgb {
+                0xe5263f => serializer.serialize_str("red"),
+                0xea580c => serializer.serialize_str("orange"),
+                0x16a34a => serializer.serialize_str("green"),
+                0x2563eb => serializer.serialize_str("blue"),
+                0x9333ea => serializer.serialize_str("purple"),
+                other => serializer.serialize_str(&format!("#{:06x}", other)),
+            },
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ThemeColor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ThemeColorVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ThemeColorVisitor {
+            type Value = ThemeColor;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a theme color string or custom hex")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<ThemeColor, E>
+            where
+                E: serde::de::Error,
+            {
+                let s = v.trim();
+                let lower = s.to_lowercase();
+                match lower.as_str() {
+                    "neutral" => Ok(ThemeColor::Neutral),
+                    "cover" => Ok(ThemeColor::Cover),
+                    "red" => Ok(ThemeColor::Custom(0xe5263f)),
+                    "orange" => Ok(ThemeColor::Custom(0xea580c)),
+                    "green" => Ok(ThemeColor::Custom(0x16a34a)),
+                    "blue" => Ok(ThemeColor::Custom(0x2563eb)),
+                    "purple" => Ok(ThemeColor::Custom(0x9333ea)),
+                    hex => {
+                        let hex = hex.trim_start_matches('#');
+                        if hex.len() == 6 {
+                            if let Ok(rgb) = u32::from_str_radix(hex, 16) {
+                                return Ok(ThemeColor::Custom(rgb));
+                            }
+                        } else if hex.len() == 3 {
+                            let mut expanded = String::new();
+                            for c in hex.chars() {
+                                expanded.push(c);
+                                expanded.push(c);
+                            }
+                            if let Ok(rgb) = u32::from_str_radix(&expanded, 16) {
+                                return Ok(ThemeColor::Custom(rgb));
+                            }
+                        }
+                        Ok(ThemeColor::Cover)
+                    }
+                }
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<ThemeColor, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(ThemeColor::Custom(v as u32))
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<ThemeColor, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(ThemeColor::Custom(v as u32))
+            }
+        }
+
+        deserializer.deserialize_any(ThemeColorVisitor)
+    }
 }
 
 /// 持久化配置。
@@ -1115,6 +1204,50 @@ mod tests {
         assert!(
             none.normalized().genre_separators.is_empty(),
             "显式清空时不拆分"
+        );
+    }
+
+    #[test]
+    fn theme_color_serde_roundtrip() {
+        assert_eq!(
+            serde_json::from_str::<ThemeColor>(r#""neutral""#).unwrap(),
+            ThemeColor::Neutral
+        );
+        assert_eq!(
+            serde_json::from_str::<ThemeColor>(r#""cover""#).unwrap(),
+            ThemeColor::Cover
+        );
+        assert_eq!(
+            serde_json::from_str::<ThemeColor>(r#""red""#).unwrap(),
+            ThemeColor::Custom(0xe5263f)
+        );
+        assert_eq!(
+            serde_json::from_str::<ThemeColor>(r#""blue""#).unwrap(),
+            ThemeColor::Custom(0x2563eb)
+        );
+        assert_eq!(
+            serde_json::from_str::<ThemeColor>(r##""#123456""##).unwrap(),
+            ThemeColor::Custom(0x123456)
+        );
+        assert_eq!(
+            serde_json::from_str::<ThemeColor>(r#""123456""#).unwrap(),
+            ThemeColor::Custom(0x123456)
+        );
+        assert_eq!(
+            serde_json::to_string(&ThemeColor::Neutral).unwrap(),
+            r#""neutral""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ThemeColor::Cover).unwrap(),
+            r#""cover""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ThemeColor::Custom(0xe5263f)).unwrap(),
+            r#""red""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ThemeColor::Custom(0x123456)).unwrap(),
+            r##""#123456""##
         );
     }
 

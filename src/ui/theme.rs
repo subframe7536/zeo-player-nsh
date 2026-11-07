@@ -68,16 +68,60 @@ pub fn primary_fg() -> AdaptiveColor {
         theme().primary_foreground
     }
 }
-/// 预设强调色（`Neutral` / `Cover` 为 `None`）。
+/// 预设强调色（`Neutral` / `Cover` 为 `None`，`Custom` 返回自适应强调色）。
 pub fn preset_accent(color: ThemeColor) -> Option<AdaptiveColor> {
-    Some(match color {
-        ThemeColor::Neutral | ThemeColor::Cover => return None,
-        ThemeColor::Red => AdaptiveColor::rgb(0xe5263f, 0xff4d63),
-        ThemeColor::Orange => AdaptiveColor::rgb(0xea580c, 0xfb923c),
-        ThemeColor::Green => AdaptiveColor::rgb(0x16a34a, 0x4ade80),
-        ThemeColor::Blue => AdaptiveColor::rgb(0x2563eb, 0x60a5fa),
-        ThemeColor::Purple => AdaptiveColor::rgb(0x9333ea, 0xc084fc),
-    })
+    match color {
+        ThemeColor::Neutral | ThemeColor::Cover => None,
+        ThemeColor::Custom(rgb) => Some(custom_accent(rgb)),
+    }
+}
+
+/// 将 24-bit RGB（0xRRGGBB）转为浅色 / 深色自适应强调色。
+/// 预设颜色保持原精准调校值，其余任意颜色按色相 / 饱和度生成自适应对比度。
+pub fn custom_accent(rgb: u32) -> AdaptiveColor {
+    match rgb {
+        0xe5263f => AdaptiveColor::rgb(0xe5263f, 0xff4d63),
+        0xea580c => AdaptiveColor::rgb(0xea580c, 0xfb923c),
+        0x16a34a => AdaptiveColor::rgb(0x16a34a, 0x4ade80),
+        0x2563eb => AdaptiveColor::rgb(0x2563eb, 0x60a5fa),
+        0x9333ea => AdaptiveColor::rgb(0x9333ea, 0xc084fc),
+        _ => {
+            let (h, s, _) = rgb_to_hsl(rgb);
+            if s < 0.08 {
+                AdaptiveColor::rgb(rgb, rgb)
+            } else {
+                accent_of(h, s)
+            }
+        }
+    }
+}
+
+fn rgb_to_hsl(rgb: u32) -> (f32, f32, f32) {
+    let r = ((rgb >> 16) & 0xff) as f32 / 255.0;
+    let g = ((rgb >> 8) & 0xff) as f32 / 255.0;
+    let b = (rgb & 0xff) as f32 / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let mut h = if delta == 0.0 {
+        0.0
+    } else if (max - r).abs() < f32::EPSILON {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if (max - g).abs() < f32::EPSILON {
+        60.0 * (((b - r) / delta) + 2.0)
+    } else {
+        60.0 * (((r - g) / delta) + 4.0)
+    };
+    if h < 0.0 {
+        h += 360.0;
+    }
+    let l = (max + min) / 2.0;
+    let s = if delta == 0.0 {
+        0.0
+    } else {
+        delta / (1.0 - (2.0 * l - 1.0).abs())
+    };
+    (h, s, l)
 }
 /// 封面主色调（色相圈、饱和度）→ 浅 / 深色各一份强调色：饱和度与亮度
 /// 压进可读范围，避免荧光色或太浅看不清。
