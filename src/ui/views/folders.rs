@@ -46,8 +46,8 @@ const FOLDER_COLS: Columns = Columns {
     format: true,
 };
 
-/// 目录树行高与每层缩进。
-const TREE_ROW: f32 = 30.0;
+/// 目录树行高（与侧栏 adaptive_row 统一为 34pt，消除收缩时的垂直位移）与每层缩进。
+const TREE_ROW: f32 = 34.0;
 const INDENT: f32 = 14.0;
 
 #[derive(Default)]
@@ -403,7 +403,7 @@ impl DragCtx {
         if !(ox..=ox + w).contains(&page.x.0) {
             return None;
         }
-        let row_h = if sidebar_collapsed() { 34.0 } else { TREE_ROW };
+        let row_h = TREE_ROW;
         let index = ((page.y.0 - oy + self.scroll.get_untracked()) / row_h).floor();
         if index < 0.0 {
             return None;
@@ -1880,7 +1880,7 @@ fn tree_cell(
     };
     let cell = view()
         .w_full()
-        .h(move || px(if rail() { 34.0 } else { TREE_ROW }))
+        .h(px(TREE_ROW))
         .pl(move || {
             if rail() {
                 px(16.0)
@@ -1968,6 +1968,9 @@ fn tree_cell(
                 .flex_1()
                 .min_w(px(0.0))
                 .opacity(fade)
+                .transition_opacity()
+                .duration(200.0)
+                .ease_in_out()
                 .flex_row()
                 .items_center()
                 .justify_between()

@@ -58,7 +58,7 @@ fn put_cached_full(path: &str, row: FullRow) {
     cache.push((path.to_owned(), row));
 }
 
-/// 面板（w 380，左边框 + 浮动阴影）：单选表单 / 批量修改，按选中数切换——两个
+/// 面板（自适应宽 280-380，左边框 + 浮动阴影）：单选表单 / 批量修改，按选中数切换——两个
 /// 分支各按「单选路径 / 批量集合」memo，集合没变不重建（草稿留得住）。
 pub(super) fn panel(
     displayed: Memo<Rc<Vec<TrackEntry>>>,
@@ -76,7 +76,16 @@ pub(super) fn panel(
         (set.len() >= 2).then(|| Rc::new(set.iter().cloned().collect::<Vec<String>>()))
     });
     view()
-        .w(px(380.0))
+        .w(move || {
+            let cw = crate::ui::components::tracks::content_width();
+            if cw < 760.0 {
+                px(280.0)
+            } else if cw < 960.0 {
+                px(320.0)
+            } else {
+                px(380.0)
+            }
+        })
         .flex_shrink_0()
         .rounded(px(12.0))
         .border_1()

@@ -437,31 +437,55 @@ pub fn page() -> View {
             if empty.get() {
                 return no_library().into_element();
             }
+            let pad_x = move || {
+                if crate::ui::components::tracks::content_width() < 860.0 {
+                    16.0
+                } else {
+                    32.0
+                }
+            };
+            let gap_w = move || {
+                if crate::ui::components::tracks::content_width() < 860.0 {
+                    10.0
+                } else {
+                    16.0
+                }
+            };
+            let filter_w = move || {
+                if crate::ui::components::tracks::content_width() < 860.0 {
+                    180.0
+                } else {
+                    260.0
+                }
+            };
             view()
                 .flex_1()
                 .min_w(px(0.0))
-                .child(page_header(
-                    || "元数据".into(),
-                    move || {
-                        format!(
-                            "{} 首曲目 · 已选 {} 首",
-                            count.get(),
-                            selected.with(|set| set.len())
-                        )
-                    },
-                    None,
-                    None,
-                ))
+                .child(
+                    page_header(
+                        || "元数据".into(),
+                        move || {
+                            format!(
+                                "{} 首曲目 · 已选 {} 首",
+                                count.get(),
+                                selected.with(|set| set.len())
+                            )
+                        },
+                        None,
+                        None,
+                    )
+                    .px(move || px(pad_x())),
+                )
                 .child(
                     view()
                         .flex_row()
                         .items_center()
                         .gap(px(8.0))
-                        .px(px(32.0))
+                        .px(move || px(pad_x()))
                         .pb(px(12.0))
                         .child(
                             input_field(true)
-                                .w(px(280.0))
+                                .w(move || px(filter_w()))
                                 .label("筛选")
                                 .placeholder("筛选文件名、标题、艺术家、专辑")
                                 .default_value(untracked(|| filter.get()))
@@ -553,23 +577,41 @@ pub fn page() -> View {
                                 view()
                                     .flex_row()
                                     .gap(px(8.0))
-                                    .child(text_button(
-                                        Variant::Outline,
-                                        Size::Xs,
-                                        None,
-                                        "重命名文件…",
-                                        move || rename_open.set(true),
-                                    ))
-                                    .child(text_button(
-                                        Variant::Ghost,
-                                        Size::Xs,
-                                        None,
-                                        "取消选择",
-                                        move || {
-                                            selected.set(BTreeSet::new());
-                                            anchor.set(None);
-                                        },
-                                    ))
+                                    .child(
+                                        text_button(
+                                            Variant::Outline,
+                                            Size::Xs,
+                                            None,
+                                            if crate::ui::components::tracks::content_width()
+                                                < 860.0
+                                            {
+                                                "重命名…"
+                                            } else {
+                                                "重命名文件…"
+                                            },
+                                            move || rename_open.set(true),
+                                        )
+                                        .accessibility_label("重命名文件…"),
+                                    )
+                                    .child(
+                                        text_button(
+                                            Variant::Ghost,
+                                            Size::Xs,
+                                            None,
+                                            if crate::ui::components::tracks::content_width()
+                                                < 860.0
+                                            {
+                                                "取消"
+                                            } else {
+                                                "取消选择"
+                                            },
+                                            move || {
+                                                selected.set(BTreeSet::new());
+                                                anchor.set(None);
+                                            },
+                                        )
+                                        .accessibility_label("取消选择"),
+                                    )
                             },
                         )),
                 )
@@ -578,9 +620,9 @@ pub fn page() -> View {
                         .flex_1()
                         .min_h(px(0.0))
                         .flex_row()
-                        .px(px(32.0))
+                        .px(move || px(pad_x()))
                         .pb(px(BAR_SPACE))
-                        .gap(px(16.0))
+                        .gap(move || px(gap_w()))
                         .child(
                             view()
                                 .flex_1()

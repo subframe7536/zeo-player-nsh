@@ -247,59 +247,36 @@ pub(crate) fn add_playlist_button() -> AnyElement {
 pub(crate) fn sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> impl IntoElement {
     let s = store();
     let fade = super::super::frame::label_fade(rail);
-    // 图标栏时顶替表头「+」的一行：只在 rail 出现（不占高度），
-    // 加号与其他行的图标同列。
-    let add_row = add_playlist_menu(
-        view()
-            .w_full()
-            .h(move || px(if rail() { 34.0 } else { 0.0 }))
-            .opacity(move || if rail() { 1.0_f32 } else { 0.0 })
-            .overflow_hidden()
-            .flex_row()
-            .items_center()
-            .pl(px(10.0))
-            .rounded(px(8.0))
-            .role(AccessibilityRole::Button)
-            .label("新建歌单")
-            .hover(|st| st.bg(move || primary().opacity(0.08)))
-            .active(|st| st.opacity(0.7))
-            .child(
-                view()
-                    .size(px(20.0))
-                    .items_center()
-                    .justify_center()
-                    .child(icon(Icon::Plus, 17.0, sidebar_fg)),
-            ),
-    );
-    scroll().flex_1().child(
-        view()
-            .px(px(10.0))
-            .pb(px(8.0))
-            .gap(px(2.0))
-            .child(add_row)
-            .child(dynamic(move || {
-                let lists = s.playlists.get();
-                // 「我喜欢」固定在最前（`ensure_favorites`），其余按创建顺序。
-                let mut rows: Vec<AnyElement> =
-                    lists.iter().map(|p| sidebar_row(p, rail)).collect();
-                if lists.iter().all(|p| p.favorite) {
-                    rows.push(
-                        view()
-                            .opacity(fade)
-                            .child(
-                                text("点 + 新建歌单，或在曲目上点右键添加。")
-                                    .text_size(px(12.0))
-                                    .line_height(px(18.0))
-                                    .text_color(faint())
-                                    .px(px(10.0))
-                                    .py(px(4.0)),
-                            )
-                            .into_element(),
-                    );
-                }
-                rows
-            })),
-    )
+    scroll()
+        .flex_1()
+        .child(
+            view()
+                .px(px(10.0))
+                .pb(px(8.0))
+                .gap(px(2.0))
+                .child(dynamic(move || {
+                    let lists = s.playlists.get();
+                    // 「我喜欢」固定在最前（`ensure_favorites`），其余按创建顺序。
+                    let mut rows: Vec<AnyElement> =
+                        lists.iter().map(|p| sidebar_row(p, rail)).collect();
+                    if lists.iter().all(|p| p.favorite) {
+                        rows.push(
+                            view()
+                                .opacity(fade)
+                                .child(
+                                    text("点 + 新建歌单，或在曲目上点右键添加。")
+                                        .text_size(px(12.0))
+                                        .line_height(px(18.0))
+                                        .text_color(faint())
+                                        .px(px(10.0))
+                                        .py(px(4.0)),
+                                )
+                                .into_element(),
+                        );
+                    }
+                    rows
+                })),
+        )
 }
 
 fn sidebar_row(p: &Playlist, rail: impl Fn() -> bool + Copy + 'static) -> AnyElement {

@@ -11,10 +11,10 @@ mod views;
 
 use std::rc::Rc;
 
+use nsh_core::ContextMenuEvent;
 use nsh_core::desktop::TitleBarStyle;
 use nsh_core::element::desktop::set_title_bar;
 use nsh_core::prelude::*;
-use nsh_core::{ContextMenuEvent, TouchEvent};
 
 use theme::*;
 
@@ -47,6 +47,10 @@ pub fn App() -> impl IntoElement {
     #[cfg(target_os = "windows")]
     frame::caption::install();
     on_key("space", |_| store::toggle());
+    on_key("mod+k", |_| {
+        let s = store::store();
+        s.search_open.update(|open| *open = !*open);
+    });
 
     let full_open = signal(false);
     // 正在收起（淡出动画中）；收起途中再打开会取消它。
@@ -96,30 +100,24 @@ pub fn App() -> impl IntoElement {
     let nav = global::<Nav>();
 
     let queue_open = signal(false);
-    // 内容区顶部常驻搜索框的焦点句柄；rail 模式的放大镜按钮也聚焦它。
-    let search_page = frame::SearchFocus::new();
     // 窗口隐藏到托盘时整个界面拆掉（视图、图片、列表都释放），只留播放与
     // 状态轮询；再次显示时重建，导航位置在全局信号里，不丢。
     // 侧栏与内容区一直铺到窗口顶边，标题栏透明地浮在上面；全屏播放盖住
     // 整个窗口（包括标题栏），只有系统的窗口按钮还在它上面。
     let shell = move || {
-        let content = page(nav, search_page);
+        let content = page(nav);
         let (open, close) = (open.clone(), close.clone());
         view()
             .flex_1()
             .child(
-                view()
-                    .flex_1()
-                    .flex_row()
-                    .child(frame::sidebar(search_page))
-                    .child(
-                        view()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .child(view().h(move || px(top_inset())).flex_shrink_0())
-                            .child(view().flex_1().child(content))
-                            .child(frame::bar::player_bar(open, queue_open)),
-                    ),
+                view().flex_1().flex_row().child(frame::sidebar()).child(
+                    view()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .child(view().h(move || px(top_inset())).flex_shrink_0())
+                        .child(view().flex_1().child(content))
+                        .child(frame::bar::player_bar(open, queue_open)),
+                ),
             )
             .child(views::folders::drag_ghost())
             .child(frame::title_bar())
@@ -137,11 +135,6 @@ pub fn App() -> impl IntoElement {
         .text_color(fg())
         // 文字样式由里面的文字继承：整个界面跟着设置里的字体走。
         .font_family(store::font_family)
-        // 点在搜索框以外的地方时让它失去焦点（否则焦点一直留在里面，
-        // Space 等快捷键也被它吃掉）。
-        .on_touch(move |e: &TouchEvent| {
-            search_page.outside_touch(e);
-        })
         // 右键事件只派发给最近的监听者：点到没有菜单的地方才轮到根——
         // 清掉「当前菜单」令牌，开着的菜单随之关闭（右键不产生
         // PressOutside，不这样处理旧菜单会一直留着）。
@@ -151,6 +144,10 @@ pub fn App() -> impl IntoElement {
         .child(when(
             move || s.settings.get() && !s.hidden.get(),
             views::settings_dialog,
+        ))
+        .child(when(
+            move || s.search_open.get() && !s.hidden.get(),
+            views::command_palette_dialog,
         ))
         .child(when(
             move || s.editor.with(Option::is_some),
@@ -178,39 +175,18 @@ pub fn App() -> impl IntoElement {
     root
 }
 
-fn page(nav: Signal<Nav>, search_page: frame::SearchFocus) -> AnyElement {
-    let s = store::store();
-    let search_mode = move || s.search_open.get() || !s.search.with(|q| q.trim().is_empty());
-    // 搜索框常驻内容区顶部，不再出现在侧栏。高度由 search_mode 驱动：
-    // 非搜索页收至 0，避免 when 挂卸节点导致重建丢焦点。
-    let search_bar_h = 20.0 + 44.0 + 4.0; // pt + pb + 框高
-    // 输入框挂在 `dynamic` 外面：输入时只重建下面的结果，框本身不重建
-    // （不然每个键击都把焦点弄丢）。
+fn page(nav: Signal<Nav>) -> AnyElement {
     view()
         .flex_1()
-        .child(
-            view()
-                .h(move || px(if search_mode() { search_bar_h } else { 0.0 }))
-                .overflow_hidden()
-                .px(px(24.0))
-                .pt(px(20.0))
-                .pb(px(4.0))
-                .child(frame::search_box(search_page, false, true)),
-        )
-        .child(dynamic(move || {
-            if search_mode() {
-                return views::search_results().into_element();
-            }
-            match nav.get() {
-                Nav::Home => views::home().into_element(),
-                Nav::Library => views::library().into_element(),
-                Nav::Metadata => views::metadata::page().into_element(),
-                Nav::Folders => views::folders().into_element(),
-                Nav::Artists => views::artists().into_element(),
-                Nav::Albums => views::albums().into_element(),
-                Nav::Genres => views::genres().into_element(),
-                Nav::Playlist(id) => views::playlists::page(id).into_element(),
-            }
+        .child(dynamic(move || match nav.get() {
+            Nav::Home => views::home().into_element(),
+            Nav::Library => views::library().into_element(),
+            Nav::Metadata => views::metadata::page().into_element(),
+            Nav::Folders => views::folders().into_element(),
+            Nav::Artists => views::artists().into_element(),
+            Nav::Albums => views::albums().into_element(),
+            Nav::Genres => views::genres().into_element(),
+            Nav::Playlist(id) => views::playlists::page(id).into_element(),
         }))
         .into_element()
 }

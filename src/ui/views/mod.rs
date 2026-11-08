@@ -22,7 +22,10 @@ use super::store::{format_total, play_list, store};
 use super::theme::*;
 use crate::config::{TrackEntry, library_store};
 
+mod command_palette;
+
 pub(super) use self::browse::{albums, artists, genres, tags_sidebar_list};
+pub(super) use self::command_palette::dialog as command_palette_dialog;
 pub(super) use self::edit_info::edit_info_dialog;
 pub(super) use self::folders::{folders, tree_sidebar_list};
 pub(super) use self::home::home;
@@ -335,34 +338,6 @@ pub fn library() -> View {
             .child(list)
             .into_element()
     }))
-}
-
-/// 搜索页的结果列表：标题 / 歌手 / 专辑 / 文件名匹配（不分大小写）。
-/// 点一首播放时，播放队列就是这份结果列表。页顶的输入框在 `page()` 里
-/// （放在 `dynamic` 外面，输入时不重建）。
-pub fn search_results() -> View {
-    let s = store();
-    let items = computed(move || {
-        let query = s.search.with(|q| q.trim().to_lowercase());
-        let tracks = s.tracks.get();
-        Rc::new(search_hits(&query, &tracks))
-    });
-    let count = computed(move || items.with(|v| v.len()));
-    let header = view()
-        .child(page_header(
-            || "搜索".into(),
-            move || format!("{} 个结果", count.get()),
-            None,
-            None,
-        ))
-        .child(track_columns(Columns::ALL));
-    view().flex_1().child(
-        track_list(items, Columns::ALL, header.into_element()).empty(empty_state(
-            Icon::Search,
-            "没有匹配的曲目",
-            "搜索匹配曲目的标题、歌手、专辑和文件名。",
-        )),
-    )
 }
 
 // --- 路径 ---------------------------------------------------------------------

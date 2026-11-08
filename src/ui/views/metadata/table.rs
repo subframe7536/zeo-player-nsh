@@ -559,7 +559,12 @@ pub(super) fn table(
                         .with(|m| m.get(&key).copied())
                         .unwrap_or(default_w);
                     let start_mouse_x = e.page.x.0;
-                    let table_left = crate::ui::theme::sidebar_width() + 32.0;
+                    let pad_x = if crate::ui::components::tracks::content_width() < 860.0 {
+                        16.0
+                    } else {
+                        32.0
+                    };
+                    let table_left = crate::ui::theme::sidebar_width() + pad_x;
                     let start_guide_x = start_mouse_x - table_left;
                     drag_origin.set(Some((start_mouse_x, cur_w, start_guide_x)));
                     guide_line_x.set(Some(start_guide_x));

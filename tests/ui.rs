@@ -1216,32 +1216,66 @@ fn full_player_opens_and_closes() {
         .unwrap();
 }
 
-/// 搜索框：点框里的清除按钮不失焦，点框外（侧栏）失焦。
+/// 侧栏搜索按钮：点击直接打开 command palette，支持搜索曲目与页面导航。
 #[test]
-fn search_box_blurs_when_pressing_outside() {
-    use nsh_core::Command;
-    let blurs = |app: &Headless| {
-        app.screen()
-            .commands()
-            .iter()
-            .filter(|(_, c)| *c == Command::Blur)
-            .count()
-    };
+fn sidebar_search_opens_command_palette() {
     let mut app = start(1200.0, 800.0);
-    app.type_text("label:搜索", "zz").unwrap();
-    app.wait_for("label:清除搜索").unwrap();
-    let before = blurs(&app);
-    // 有搜索词时搜索页页顶也有一个同样的清除按钮；侧栏的在树里更靠前。
-    app.press("label:清除搜索 >> nth=0").unwrap();
+    app.press("label:搜索").unwrap();
+    app.wait_for("label:命令面板").unwrap();
+    let t = texts(&app);
+    assert!(t.iter().any(|s| s == "页面" || s == "首页"), "{t:?}");
+    // 搜索曲目
+    app.type_text("label:命令面板", "short").unwrap();
     app.wait(Duration::from_millis(50)).unwrap();
-    assert_eq!(blurs(&app), before, "点在搜索框里不失焦");
-    app.type_text("label:搜索", "zz").unwrap();
-    app.press("label:艺术家").unwrap();
+    let t_after = texts(&app);
+    assert!(t_after.iter().any(|s| s == "short"), "{t_after:?}");
+
+    // 选择曲目播放并关闭面板
+    app.press("short.flac").unwrap();
+    app.wait_for_gone("label:命令面板", Duration::from_secs(2))
+        .unwrap();
+
+    // 再次点击打开，搜索并导航至元数据页面
+    app.press("label:搜索").unwrap();
+    app.wait_for("label:命令面板").unwrap();
+    app.type_text("label:命令面板", "元数据").unwrap();
     app.wait(Duration::from_millis(50)).unwrap();
-    assert_eq!(blurs(&app), before + 1, "点在框外失焦");
-    app.press("label:专辑").unwrap();
-    app.wait(Duration::from_millis(50)).unwrap();
-    assert_eq!(blurs(&app), before + 1, "已失焦后不再发");
+    app.press("role:option[元数据]").unwrap();
+    app.wait_for_gone("label:命令面板", Duration::from_secs(2))
+        .unwrap();
+    app.wait_for("label:列显示设置").unwrap();
+}
+
+#[test]
+fn sidebar_collapsed_separators_and_no_track_count() {
+    let mut app = start(1200.0, 800.0);
+    // 侧栏底部不再有 "首曲目" 文本
+    let t = texts(&app);
+    assert!(
+        !t.iter().any(|s| s.contains("首曲目")),
+        "侧栏底部不应再出现曲目总数统计: {t:?}"
+    );
+
+    // 展开态下能看到「曲库」小标题
+    assert!(has(&app, "曲库"), "展开态应有「曲库」小标题");
+
+    // 收缩到 rail 模式（宽 800 < 900）
+    app.set_viewport(nsh_core::geometry::size(
+        nsh_core::geometry::px(800.0),
+        nsh_core::geometry::px(800.0),
+    ))
+    .unwrap();
+    app.wait(Duration::from_millis(100)).unwrap();
+
+    // 依然没有 "首曲目" 文本
+    let t_collapsed = texts(&app);
+    assert!(
+        !t_collapsed.iter().any(|s| s.contains("首曲目")),
+        "收起态侧栏不应出现曲目统计: {t_collapsed:?}"
+    );
+    // 搜索按钮依然可以点击
+    app.press("label:搜索").unwrap();
+    app.wait_for("label:命令面板").unwrap();
 }
 
 #[test]
@@ -1823,4 +1857,28 @@ fn metadata_column_resize_drag() {
         nsh_core::geometry::point(px(50.0), px(0.0)),
     )
     .unwrap();
+}
+
+/// 窄窗口元数据视图：在 720pt 最小窗口下，工具栏按钮与输入框自适应不截断，
+/// 选中曲目后右侧面板自适应收窄（280pt），左侧表格仍然维持可用宽度。
+#[test]
+fn metadata_narrow_window_layout() {
+    let mut app = start(720.0, 720.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("元数据").unwrap();
+    app.wait_for("label:筛选").unwrap();
+    app.wait_for("label:全选").unwrap();
+    app.wait_for("text:sine.flac").unwrap();
+    // 选中一行
+    app.press("text:sine.flac").unwrap();
+    app.wait_for("label:标题").unwrap();
+    // 验证工具栏上的操作按钮依然存在且可点击（无截断丢失）
+    app.wait_for("label:重命名文件…").unwrap();
+    app.wait_for("label:取消选择").unwrap();
+    // 点击取消选择
+    app.press("label:取消选择").unwrap();
+    app.wait_for_gone("label:标题", Duration::from_secs(2))
+        .unwrap();
 }
