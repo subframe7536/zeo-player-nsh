@@ -311,11 +311,7 @@ pub(super) fn table(
     };
 
     let mut classes = DataTableClasses::default();
-    // 固定列分隔线与投影：线颜色加深且投射平滑阴影
-    classes.fixed_edge = Some(SharedString::from(
-        "bg-foreground/25 shadow-[4px_0_12px_rgba(0,0,0,0.18)]",
-    ));
-    // sticky 表头：底边框颜色加深（border-b border-foreground/25）
+    // sticky 表头：底边框颜色（border-b border-foreground/25）
     classes.header = Some(SharedString::from("bg-card border-b border-foreground/25"));
     // 表头单元格：竖向分隔网格线（border-r border-border/50）
     classes.header_cell = Some(SharedString::from(

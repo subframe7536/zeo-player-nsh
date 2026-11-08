@@ -266,12 +266,13 @@ fn single_panel(
             close,
         ))
         .child(
-            scroll().flex_1().min_h(px(0.0)).child(
+            scroll().key(path.clone()).flex_1().min_h(px(0.0)).child(
                 view()
                     .px(px(16.0))
                     .pt(px(14.0))
                     .pb(px(16.0))
                     .gap(px(12.0))
+                    .overflow_hidden()
                     // 状态行是滚动区第一条：写回 / 改名报错（红）与
                     // 「已保存」（淡色），空着不占位。
                     .child(when(
@@ -582,6 +583,7 @@ fn section(title: &'static str, rows: Vec<View>) -> View {
         .border_1()
         .border_color(border().opacity(0.6))
         .bg(nsh_base::theme().background)
+        .overflow_hidden()
         .gap(px(10.0))
         .child(section_title(title))
         .children(rows)
@@ -799,6 +801,7 @@ fn multi_row(
                 .max_h(px(max_height))
                 .py(px(10.0))
                 .multiline(true)
+                .overflow_hidden()
                 .label(label)
                 .default_value(initial)
                 .readonly(move || draft.with(|d| d.saving))
@@ -1443,6 +1446,7 @@ fn batch_panel(
         .pt(px(16.0))
         .pb(px(16.0))
         .gap(px(16.0))
+        .overflow_hidden()
         // 消息行是滚动区第一条（同单选面板的状态行），空着不占位。
         .child(when(
             move || draft.with(|d| d.message.is_some()),
@@ -1491,7 +1495,7 @@ fn batch_panel(
             ],
             close,
         ))
-        .child(scroll().flex_1().min_h(px(0.0)).child(form))
+        .child(scroll().key("batch").flex_1().min_h(px(0.0)).child(form))
 }
 
 /// 一行的当前字段值：行已加载用标签值，未加载回落 `TrackEntry`。
@@ -1948,5 +1952,54 @@ mod tests {
         assert_eq!(case_convert("中文abc", CaseOp::Title), "中文Abc");
         assert_eq!(case_convert("A/B", CaseOp::Lower), "a/b");
         assert_eq!(case_convert("a b", CaseOp::Upper), "A B");
+    }
+
+    #[component]
+    fn MultiRowOverflowTest() -> impl IntoElement {
+        crate::ui::store::install();
+        let p = "mock.flac".to_owned();
+        let rows = signal(HashMap::new());
+        let full = signal(Some((
+            HashMap::from([
+                (TagField::Lyrics, "line\n".repeat(100)),
+                (TagField::Comment, "comment\n".repeat(50)),
+            ]),
+            Some("FLAC"),
+            None,
+        )));
+        let draft = signal(SingleDraft {
+            path: p.clone(),
+            original: HashMap::new(),
+            values: HashMap::new(),
+            cover: None,
+            cover_src: None,
+            saving: false,
+            saved: false,
+            error: None,
+        });
+        scroll().flex_1().min_h(px(0.0)).child(
+            view()
+                .overflow_hidden()
+                .child(single_form(p, draft, rows, full)),
+        )
+    }
+
+    #[test]
+    fn multiline_overflow_does_not_expand_scroll_content() {
+        use nsh_core::geometry::{px, size};
+        use nsh_engine::{EngineConfig, Root};
+        use nsh_testing::Headless;
+        let theme =
+            nsh_base::Theme::from_json(include_str!("../../../../theme.json")).expect("theme.json");
+        let mut config =
+            EngineConfig::new(Root::of::<MultiRowOverflowTest>().tokens(theme.into_tokens()));
+        config.ui_sets = vec![nsh_base::registry(), crate::registry()];
+        config.viewport = size(px(400.0), px(800.0));
+        let mut app = Headless::start(config).expect("start");
+        app.wait_for("基本信息").unwrap();
+        // Since lyrics and comment have overflow_hidden, their 100 lines of text
+        // are clipped within max_h (260pt and 120pt) and do not expand the scroll content.
+        let err = app.scroll("text:基本信息", px(-1.0)).unwrap_err();
+        assert!(err.contains("cannot scroll by -1"));
     }
 }
