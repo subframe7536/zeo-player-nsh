@@ -1760,8 +1760,6 @@ fn metadata_panel_close_clears_selection() {
         .unwrap();
 }
 
-/// 已选中行再按一次（非选择列、无修饰键）：只取消它，单选面板随之
-/// 收起。
 #[test]
 fn metadata_row_press_toggles_selection_off() {
     let mut app = start(1400.0, 800.0);
@@ -1777,4 +1775,52 @@ fn metadata_row_press_toggles_selection_off() {
     app.press("text:测试歌曲").unwrap();
     app.wait_for_gone("label:标题", Duration::from_secs(5))
         .unwrap();
+}
+
+#[test]
+fn metadata_column_selector_opens() {
+    let mut app = start(1400.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("元数据").unwrap();
+    app.wait_for("label:列显示设置").unwrap();
+    assert!(texts(&app).iter().any(|t| t == "显示列 (15/24)"));
+
+    // 打开列设置下拉菜单
+    app.press("label:列显示设置").unwrap();
+    app.wait_for("text:选择显示列").unwrap();
+    app.wait_for("text:基本信息").unwrap();
+    app.wait_for("text:人员与版权").unwrap();
+    app.wait_for("text:封面与歌词").unwrap();
+    app.wait_for("text:ReplayGain").unwrap();
+
+    // 勾选未选中的「作曲」
+    app.press("text:作曲").unwrap();
+    app.wait_for("text:显示列 (16/24)").unwrap();
+
+    // 点击「默认」还原为 15 列
+    app.press("text:默认").unwrap();
+    app.wait_for("text:显示列 (15/24)").unwrap();
+
+    // 验证遮罩层存在并点击遮罩层可关闭弹窗
+    app.wait_for("id:column_selector_overlay").unwrap();
+    app.press("id:column_selector_overlay").unwrap();
+    app.wait_for_gone("text:选择显示列", std::time::Duration::from_millis(1000))
+        .unwrap();
+}
+
+#[test]
+fn metadata_column_resize_drag() {
+    let mut app = start(1400.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("元数据").unwrap();
+    app.wait_for("id:resize:title").unwrap();
+    app.drag(
+        "id:resize:title",
+        nsh_core::geometry::point(px(50.0), px(0.0)),
+    )
+    .unwrap();
 }

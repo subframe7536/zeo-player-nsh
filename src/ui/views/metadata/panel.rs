@@ -151,6 +151,7 @@ struct SingleDraft {
 
 /// 行（`MetaRow`）值 → 种子映射：注释 / 歌词在 MetaRow 里是截断的，
 /// 不种（完整值由后台读回填）。
+#[allow(dead_code)]
 fn row_seed(row: &MetaRow) -> HashMap<TagField, String> {
     row.fields
         .iter()
@@ -171,9 +172,7 @@ fn single_panel(
     let initial_values = cached
         .as_ref()
         .map(|(fields, _, _)| fields.clone())
-        .or_else(|| rows.with_untracked(|r| r.get(&path).map(|row| row_seed(row))))
         .unwrap_or_default();
-    let seeded = signal(cached.is_some() || !initial_values.is_empty());
     let full = signal(cached.clone());
     let alive = Arc::new(AtomicBool::new(true));
     cleanup({
@@ -225,28 +224,14 @@ fn single_panel(
             }
             put_cached_full(&read, res.clone());
             let (fields, tag_type, added) = res;
-            let row_seeded = seeded.get_untracked();
-            seeded.set(true);
             draft.update(|d| {
-                if row_seeded {
-                    for f in [TagField::Comment, TagField::Lyrics] {
-                        d.values
-                            .insert(f, fields.get(&f).cloned().unwrap_or_default());
-                    }
-                } else {
-                    d.values = fields.clone();
-                }
+                d.values = fields.clone();
                 d.original = fields.clone();
             });
             full.set(Some((fields, tag_type, added)));
         });
     }
 
-    // 表单门槛：完整值或行种子谁先到用谁的（行通常先到——表格加载批）。
-    let ready = {
-        let path = path.clone();
-        computed(move || full.get().is_some() || rows.with(|r| r.contains_key(path.as_str())))
-    };
     let file_label = Path::new(&path)
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -307,36 +292,7 @@ fn single_panel(
                             })
                         },
                     ))
-                    .child(dynamic(move || {
-                        if !ready.get() {
-                            return view()
-                                .h(px(160.0))
-                                .items_center()
-                                .justify_center()
-                                .child(
-                                    text("正在读取元数据…")
-                                        .text_size(px(12.0))
-                                        .line_height(px(12.0))
-                                        .text_color(muted_fg()),
-                                )
-                                .into_element();
-                        }
-                        // 行种子兜底（`untracked`：构建期读不把表单
-                        // 订到 rows / full；`full` 先到时已填，这里幂等空转）。
-                        untracked(|| {
-                            if !seeded.get()
-                                && full.get().is_none()
-                                && let Some(seed) = rows.get().get(&path).map(|row| row_seed(row))
-                            {
-                                seeded.set(true);
-                                draft.update(|d| {
-                                    d.original = seed.clone();
-                                    d.values = seed;
-                                });
-                            }
-                        });
-                        single_form(path.clone(), draft, rows, full).into_element()
-                    })),
+                    .child(single_form(path.clone(), draft, rows, full)),
             ),
         )
 }
@@ -460,14 +416,17 @@ fn single_header(
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(fg()),
                         )
-                        .child(icon_button(|| Icon::Edit, 12.0, "重命名", muted_fg, {
-                            let stem = stem.clone();
-                            move || {
-                                rename_state.name_input.set((*stem).clone());
-                                rename_state.err.set(None);
-                                rename_state.renaming.set(true);
-                            }
-                        }))
+                        .child(
+                            icon_button(|| Icon::Edit, 12.0, "重命名", muted_fg, {
+                                let stem = stem.clone();
+                                move || {
+                                    rename_state.name_input.set((*stem).clone());
+                                    rename_state.err.set(None);
+                                    rename_state.renaming.set(true);
+                                }
+                            })
+                            .disabled(move || full.get().is_none() || rename_state.busy.get()),
+                        )
                         .into_element(),
                     text_button(Variant::Default, Size::Xs, None, "保存", {
                         let alive = alive.clone();
@@ -507,16 +466,16 @@ fn single_form(
     full: Signal<Option<FullRow>>,
 ) -> View {
     view()
-        .gap(px(12.0))
+        .gap(px(18.0))
         .child(section(
             "基本信息",
             vec![
-                field_row("标题", TagField::Title, draft),
-                field_row("歌手", TagField::Artist, draft),
-                field_row("专辑", TagField::Album, draft),
-                field_row("专辑歌手", TagField::AlbumArtist, draft),
-                field_row("流派", TagField::Genre, draft),
-                narrow_row("年份", TagField::Year, draft, 64.0),
+                field_row("标题", TagField::Title, draft, full),
+                field_row("歌手", TagField::Artist, draft, full),
+                field_row("专辑", TagField::Album, draft, full),
+                field_row("专辑歌手", TagField::AlbumArtist, draft, full),
+                field_row("流派", TagField::Genre, draft, full),
+                narrow_row("年份", TagField::Year, draft, full, 64.0),
                 pair_row(
                     "音轨",
                     "音轨号",
@@ -524,6 +483,7 @@ fn single_form(
                     "音轨总数",
                     TagField::TrackTotal,
                     draft,
+                    full,
                 ),
                 pair_row(
                     "碟号",
@@ -532,24 +492,25 @@ fn single_form(
                     "碟总数",
                     TagField::DiscTotal,
                     draft,
+                    full,
                 ),
             ],
         ))
         .child(section(
             "人员与版权",
             vec![
-                field_row("作曲", TagField::Composer, draft),
-                field_row("指挥", TagField::Conductor, draft),
-                field_row("作词", TagField::Lyricist, draft),
-                field_row("发行商", TagField::Publisher, draft),
-                field_row("版权", TagField::Copyright, draft),
-                rating_row(draft),
+                field_row("作曲", TagField::Composer, draft, full),
+                field_row("指挥", TagField::Conductor, draft, full),
+                field_row("作词", TagField::Lyricist, draft, full),
+                field_row("发行商", TagField::Publisher, draft, full),
+                field_row("版权", TagField::Copyright, draft, full),
+                rating_row(draft, full),
             ],
         ))
         .child(section(
             "封面与歌词",
             vec![
-                cover_row(draft),
+                cover_row(draft, full),
                 multi_row("歌词", TagField::Lyrics, draft, full, 140.0, 260.0),
                 multi_row("注释", TagField::Comment, draft, full, 64.0, 120.0),
             ],
@@ -557,10 +518,10 @@ fn single_form(
         .child(section(
             "ReplayGain",
             vec![
-                narrow_row("音轨增益", TagField::TrackGain, draft, 88.0),
-                narrow_row("音轨峰值", TagField::TrackPeak, draft, 88.0),
-                narrow_row("专辑增益", TagField::AlbumGain, draft, 88.0),
-                narrow_row("专辑峰值", TagField::AlbumPeak, draft, 88.0),
+                narrow_row("音轨增益", TagField::TrackGain, draft, full, 88.0),
+                narrow_row("音轨峰值", TagField::TrackPeak, draft, full, 88.0),
+                narrow_row("专辑增益", TagField::AlbumGain, draft, full, 88.0),
+                narrow_row("专辑峰值", TagField::AlbumPeak, draft, full, 88.0),
             ],
         ))
         .child(tech_section(&path, rows, full))
@@ -575,15 +536,9 @@ fn section_title(title: &'static str) -> Text {
         .text_color(muted_fg())
 }
 
-/// 一节：卡片框体（细边框 + 圆角 + 微底色），标题 + 间距 10 的若干行。
+/// 一节：标题 + 间距 10 的若干行（无内部卡片圆角边框）。
 fn section(title: &'static str, rows: Vec<View>) -> View {
     view()
-        .p(px(14.0))
-        .rounded(px(10.0))
-        .border_1()
-        .border_color(border().opacity(0.6))
-        .bg(nsh_base::theme().background)
-        .overflow_hidden()
         .gap(px(10.0))
         .child(section_title(title))
         .children(rows)
@@ -598,19 +553,58 @@ fn label_cell(label: &'static str) -> Text {
         .text_color(muted_fg())
 }
 
-/// 一行 `标签 + 输入框`（标签列 64pt，控件占满余宽）。
-fn field_row(label: &'static str, field: TagField, draft: Signal<SingleDraft>) -> View {
-    let initial = untracked(|| {
-        draft
-            .with(|d| d.values.get(&field).cloned())
-            .unwrap_or_default()
-    });
+/// 加载中的输入框占位：与 `input_field` 同款外观，无法获得焦点，文字显示「加载中...」。
+fn loading_input(small: bool, width: Option<f32>) -> View {
+    let t = nsh_base::theme();
+    let pad = match width {
+        Some(w) if w < 70.0 => 4.0,
+        _ => 12.0,
+    };
+    let mut v = view()
+        .h(px(if small { 32.0 } else { 36.0 }))
+        .px(px(pad))
+        .rounded(px(RADIUS_MD))
+        .border_1()
+        .border_color(t.input)
+        .bg(t.card)
+        .items_start()
+        .justify_center()
+        .overflow_hidden();
+    if let Some(w) = width {
+        v = v.w(px(w));
+    } else {
+        v = v.flex_1().min_w(px(0.0));
+    }
+    v.child(
+        text("加载中...")
+            .number_of_lines(1)
+            .text_size(px(12.0))
+            .line_height(px(12.0))
+            .text_color(faint()),
+    )
+}
+
+/// 一行 `标签 + 输入框`（标签列 72pt，控件占满余宽）。
+fn field_row(
+    label: &'static str,
+    field: TagField,
+    draft: Signal<SingleDraft>,
+    full: Signal<Option<FullRow>>,
+) -> View {
     view()
         .flex_row()
         .items_center()
         .gap(px(8.0))
         .child(label_cell(label))
-        .child(
+        .child(dynamic(move || {
+            if full.get().is_none() {
+                return loading_input(true, None).into_element();
+            }
+            let initial = untracked(|| {
+                draft
+                    .with(|d| d.values.get(&field).cloned())
+                    .unwrap_or_default()
+            });
             input_field(true)
                 .flex_1()
                 .min_w(px(0.0))
@@ -622,8 +616,9 @@ fn field_row(label: &'static str, field: TagField, draft: Signal<SingleDraft>) -
                         d.values.insert(field, t.to_owned());
                         d.saved = false;
                     })
-                }),
-        )
+                })
+                .into_element()
+        }))
 }
 
 /// 一行 `标签 + 定宽输入框`（年份 / ReplayGain 类，控件列从同一 x 起）。
@@ -631,6 +626,7 @@ fn narrow_row(
     label: &'static str,
     field: TagField,
     draft: Signal<SingleDraft>,
+    full: Signal<Option<FullRow>>,
     width: f32,
 ) -> View {
     view()
@@ -638,7 +634,12 @@ fn narrow_row(
         .items_center()
         .gap(px(8.0))
         .child(label_cell(label))
-        .child(number_input(field.label(), field, draft, width))
+        .child(dynamic(move || {
+            if full.get().is_none() {
+                return loading_input(true, Some(width)).into_element();
+            }
+            number_input(field.label(), field, draft, width).into_element()
+        }))
 }
 
 /// 一行 `标签 + 号 / 总数`：两个等宽输入，`/` 居中，从控件列起点排。
@@ -649,13 +650,29 @@ fn pair_row(
     b_label: &'static str,
     b: TagField,
     draft: Signal<SingleDraft>,
+    full: Signal<Option<FullRow>>,
 ) -> View {
     view()
         .flex_row()
         .items_center()
         .gap(px(8.0))
         .child(label_cell(label))
-        .child(
+        .child(dynamic(move || {
+            if full.get().is_none() {
+                return view()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(loading_input(true, Some(56.0)))
+                    .child(
+                        text("/")
+                            .text_size(px(13.0))
+                            .line_height(px(13.0))
+                            .text_color(faint()),
+                    )
+                    .child(loading_input(true, Some(56.0)))
+                    .into_element();
+            }
             view()
                 .flex_row()
                 .items_center()
@@ -667,8 +684,9 @@ fn pair_row(
                         .line_height(px(13.0))
                         .text_color(faint()),
                 )
-                .child(number_input(b_label, b, draft, 56.0)),
-        )
+                .child(number_input(b_label, b, draft, 56.0))
+                .into_element()
+        }))
 }
 
 /// 窄数字输入（行内并排用）。
@@ -696,59 +714,80 @@ fn number_input(
         })
 }
 
-/// 评分：5 颗星；点当前星清空。
-fn rating_row(draft: Signal<SingleDraft>) -> View {
-    let star = |n: u32| {
-        let filled = move || {
-            draft.with(|d| {
-                d.values
-                    .get(&TagField::Rating)
-                    .and_then(|v| v.parse::<u32>().ok())
-                    .unwrap_or(0)
-                    >= n
-            })
-        };
-        view()
-            .size(px(22.0))
-            .items_center()
-            .justify_center()
-            .rounded(px(4.0))
-            .role(AccessibilityRole::Button)
-            .label(format!("评分 {n} 星"))
-            .cursor(Cursor::Pointer)
-            .hover(move |st| st.bg(hover()))
-            .on_press(move || {
-                draft.update(|d| {
-                    let current = d.values.get(&TagField::Rating).cloned().unwrap_or_default();
-                    d.values.insert(
-                        TagField::Rating,
-                        if current == n.to_string() {
-                            String::new()
-                        } else {
-                            n.to_string()
-                        },
-                    );
-                    d.saved = false;
-                });
-            })
-            .child(
-                text(move || if filled() { "★" } else { "☆" })
-                    .text_size(px(16.0))
-                    .line_height(px(16.0))
-                    .text_color(move || if filled() { primary() } else { faint() }),
-            )
-    };
+/// 评分：5 颗星；点当前星清空。加载中显示灰星且不可交互。
+fn rating_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow>>) -> View {
     view()
         .flex_row()
         .items_center()
         .gap(px(8.0))
         .child(label_cell("评分"))
-        .child(
+        .child(dynamic(move || {
+            if full.get().is_none() {
+                return view()
+                    .flex_row()
+                    .gap(px(2.0))
+                    .children((1..=5).map(|_| {
+                        view()
+                            .size(px(22.0))
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                text("☆")
+                                    .text_size(px(16.0))
+                                    .line_height(px(16.0))
+                                    .text_color(faint()),
+                            )
+                            .into_element()
+                    }))
+                    .into_element();
+            }
+            let star = |n: u32| {
+                let filled = move || {
+                    draft.with(|d| {
+                        d.values
+                            .get(&TagField::Rating)
+                            .and_then(|v| v.parse::<u32>().ok())
+                            .unwrap_or(0)
+                            >= n
+                    })
+                };
+                view()
+                    .size(px(22.0))
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(4.0))
+                    .role(AccessibilityRole::Button)
+                    .label(format!("评分 {n} 星"))
+                    .cursor(Cursor::Pointer)
+                    .hover(|st| st.bg(hover()))
+                    .on_press(move || {
+                        draft.update(|d| {
+                            let current =
+                                d.values.get(&TagField::Rating).cloned().unwrap_or_default();
+                            d.values.insert(
+                                TagField::Rating,
+                                if current == n.to_string() {
+                                    String::new()
+                                } else {
+                                    n.to_string()
+                                },
+                            );
+                            d.saved = false;
+                        });
+                    })
+                    .child(
+                        text(move || if filled() { "★" } else { "☆" })
+                            .text_size(px(16.0))
+                            .line_height(px(16.0))
+                            .text_color(move || if filled() { primary() } else { faint() }),
+                    )
+            };
             view()
                 .flex_row()
                 .gap(px(2.0))
-                .children((1..=5).map(|n| star(n).into_element())),
-        )
+                .children((1..=5).map(|n| star(n).into_element()))
+                .into_element()
+        }))
 }
 
 /// 多行输入（注释 / 歌词）：限制最大高度（歌词 260pt，注释 120pt）；只在
@@ -780,8 +819,10 @@ fn multi_row(
                     .border_1()
                     .border_color(nsh_base::theme().input)
                     .bg(nsh_base::theme().card)
+                    .overflow_hidden()
                     .child(
-                        text("加载中…")
+                        text("加载中...")
+                            .number_of_lines(1)
                             .text_size(px(13.0))
                             .line_height(px(13.0))
                             .text_color(faint()),
@@ -816,7 +857,7 @@ fn multi_row(
 }
 
 /// 封面行：缩略图 + 更换 / 移除（写内嵌图片）。
-fn cover_row(draft: Signal<SingleDraft>) -> View {
+fn cover_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow>>) -> View {
     let src = move || {
         let d = draft.get();
         match &d.cover {
@@ -826,6 +867,9 @@ fn cover_row(draft: Signal<SingleDraft>) -> View {
         }
     };
     let pick = move || {
+        if full.get().is_none() {
+            return;
+        }
         spawn(async move {
             let picked = blocking(|| {
                 rfd::FileDialog::new()
@@ -855,6 +899,7 @@ fn cover_row(draft: Signal<SingleDraft>) -> View {
             }
         });
     };
+    let busy_or_loading = move || full.get().is_none() || draft.with(|d| d.saving);
     view()
         .flex_row()
         .items_center()
@@ -864,13 +909,10 @@ fn cover_row(draft: Signal<SingleDraft>) -> View {
         .child(
             view()
                 .gap(px(6.0))
-                .child(text_button(
-                    Variant::Outline,
-                    Size::Xs,
-                    None,
-                    "更换图片…",
-                    pick,
-                ))
+                .child(
+                    text_button(Variant::Outline, Size::Xs, None, "更换图片…", pick)
+                        .disabled(busy_or_loading),
+                )
                 .child(
                     text_button(
                         Variant::Outline,
@@ -885,7 +927,7 @@ fn cover_row(draft: Signal<SingleDraft>) -> View {
                             })
                         },
                     )
-                    .disabled(move || draft.with(|d| d.saving)),
+                    .disabled(busy_or_loading),
                 ),
         )
 }
@@ -1437,15 +1479,32 @@ fn batch_panel(
                 .line_height(px(11.0))
                 .text_color(faint()),
         );
+    // 建立所选路径的 TrackEntry 快速查找表（一次 pass），避免三态字段
+    // 计算占位符与批量应用时对全表进行 O(M × N) 线性扫描。
+    let selected_entries: Rc<HashMap<String, TrackEntry>> = Rc::new({
+        let path_set: std::collections::HashSet<&str> = paths.iter().map(|s| s.as_str()).collect();
+        displayed.with_untracked(|v| {
+            v.iter()
+                .filter(|t| path_set.contains(t.path.as_str()))
+                .map(|t| (t.path.clone(), t.clone()))
+                .collect()
+        })
+    });
     let mut fields = view().gap(px(8.0));
     for field in TRI_FIELDS {
-        fields = fields.child(tri_row(*field, paths.clone(), displayed, rows, draft));
+        fields = fields.child(tri_row(
+            *field,
+            paths.clone(),
+            selected_entries.clone(),
+            rows,
+            draft,
+        ));
     }
     let form = view()
         .px(px(16.0))
         .pt(px(16.0))
         .pb(px(16.0))
-        .gap(px(16.0))
+        .gap(px(18.0))
         .overflow_hidden()
         // 消息行是滚动区第一条（同单选面板的状态行），空着不占位。
         .child(when(
@@ -1487,7 +1546,16 @@ fn batch_panel(
                     format!("应用到 {m} 首"),
                     {
                         let paths = paths.clone();
-                        move || apply_batch(paths.clone(), displayed, rows, draft)
+                        let selected_entries = selected_entries.clone();
+                        move || {
+                            apply_batch(
+                                paths.clone(),
+                                selected_entries.clone(),
+                                displayed,
+                                rows,
+                                draft,
+                            )
+                        }
                     },
                 )
                 .disabled(move || draft.with(|d| d.applying))
@@ -1498,45 +1566,12 @@ fn batch_panel(
         .child(scroll().key("batch").flex_1().min_h(px(0.0)).child(form))
 }
 
-/// 一行的当前字段值：行已加载用标签值，未加载回落 `TrackEntry`。
-fn field_of(
-    path: &str,
-    field: TagField,
-    displayed: Memo<Rc<Vec<TrackEntry>>>,
-    rows: &HashMap<String, Arc<MetaRow>>,
-) -> String {
-    if let Some(row) = rows.get(path) {
-        return row.fields.get(&field).cloned().unwrap_or_default();
-    }
-    let Some(t) = displayed.with_untracked(|v| v.iter().find(|t| t.path == path).cloned()) else {
-        return String::new();
-    };
+/// 单首曲目的现有索引字段值（`TrackEntry` 兜底）。
+fn entry_field_of(t: &TrackEntry, field: TagField) -> String {
     match field {
-        TagField::Title => {
-            let stem = Path::new(&t.file_name)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(&t.file_name);
-            if t.title == stem {
-                String::new()
-            } else {
-                t.title.clone()
-            }
-        }
-        TagField::Artist => {
-            if t.artist == "Unknown Artist" {
-                String::new()
-            } else {
-                t.artist.clone()
-            }
-        }
-        TagField::Album => {
-            if t.album == "Unknown Album" {
-                String::new()
-            } else {
-                t.album.clone()
-            }
-        }
+        TagField::Title => t.title.clone(),
+        TagField::Artist => t.artist.clone(),
+        TagField::Album => t.album.clone(),
         TagField::AlbumArtist => t.meta.album_artist.clone(),
         TagField::Genre => t.genres.join("; "),
         TagField::Year => t.year.map(|n| n.to_string()).unwrap_or_default(),
@@ -1545,8 +1580,42 @@ fn field_of(
         TagField::Disc => t.disk.map(|n| n.to_string()).unwrap_or_default(),
         TagField::DiscTotal => t.disk_total.map(|n| n.to_string()).unwrap_or_default(),
         TagField::Composer => t.composers.join("; "),
-        _ => String::new(),
+        TagField::Conductor => t.conductor.clone().unwrap_or_default(),
+        TagField::Lyricist => t.lyricist.clone().unwrap_or_default(),
+        TagField::Publisher => t.publisher.clone().unwrap_or_default(),
+        TagField::Copyright => t.copyright.clone().unwrap_or_default(),
+        TagField::Comment => t.comment.clone().unwrap_or_default(),
+        TagField::Rating => t.rating.map(|r| r.to_string()).unwrap_or_default(),
+        TagField::Lyrics => t.lyrics.clone().unwrap_or_default(),
+        TagField::TrackGain => t
+            .replaygain
+            .track_gain
+            .map(|g| format!("{g:.2}"))
+            .unwrap_or_default(),
+        TagField::TrackPeak => t
+            .replaygain
+            .track_peak
+            .map(|p| format!("{p:.6}"))
+            .unwrap_or_default(),
+        TagField::AlbumGain => t
+            .replaygain
+            .album_gain
+            .map(|g| format!("{g:.2}"))
+            .unwrap_or_default(),
+        TagField::AlbumPeak => t
+            .replaygain
+            .album_peak
+            .map(|p| format!("{p:.6}"))
+            .unwrap_or_default(),
     }
+}
+
+#[allow(dead_code)]
+fn track_seed(t: &TrackEntry) -> HashMap<TagField, String> {
+    TagField::ALL
+        .iter()
+        .map(|&f| (f, entry_field_of(t, f)))
+        .collect()
 }
 
 /// 三态行：标签 + 模式下拉（保持原值 / 统一设为 / 清空）+ 输入框
@@ -1554,7 +1623,7 @@ fn field_of(
 fn tri_row(
     field: TagField,
     paths: Rc<Vec<String>>,
-    displayed: Memo<Rc<Vec<TrackEntry>>>,
+    selected_entries: Rc<HashMap<String, TrackEntry>>,
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
     draft: Signal<BatchDraft>,
 ) -> View {
@@ -1563,7 +1632,15 @@ fn tri_row(
     // 占位：全部选中行同值显示它，否则「多个值」（行加载完会修正）。
     let placeholder = {
         let map = rows.get_untracked();
-        let mut it = paths.iter().map(|p| field_of(p, field, displayed, &map));
+        let mut it = paths.iter().map(|p| {
+            if let Some(row) = map.get(p) {
+                return row.fields.get(&field).cloned().unwrap_or_default();
+            }
+            if let Some(t) = selected_entries.get(p) {
+                return entry_field_of(t, field);
+            }
+            String::new()
+        });
         match it.next() {
             Some(first) if it.all(|v| v == first) && !first.is_empty() => first,
             _ => "多个值".to_owned(),
@@ -1710,6 +1787,7 @@ fn cover_mode_row(draft: Signal<BatchDraft>) -> View {
 /// 覆盖同名字段），后台顺序写回；成功行失效重读。
 fn apply_batch(
     paths: Rc<Vec<String>>,
+    selected_entries: Rc<HashMap<String, TrackEntry>>,
     displayed: Memo<Rc<Vec<TrackEntry>>>,
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
     draft: Signal<BatchDraft>,
@@ -1730,7 +1808,15 @@ fn apply_batch(
         d.staged_num,
         d.staged_case,
         &d.cover,
-        |p, f| field_of(p, f, displayed, &map),
+        |p, f| {
+            if let Some(row) = map.get(p) {
+                return row.fields.get(&f).cloned().unwrap_or_default();
+            }
+            if let Some(t) = selected_entries.get(p) {
+                return entry_field_of(t, f);
+            }
+            String::new()
+        },
     );
     let total = items.len();
     if total == 0 {

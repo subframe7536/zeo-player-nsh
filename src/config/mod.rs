@@ -47,6 +47,38 @@ pub struct TrackShared {
     pub meta: Arc<crate::metadata::MetaInfo>,
 }
 
+impl TrackShared {
+    /// 显示用标题：若标签无标题，回落文件名主干。
+    pub fn display_title(&self) -> &str {
+        if !self.meta.title.is_empty() {
+            &self.meta.title
+        } else {
+            Path::new(&self.file_name)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&self.file_name)
+        }
+    }
+
+    /// 显示用歌手：若标签无歌手，回落 "Unknown Artist"。
+    pub fn display_artist(&self) -> &str {
+        if !self.meta.artist.is_empty() {
+            &self.meta.artist
+        } else {
+            "Unknown Artist"
+        }
+    }
+
+    /// 显示用专辑：若标签无专辑，回落 "Unknown Album"。
+    pub fn display_album(&self) -> &str {
+        if !self.meta.album.is_empty() {
+            &self.meta.album
+        } else {
+            "Unknown Album"
+        }
+    }
+}
+
 impl std::ops::Deref for TrackShared {
     type Target = crate::metadata::MetaInfo;
 

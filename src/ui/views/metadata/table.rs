@@ -1,16 +1,20 @@
 //! 表格：nsh-base `DataTable` 的列配置（首列选择标记 + 固定文件名 + 22
 //! 个标签列，对应 spec §一）、单元格文本 / 排序比较与行选择交互。
 
+use std::borrow::Cow;
+use std::cell::Cell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use nsh_base::{
     DataTableAlign, DataTableClasses, DataTableColumn, DataTablePress, DataTableRows,
     DataTableSelection, DataTableSort, data_table,
 };
 use nsh_core::prelude::*;
+use nsh_core::{Cursor, PointerEvents};
 
 use super::super::super::theme::*;
 use super::{CoverState, MetaRow};
@@ -18,7 +22,7 @@ use crate::config::TrackEntry;
 use crate::metadata::write::TagField;
 
 /// 标签列：key、标题、宽（pt）、对齐、可排序（spec §一）。
-const COLUMNS: &[(&str, &str, f32, DataTableAlign, bool)] = &[
+pub(super) const COLUMNS: &[(&str, &str, f32, DataTableAlign, bool)] = &[
     ("file_name", "文件名", 200.0, DataTableAlign::Start, true),
     ("title", "标题", 180.0, DataTableAlign::Start, true),
     ("artist", "艺术家", 150.0, DataTableAlign::Start, true),
@@ -91,113 +95,163 @@ const NUMERIC: &[&str] = &[
 
 /// 一个单元格的显示文本：行已加载用标签值（增益补 ` dB`、评分画星、
 /// 封面状态译名），未加载回落 `TrackEntry` 索引值（多余列为空）。
+#[allow(dead_code)]
 pub(super) fn cell_text(key: &str, track: &TrackEntry, row: Option<&MetaRow>) -> String {
+    cell_value(key, track, row).into_owned()
+}
+
+fn field_str(row: &MetaRow, f: TagField) -> &str {
+    row.fields.get(&f).map(|s| s.as_str()).unwrap_or("")
+}
+
+/// 单元格零分配提取：借用已加载行字段或 `TrackEntry` 现有字串，减少渲染期
+/// 堆分配与中间临时 String 产生。
+pub(super) fn cell_value<'a>(
+    key: &str,
+    track: &'a TrackEntry,
+    row: Option<&'a MetaRow>,
+) -> Cow<'a, str> {
     match row {
-        Some(row) => loaded_cell(key, track, row),
-        None => fallback_cell(key, track),
+        Some(row) => loaded_cell_cow(key, track, row),
+        None => entry_cell_cow(key, track),
     }
 }
 
-fn field(row: &MetaRow, f: TagField) -> String {
-    row.fields.get(&f).cloned().unwrap_or_default()
-}
-
-fn loaded_cell(key: &str, track: &TrackEntry, row: &MetaRow) -> String {
+fn loaded_cell_cow<'a>(key: &str, track: &'a TrackEntry, row: &'a MetaRow) -> Cow<'a, str> {
     let gain = |f: TagField| {
-        let v = field(row, f);
-        if v.is_empty() { v } else { format!("{v} dB") }
+        let v = field_str(row, f);
+        if v.is_empty() {
+            Cow::Borrowed("")
+        } else {
+            Cow::Owned(format!("{v} dB"))
+        }
     };
     match key {
-        "file_name" => track.file_name.clone(),
-        "title" => field(row, TagField::Title),
-        "artist" => field(row, TagField::Artist),
-        "album" => field(row, TagField::Album),
-        "album_artist" => field(row, TagField::AlbumArtist),
-        "genre" => field(row, TagField::Genre),
-        "year" => field(row, TagField::Year),
-        "track_number" => field(row, TagField::Track),
-        "track_total" => field(row, TagField::TrackTotal),
-        "disc_number" => field(row, TagField::Disc),
-        "discs_total" => field(row, TagField::DiscTotal),
-        "composer" => field(row, TagField::Composer),
-        "conductor" => field(row, TagField::Conductor),
-        "lyricist" => field(row, TagField::Lyricist),
-        "publisher" => field(row, TagField::Publisher),
-        "comment" => field(row, TagField::Comment),
-        "lyrics" => field(row, TagField::Lyrics),
-        "copyright" => field(row, TagField::Copyright),
-        "rating" => field(row, TagField::Rating)
-            .parse::<usize>()
-            .map(|n| "★".repeat(n))
-            .unwrap_or_default(),
+        "file_name" => Cow::Borrowed(track.file_name.as_str()),
+        "title" => Cow::Borrowed(field_str(row, TagField::Title)),
+        "artist" => Cow::Borrowed(field_str(row, TagField::Artist)),
+        "album" => Cow::Borrowed(field_str(row, TagField::Album)),
+        "album_artist" => Cow::Borrowed(field_str(row, TagField::AlbumArtist)),
+        "genre" => Cow::Borrowed(field_str(row, TagField::Genre)),
+        "year" => Cow::Borrowed(field_str(row, TagField::Year)),
+        "track_number" => Cow::Borrowed(field_str(row, TagField::Track)),
+        "track_total" => Cow::Borrowed(field_str(row, TagField::TrackTotal)),
+        "disc_number" => Cow::Borrowed(field_str(row, TagField::Disc)),
+        "discs_total" => Cow::Borrowed(field_str(row, TagField::DiscTotal)),
+        "composer" => Cow::Borrowed(field_str(row, TagField::Composer)),
+        "conductor" => Cow::Borrowed(field_str(row, TagField::Conductor)),
+        "lyricist" => Cow::Borrowed(field_str(row, TagField::Lyricist)),
+        "publisher" => Cow::Borrowed(field_str(row, TagField::Publisher)),
+        "comment" => Cow::Borrowed(field_str(row, TagField::Comment)),
+        "lyrics" => Cow::Borrowed(field_str(row, TagField::Lyrics)),
+        "copyright" => Cow::Borrowed(field_str(row, TagField::Copyright)),
+        "rating" => match field_str(row, TagField::Rating) {
+            "1" => Cow::Borrowed("★"),
+            "2" => Cow::Borrowed("★★"),
+            "3" => Cow::Borrowed("★★★"),
+            "4" => Cow::Borrowed("★★★★"),
+            "5" => Cow::Borrowed("★★★★★"),
+            s => match s.parse::<usize>() {
+                Ok(n) if n > 0 => Cow::Owned("★".repeat(n)),
+                _ => Cow::Borrowed(""),
+            },
+        },
         "pictures" => match row.cover {
-            CoverState::Embedded => "内嵌",
-            CoverState::File => "文件",
-            CoverState::None => "无",
-        }
-        .to_owned(),
+            CoverState::Embedded => Cow::Borrowed("内嵌"),
+            CoverState::File => Cow::Borrowed("文件"),
+            CoverState::None => Cow::Borrowed("无"),
+        },
         "track_replay_gain" => gain(TagField::TrackGain),
-        "track_replay_peak" => field(row, TagField::TrackPeak),
+        "track_replay_peak" => Cow::Borrowed(field_str(row, TagField::TrackPeak)),
         "album_replay_gain" => gain(TagField::AlbumGain),
-        "album_replay_peak" => field(row, TagField::AlbumPeak),
-        _ => String::new(),
+        "album_replay_peak" => Cow::Borrowed(field_str(row, TagField::AlbumPeak)),
+        _ => Cow::Borrowed(""),
     }
 }
 
-/// 行未加载时回落的索引值（`TrackEntry` / `MetaInfo` 里已有的字段）。
-/// 注意：曲库索引为了播放与分组把无标题回退到主干、无歌手/专辑回退
-/// 到 Unknown，专辑歌手回退到曲目歌手；但元数据表格呈现的是真实标签，
-/// 兜底假值绝不能回落，否则真实标签读完落地后单元格文字会闪烁消失。
-fn fallback_cell(key: &str, t: &TrackEntry) -> String {
-    let num = |v: Option<u32>| v.map(|n| n.to_string()).unwrap_or_default();
-    let gain = |v: Option<f32>| v.map(|v| format!("{v:.2} dB")).unwrap_or_default();
-    let peak = |v: Option<f32>| v.map(|v| format!("{v:.6}")).unwrap_or_default();
+/// 直接读取曲目索引条目（`TrackEntry` / `MetaInfo`）对应的标签值。
+/// 数据库字段无回退，真实标签缺失时保持空串。
+fn entry_cell_cow<'a>(key: &str, t: &'a TrackEntry) -> Cow<'a, str> {
+    let num = |v: Option<u32>| match v {
+        Some(n) => Cow::Owned(n.to_string()),
+        None => Cow::Borrowed(""),
+    };
+    let gain = |v: Option<f32>| match v {
+        Some(v) => Cow::Owned(format!("{v:.2} dB")),
+        None => Cow::Borrowed(""),
+    };
+    let peak = |v: Option<f32>| match v {
+        Some(v) => Cow::Owned(format!("{v:.6}")),
+        None => Cow::Borrowed(""),
+    };
     match key {
-        "file_name" => t.file_name.clone(),
-        "title" => {
-            let stem = std::path::Path::new(&t.file_name)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(&t.file_name);
-            if t.title == stem {
-                String::new()
+        "file_name" => Cow::Borrowed(t.file_name.as_str()),
+        "title" => Cow::Borrowed(t.title.as_str()),
+        "artist" => Cow::Borrowed(t.artist.as_str()),
+        "album" => Cow::Borrowed(t.album.as_str()),
+        "album_artist" => Cow::Borrowed(t.meta.album_artist.as_str()),
+        "genre" => {
+            if t.genres.is_empty() {
+                Cow::Borrowed("")
+            } else if t.genres.len() == 1 {
+                Cow::Borrowed(t.genres[0].as_str())
             } else {
-                t.title.clone()
+                Cow::Owned(t.genres.join("; "))
             }
         }
-        "artist" => {
-            if t.artist == "Unknown Artist" {
-                String::new()
-            } else {
-                t.artist.clone()
-            }
-        }
-        "album" => {
-            if t.album == "Unknown Album" {
-                String::new()
-            } else {
-                t.album.clone()
-            }
-        }
-        "album_artist" => t.meta.album_artist.clone(),
-        "genre" => t.genres.join("; "),
         "year" => num(t.year),
         "track_number" => num(t.track),
         "track_total" => num(t.track_total),
         "disc_number" => num(t.disk),
         "discs_total" => num(t.disk_total),
-        "composer" => t.composers.join("; "),
+        "composer" => {
+            if t.composers.is_empty() {
+                Cow::Borrowed("")
+            } else if t.composers.len() == 1 {
+                Cow::Borrowed(t.composers[0].as_str())
+            } else {
+                Cow::Owned(t.composers.join("; "))
+            }
+        }
+        "conductor" => Cow::Borrowed(t.conductor.as_deref().unwrap_or("")),
+        "lyricist" => Cow::Borrowed(t.lyricist.as_deref().unwrap_or("")),
+        "publisher" => Cow::Borrowed(t.publisher.as_deref().unwrap_or("")),
+        "comment" => Cow::Borrowed(t.comment.as_deref().unwrap_or("")),
+        "lyrics" => match t.lyrics.as_deref() {
+            Some(lrc) => Cow::Owned(super::lyrics_preview(lrc)),
+            None => Cow::Borrowed(""),
+        },
+        "copyright" => Cow::Borrowed(t.copyright.as_deref().unwrap_or("")),
+        "rating" => match t.rating {
+            Some(1) => Cow::Borrowed("★"),
+            Some(2) => Cow::Borrowed("★★"),
+            Some(3) => Cow::Borrowed("★★★"),
+            Some(4) => Cow::Borrowed("★★★★"),
+            Some(5) => Cow::Borrowed("★★★★★"),
+            Some(n) if n > 0 => Cow::Owned("★".repeat(n as usize)),
+            _ => Cow::Borrowed(""),
+        },
+        "pictures" => {
+            if crate::metadata::covers::find_sidecar(std::path::Path::new(&t.path)).is_some() {
+                Cow::Borrowed("文件")
+            } else if t.has_art {
+                Cow::Borrowed("内嵌")
+            } else {
+                Cow::Borrowed("无")
+            }
+        }
         "track_replay_gain" => gain(t.replaygain.track_gain),
         "track_replay_peak" => peak(t.replaygain.track_peak),
         "album_replay_gain" => gain(t.replaygain.album_gain),
         "album_replay_peak" => peak(t.replaygain.album_peak),
-        _ => String::new(),
+        _ => Cow::Borrowed(""),
     }
 }
 
 /// 单元格比较（`displayed` 排序用，纯函数）：空值恒排最后（与方向
 /// 无关）；数值列按数字（增益剥 ` dB`，非数字回落文本序）；文本列
 /// 不分大小写。
+#[allow(dead_code)]
 pub(super) fn compare_cells(key: &str, a: &str, b: &str, ascending: bool) -> Ordering {
     match (a.is_empty(), b.is_empty()) {
         (true, true) => return Ordering::Equal,
@@ -218,31 +272,96 @@ pub(super) fn compare_cells(key: &str, a: &str, b: &str, ascending: bool) -> Ord
 }
 
 fn compare_text(a: &str, b: &str) -> Ordering {
-    a.to_lowercase()
-        .cmp(&b.to_lowercase())
-        .then_with(|| a.cmp(b))
+    if a.is_ascii() && b.is_ascii() {
+        for (ca, cb) in a.bytes().zip(b.bytes()) {
+            let ord = ca.to_ascii_lowercase().cmp(&cb.to_ascii_lowercase());
+            if ord != Ordering::Equal {
+                return ord;
+            }
+        }
+        a.len().cmp(&b.len()).then_with(|| a.cmp(b))
+    } else {
+        a.to_lowercase()
+            .cmp(&b.to_lowercase())
+            .then_with(|| a.cmp(b))
+    }
 }
 
-/// `displayed` memo 的就地排序（decorate-sort：比较器里不做重复取值 /
-/// 分配，每行算一次键再排）。
+#[derive(PartialEq)]
+enum SortKey {
+    Empty,
+    Number(f64),
+    Text { lower: String, orig: String },
+}
+
+fn compare_sort_keys(a: &SortKey, b: &SortKey, ascending: bool) -> Ordering {
+    match (a, b) {
+        (SortKey::Empty, SortKey::Empty) => return Ordering::Equal,
+        (SortKey::Empty, _) => return Ordering::Greater,
+        (_, SortKey::Empty) => return Ordering::Less,
+        _ => {}
+    }
+    let ord = match (a, b) {
+        (SortKey::Number(x), SortKey::Number(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+        (
+            SortKey::Text {
+                lower: lx,
+                orig: ox,
+            },
+            SortKey::Text {
+                lower: ly,
+                orig: oy,
+            },
+        ) => lx.cmp(ly).then_with(|| ox.cmp(oy)),
+        _ => Ordering::Equal,
+    };
+    if ascending { ord } else { ord.reverse() }
+}
+
+/// `displayed` memo 的就地排序（decorate-sort：预解析键与索引，
+/// 比较循环内 0 堆分配，重排移动原值避免全量克隆 TrackEntry）。
 pub(super) fn sort_entries(
-    list: &mut [TrackEntry],
+    list: &mut Vec<TrackEntry>,
     key: &str,
     ascending: bool,
     rows: &HashMap<String, Arc<MetaRow>>,
 ) {
-    let mut keyed: Vec<(String, TrackEntry)> = list
+    let mut keyed: Vec<(SortKey, usize)> = list
         .iter()
-        .map(|t| {
-            (
-                cell_text(key, t, rows.get(t.path.as_str()).map(|r| r.as_ref())),
-                t.clone(),
-            )
+        .enumerate()
+        .map(|(idx, t)| {
+            let row = rows.get(t.path.as_str()).map(|r| r.as_ref());
+            let val = cell_value(key, t, row);
+            let sort_key = if val.is_empty() {
+                SortKey::Empty
+            } else if NUMERIC.contains(&key) {
+                match val.trim_end_matches(" dB").parse::<f64>().ok() {
+                    Some(n) => SortKey::Number(n),
+                    None => SortKey::Text {
+                        lower: val.to_lowercase(),
+                        orig: val.into_owned(),
+                    },
+                }
+            } else {
+                SortKey::Text {
+                    lower: val.to_lowercase(),
+                    orig: val.into_owned(),
+                }
+            };
+            (sort_key, idx)
         })
         .collect();
-    keyed.sort_by(|(a, _), (b, _)| compare_cells(key, a, b, ascending));
-    let sorted: Vec<TrackEntry> = keyed.into_iter().map(|(_, t)| t).collect();
-    list.clone_from_slice(&sorted);
+
+    keyed.sort_by(|(a, _), (b, _)| compare_sort_keys(a, b, ascending));
+
+    let old = std::mem::take(list);
+    let mut old_opts: Vec<Option<TrackEntry>> = old.into_iter().map(Some).collect();
+    list.reserve(old_opts.len());
+    for (_, idx) in keyed {
+        if let Some(entry) = old_opts[idx].take() {
+            list.push(entry);
+        }
+    }
 }
 
 /// 标签表格：选中态由 `selected` 集合驱动行高亮（`row_classes` 的
@@ -254,38 +373,74 @@ pub(super) fn table(
     selected: Signal<BTreeSet<String>>,
     anchor: Signal<Option<String>>,
     sort: Signal<Option<DataTableSort>>,
+    visible_cols: Signal<BTreeSet<String>>,
+    col_widths: Signal<HashMap<String, f32>>,
 ) -> impl IntoElement {
-    let mut defs = Vec::with_capacity(COLUMNS.len());
-    for (key, title, width, align, sortable) in COLUMNS {
-        let mut c = DataTableColumn::default();
-        c.key = SharedString::from(*key);
-        c.title = Some(SharedString::from(*title));
-        c.width = Some(px(*width));
-        c.align = *align;
-        c.sortable = *sortable;
-        c.fixed = *key == "file_name";
-        if *key == "file_name" {
-            // sticky 固定文件名列：右边框颜色加深（border-foreground/25，
-            // 显著深于普通网格线的 border-border/50），保证与滚动列分界清晰。
-            c.header_class = Some(SharedString::from(
-                "bg-card border-r border-foreground/25 font-medium",
-            ));
-            c.cell_class = Some(SharedString::from("border-r border-foreground/25"));
+    let defs = {
+        let visible_cols = visible_cols.clone();
+        let col_widths = col_widths.clone();
+        move || {
+            let active = visible_cols.get();
+            let widths = col_widths.get();
+            let mut defs = Vec::with_capacity(COLUMNS.len());
+            for (key, title, width, align, _) in COLUMNS {
+                if !active.contains(*key) {
+                    continue;
+                }
+                let mut c = DataTableColumn::default();
+                c.key = SharedString::from(*key);
+                c.title = Some(SharedString::from(*title));
+                let cur_w = widths.get(*key).copied().unwrap_or(*width);
+                c.width = Some(px(cur_w));
+                c.align = *align;
+                c.sortable = false;
+                c.resizable = Some(false);
+                c.fixed = *key == "file_name";
+                if *key == "file_name" {
+                    // sticky 固定文件名列：右边框颜色加深（border-foreground/25，
+                    // 显著深于普通网格线的 border-border/50），保证与滚动列分界清晰。
+                    // 普通省略已由 classes.cell 与 classes.header_cell 统一处理。
+                    c.header_class = Some(SharedString::from(
+                        "bg-card border-r border-foreground/25 font-medium",
+                    ));
+                    c.cell_class = Some(SharedString::from("border-r border-foreground/25"));
+                }
+                // 其余列保持 None，不设多余列级覆盖，消除拖拽改列宽时逐格的字串拼接与堆分配开销。
+                defs.push(c);
+            }
+            defs
         }
-        defs.push(c);
-    }
+    };
+
+    let visible_window = signal((0usize, 120usize));
 
     let data = computed({
         let displayed = displayed.clone();
         move || -> DataTableRows {
             let list = displayed.get();
+            let total = list.len();
+            let (win_start, win_end) = visible_window.get();
+            let start = win_start.min(total);
+            let end = win_end.min(total).max(start);
+            let slice = &list[start..end];
             let map = rows.get();
-            let mut data = DataTableRows::new(list.len());
+            let active = visible_cols.get();
+            let mut data = DataTableRows::new(slice.len());
+            // 仅对当前可见窗口切片查表与生成文本，避免全库数万行全量物化
+            let row_ptrs: Vec<Option<&MetaRow>> = slice
+                .iter()
+                .map(|t| map.get(t.path.as_str()).map(|r| r.as_ref()))
+                .collect();
             for &(key, ..) in COLUMNS {
+                if !active.contains(key) {
+                    continue;
+                }
                 data = data.texts(
                     key,
-                    list.iter()
-                        .map(|t| cell_text(key, t, map.get(t.path.as_str()).map(|r| r.as_ref()))),
+                    slice
+                        .iter()
+                        .zip(row_ptrs.iter())
+                        .map(|(t, row)| cell_value(key, t, *row)),
                 );
             }
             data
@@ -294,16 +449,27 @@ pub(super) fn table(
 
     let row_classes = move || -> Vec<SharedString> {
         let set = selected.get();
+        let total = displayed.with(|v| v.len());
+        let (win_start, win_end) = visible_window.get();
+        let start = win_start.min(total);
+        let end = win_end.min(total).max(start);
         displayed.with(|v| {
-            v.iter()
+            let slice = &v[start..end];
+            if set.is_empty() {
+                return vec![SharedString::new_static("bg-card"); slice.len()];
+            }
+            let active = SharedString::new_static("bg-primary/8");
+            let card = SharedString::new_static("bg-card");
+            slice
+                .iter()
                 .map(|t| {
                     if set.contains(&t.path) {
                         // 与侧栏悬停同一个 8% 主色（`primary().opacity(0.08)`，
                         // sidebar.rs）——选中行跟着主题色走，不再用 accent 灰底。
-                        SharedString::from("bg-primary/8")
+                        active.clone()
                     } else {
                         // 未选中行设不透明背景，横向滚动时固定列不会透光重叠文字。
-                        SharedString::from("bg-card")
+                        card.clone()
                     }
                 })
                 .collect()
@@ -313,34 +479,266 @@ pub(super) fn table(
     let mut classes = DataTableClasses::default();
     // sticky 表头：底边框颜色（border-b border-foreground/25）
     classes.header = Some(SharedString::from("bg-card border-b border-foreground/25"));
+    classes.header_content = Some(SharedString::from("h-full self-stretch"));
     // 表头单元格：竖向分隔网格线（border-r border-border/50）
     classes.header_cell = Some(SharedString::from(
-        "px-3 text-muted-foreground font-medium border-r border-border/50",
+        "text-muted-foreground font-medium border-r border-border/50",
     ));
     // 普通单元格：竖向分隔网格线（border-r border-border/50）
     classes.cell = Some(SharedString::from("px-3 border-r border-border/50"));
+    classes.fixed_edge = Some(SharedString::from("bg-foreground/25"));
     // 行体：横向分隔网格线（border-b border-border/50）
     classes.row = Some(SharedString::from("border-b border-border/50"));
     classes.row_hover = Some(SharedString::from("bg-accent/40"));
 
+    let guide_line_x = signal(Option::<f32>::None);
+
+    let render_head = {
+        let sort = sort.clone();
+        let col_widths = col_widths.clone();
+        let guide_line_x = guide_line_x.clone();
+        move |cell: &nsh_base::DataTableHeaderCell| -> AnyElement {
+            let key = cell.key.to_string();
+            let title = cell.title.clone();
+            let align = COLUMNS
+                .iter()
+                .find(|(k, ..)| *k == key)
+                .map(|(.., a, _)| *a)
+                .unwrap_or(DataTableAlign::Start);
+
+            let is_hovered = signal(false);
+            let is_dragging = signal(false);
+            let drag_origin = Rc::new(Cell::new(None::<(f32, f32, f32)>));
+            let last_tap = Rc::new(Cell::new(None::<Instant>));
+
+            let sort_key = key.clone();
+            let sort_toggle = {
+                let sort = sort.clone();
+                move || {
+                    let next = match sort.get() {
+                        Some(s) if s.key.as_str() == sort_key.as_str() => match s.direction {
+                            nsh_base::DataTableSortDirection::Ascending => {
+                                let mut s = DataTableSort::default();
+                                s.key = sort_key.clone().into();
+                                s.direction = nsh_base::DataTableSortDirection::Descending;
+                                Some(s)
+                            }
+                            nsh_base::DataTableSortDirection::Descending => None,
+                        },
+                        _ => {
+                            let mut s = DataTableSort::default();
+                            s.key = sort_key.clone().into();
+                            s.direction = nsh_base::DataTableSortDirection::Ascending;
+                            Some(s)
+                        }
+                    };
+                    sort.set(next);
+                }
+            };
+
+            let drag_key = key.clone();
+            let drag_widths = col_widths.clone();
+            let drag_guide = guide_line_x.clone();
+            let drag_hovered = is_hovered.clone();
+            let drag_dragging = is_dragging.clone();
+
+            let handle_start = {
+                let drag_origin = drag_origin.clone();
+                let col_widths = drag_widths.clone();
+                let guide_line_x = drag_guide.clone();
+                let is_dragging = drag_dragging.clone();
+                let key = drag_key.clone();
+                move |e: &ResponderEvent| {
+                    is_dragging.set(true);
+                    let default_w = COLUMNS
+                        .iter()
+                        .find(|(k, ..)| *k == key)
+                        .map(|(.., w, _, _)| *w)
+                        .unwrap_or(120.0);
+                    let cur_w = col_widths
+                        .with(|m| m.get(&key).copied())
+                        .unwrap_or(default_w);
+                    let start_mouse_x = e.page.x.0;
+                    let table_left = crate::ui::theme::sidebar_width() + 32.0;
+                    let start_guide_x = start_mouse_x - table_left;
+                    drag_origin.set(Some((start_mouse_x, cur_w, start_guide_x)));
+                    guide_line_x.set(Some(start_guide_x));
+                }
+            };
+
+            let handle_move = {
+                let drag_origin = drag_origin.clone();
+                let guide_line_x = drag_guide.clone();
+                move |e: &ResponderEvent| {
+                    if let Some((start_mouse_x, cur_w, start_guide_x)) = drag_origin.get() {
+                        let delta = e.page.x.0 - start_mouse_x;
+                        let min_delta = 50.0 - cur_w;
+                        let clamped_delta = delta.max(min_delta);
+                        guide_line_x.set(Some(start_guide_x + clamped_delta));
+                    }
+                }
+            };
+
+            let handle_end = {
+                let drag_origin = drag_origin.clone();
+                let col_widths = drag_widths.clone();
+                let guide_line_x = drag_guide.clone();
+                let is_dragging = drag_dragging.clone();
+                let last_tap = last_tap.clone();
+                let key = drag_key.clone();
+                move |e: &ResponderEvent| {
+                    is_dragging.set(false);
+                    if let Some((start_mouse_x, cur_w, _)) = drag_origin.take() {
+                        guide_line_x.set(None);
+                        let delta = e.page.x.0 - start_mouse_x;
+                        if delta.abs() < 2.0 {
+                            let now = Instant::now();
+                            if let Some(prev) = last_tap.get() {
+                                if now.duration_since(prev).as_millis() < 350 {
+                                    let def_w = COLUMNS
+                                        .iter()
+                                        .find(|(k, ..)| *k == key)
+                                        .map(|(.., w, _, _)| *w)
+                                        .unwrap_or(120.0);
+                                    col_widths.update(|m| {
+                                        m.insert(key.clone(), def_w);
+                                    });
+                                    last_tap.set(None);
+                                    return;
+                                }
+                            }
+                            last_tap.set(Some(now));
+                        }
+                        let final_w = (cur_w + delta).max(50.0);
+                        col_widths.update(|m| {
+                            m.insert(key.clone(), final_w);
+                        });
+                    }
+                }
+            };
+
+            let sort_indicator = {
+                let sort = sort.clone();
+                let key = key.clone();
+                dynamic(move || match sort.get() {
+                    Some(s) if s.key.as_str() == key.as_str() => {
+                        let arrow = match s.direction {
+                            nsh_base::DataTableSortDirection::Ascending => "▲",
+                            nsh_base::DataTableSortDirection::Descending => "▼",
+                        };
+                        text(arrow)
+                            .text_size(px(9.0))
+                            .line_height(px(9.0))
+                            .text_color(primary())
+                            .ml(px(4.0))
+                            .into_element()
+                    }
+                    _ => view().w(px(0.0)).into_element(),
+                })
+            };
+
+            let handle_view = view()
+                .test_id(&format!("resize:{key}"))
+                .absolute()
+                .right_0()
+                .top_0()
+                .bottom_0()
+                .w(px(14.0))
+                .cursor(Cursor::ColResize)
+                .on_mouse_enter(move |_: &nsh_core::MouseEvent| drag_hovered.set(true))
+                .on_mouse_leave(move |_: &nsh_core::MouseEvent| drag_hovered.set(false))
+                .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {
+                    request.claim();
+                }))
+                .keep_touches(true)
+                .on_responder_grant(handle_start)
+                .on_responder_move(handle_move)
+                .on_responder_release(handle_end.clone())
+                .on_responder_terminate(handle_end)
+                .child(
+                    view()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .w(px(2.0))
+                        .bg(primary())
+                        .opacity(move || {
+                            if is_hovered.get() || is_dragging.get() {
+                                1.0_f32
+                            } else {
+                                0.0_f32
+                            }
+                        }),
+                );
+
+            view()
+                .w_full()
+                .h(px(36.0))
+                .flex_row()
+                .items_center()
+                .relative()
+                .map(move |v| match align {
+                    DataTableAlign::Start => v.justify_start(),
+                    DataTableAlign::Center => v.justify_center(),
+                    DataTableAlign::End => v.justify_end(),
+                })
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .px(px(12.0))
+                        .cursor_pointer()
+                        .on_press(sort_toggle)
+                        .child(
+                            text(title)
+                                .text_size(px(13.0))
+                                .line_height(px(13.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(muted_fg()),
+                        )
+                        .child(sort_indicator),
+                )
+                .child(handle_view)
+                .into_element()
+        }
+    };
+
     // 不设 `render_cell`：它是全局开关，一设整表体就走逐格 dynamic +
     // Renderer 的自绘路径（nsh-base data_table/view.rs），列窗口每平移
     // 一次可见格全部重建——横向滚动卡。全文本格走原生 `text(cell_text)` 绑定。
-    data_table()
+    let dt = data_table()
         .flex_1()
         .accessibility_label(Some(SharedString::from("元数据表")))
         .classes(classes)
         .columns(defs)
+        .row_count(move || Some(displayed.with(|v| v.len() as u32)))
+        .data_start(move || {
+            let total = displayed.with(|v| v.len());
+            visible_window.with(|(s, _)| (*s).min(total) as u32)
+        })
         .data(move || data.get())
         .row_height(px(32.0))
         .header_height(Some(px(36.0)))
         .font_size(px(13.0))
         .stripe(false)
+        .resizable_columns(false)
+        .render_header_cell(render_head)
         .movable_columns(false)
         .select_on_modifier_press(false)
         .selection(move || Some(DataTableSelection::default()))
         .row_classes(row_classes)
         .sort(move || sort.get())
+        .on_visible_rows_change(move |range: &nsh_base::DataTableRange| {
+            let r_start = range.start as usize;
+            let r_end = range.end as usize;
+            let current = visible_window.get_untracked();
+            if r_start < current.0 + 15 || r_end + 15 > current.1 {
+                let start = r_start.saturating_sub(60);
+                let end = r_end + 60;
+                visible_window.set((start, end));
+            }
+        })
         .empty(
             view().flex_1().items_center().justify_center().child(
                 text("没有匹配的曲目")
@@ -385,7 +783,28 @@ pub(super) fn table(
                 anchor.set(Some(path));
             }
         })
-        .on_sort_change(move |next: &Option<DataTableSort>| sort.set(next.clone()))
+        .on_sort_change(move |next: &Option<DataTableSort>| sort.set(next.clone()));
+
+    view()
+        .relative()
+        .flex_1()
+        .min_w(px(0.0))
+        .overflow_hidden()
+        .child(dt)
+        .child(when(
+            move || guide_line_x.get().is_some(),
+            move || {
+                view()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(move || px(guide_line_x.get().unwrap_or(0.0)))
+                    .w(px(2.0))
+                    .bg(primary())
+                    .z_index(50)
+                    .pointer_events(PointerEvents::None)
+            },
+        ))
 }
 
 #[cfg(test)]
@@ -431,5 +850,30 @@ mod tests {
             compare_cells("rating", "★★★★★", "★★★★", true),
             Ordering::Greater
         );
+    }
+
+    #[test]
+    fn column_width_defaults_and_clamping() {
+        let def_w = |k: &str| {
+            COLUMNS
+                .iter()
+                .find(|(col, ..)| *col == k)
+                .map(|(.., w, _, _)| *w)
+                .unwrap_or(120.0)
+        };
+        assert_eq!(def_w("file_name"), 200.0);
+        assert_eq!(def_w("title"), 180.0);
+        assert_eq!(def_w("artist"), 150.0);
+
+        // 列宽拖拽计算：最小宽度为 50pt
+        let cur_w = def_w("title");
+        let min_w = 50.0f32;
+        let delta = -200.0f32;
+        let final_w = (cur_w + delta).max(min_w);
+        assert_eq!(final_w, 50.0);
+
+        let delta_expand = 50.0f32;
+        let final_expand = (cur_w + delta_expand).max(min_w);
+        assert_eq!(final_expand, 230.0);
     }
 }

@@ -32,7 +32,7 @@ pub(super) fn dialog(
     let running = signal(false);
     let errors = signal(Vec::<String>::new());
     let template = computed(move || Template::parse(&input.get()));
-    // 已选路径按当前显示序；未加载的行现读标签（选少量，可接受）。
+    // 已选路径按当前显示序；未加载的行回落 TrackEntry 索引值。
     let items = computed(move || {
         let Ok(tpl) = template.get() else {
             return Vec::<Planned>::new();
@@ -43,7 +43,7 @@ pub(super) fn dialog(
             .get()
             .iter()
             .filter(|t| set.contains(&t.path))
-            .map(|t| (t.path.clone(), fields_of(&t.path, &map)))
+            .map(|t| (t.path.clone(), fields_of(t, &map)))
             .collect();
         rename::plan(&items, &tpl)
     });
@@ -227,12 +227,44 @@ fn preview_row(item: &Planned) -> impl IntoElement {
         )
 }
 
-/// 一条的模板字段：行已加载直接用，未加载现读（读不出给空）。
-fn fields_of(path: &str, map: &HashMap<String, Arc<MetaRow>>) -> HashMap<TagField, String> {
-    if let Some(row) = map.get(path) {
+/// 一条的模板字段：行已加载直接用，未加载回落 TrackEntry 索引值（避免界面线程同步走磁盘 I/O 读文件）。
+fn fields_of(t: &TrackEntry, map: &HashMap<String, Arc<MetaRow>>) -> HashMap<TagField, String> {
+    if let Some(row) = map.get(&t.path) {
         return row.fields.clone();
     }
-    crate::metadata::write::read_row(Path::new(path))
-        .map(|(f, _)| f)
-        .unwrap_or_default()
+    let mut fields = HashMap::new();
+    if !t.title.is_empty() {
+        fields.insert(TagField::Title, t.title.clone());
+    }
+    if !t.artist.is_empty() {
+        fields.insert(TagField::Artist, t.artist.clone());
+    }
+    if !t.album.is_empty() {
+        fields.insert(TagField::Album, t.album.clone());
+    }
+    if !t.meta.album_artist.is_empty() {
+        fields.insert(TagField::AlbumArtist, t.meta.album_artist.clone());
+    }
+    if !t.genres.is_empty() {
+        fields.insert(TagField::Genre, t.genres.join("; "));
+    }
+    if let Some(y) = t.year {
+        fields.insert(TagField::Year, y.to_string());
+    }
+    if let Some(trk) = t.track {
+        fields.insert(TagField::Track, trk.to_string());
+    }
+    if let Some(tot) = t.track_total {
+        fields.insert(TagField::TrackTotal, tot.to_string());
+    }
+    if let Some(d) = t.disk {
+        fields.insert(TagField::Disc, d.to_string());
+    }
+    if let Some(tot) = t.disk_total {
+        fields.insert(TagField::DiscTotal, tot.to_string());
+    }
+    if !t.composers.is_empty() {
+        fields.insert(TagField::Composer, t.composers.join("; "));
+    }
+    fields
 }

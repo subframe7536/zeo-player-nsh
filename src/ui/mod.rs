@@ -96,8 +96,7 @@ pub fn App() -> impl IntoElement {
     let nav = global::<Nav>();
 
     let queue_open = signal(false);
-    let search = frame::SearchFocus::new();
-    // 搜索页页顶的输入框（与侧栏框共用同一个 query，ElementRef 各一份）。
+    // 内容区顶部常驻搜索框的焦点句柄；rail 模式的放大镜按钮也聚焦它。
     let search_page = frame::SearchFocus::new();
     // 窗口隐藏到托盘时整个界面拆掉（视图、图片、列表都释放），只留播放与
     // 状态轮询；再次显示时重建，导航位置在全局信号里，不丢。
@@ -112,7 +111,7 @@ pub fn App() -> impl IntoElement {
                 view()
                     .flex_1()
                     .flex_row()
-                    .child(frame::sidebar(search, search_page))
+                    .child(frame::sidebar(search_page))
                     .child(
                         view()
                             .flex_1()
@@ -141,7 +140,6 @@ pub fn App() -> impl IntoElement {
         // 点在搜索框以外的地方时让它失去焦点（否则焦点一直留在里面，
         // Space 等快捷键也被它吃掉）。
         .on_touch(move |e: &TouchEvent| {
-            search.outside_touch(e);
             search_page.outside_touch(e);
         })
         // 右键事件只派发给最近的监听者：点到没有菜单的地方才轮到根——
@@ -183,17 +181,22 @@ pub fn App() -> impl IntoElement {
 fn page(nav: Signal<Nav>, search_page: frame::SearchFocus) -> AnyElement {
     let s = store::store();
     let search_mode = move || s.search_open.get() || !s.search.with(|q| q.trim().is_empty());
+    // 搜索框常驻内容区顶部，不再出现在侧栏。高度由 search_mode 驱动：
+    // 非搜索页收至 0，避免 when 挂卸节点导致重建丢焦点。
+    let search_bar_h = 20.0 + 44.0 + 4.0; // pt + pb + 框高
     // 输入框挂在 `dynamic` 外面：输入时只重建下面的结果，框本身不重建
     // （不然每个键击都把焦点弄丢）。
     view()
         .flex_1()
-        .child(when(search_mode, move || {
+        .child(
             view()
+                .h(move || px(if search_mode() { search_bar_h } else { 0.0 }))
+                .overflow_hidden()
                 .px(px(24.0))
                 .pt(px(20.0))
                 .pb(px(4.0))
-                .child(frame::search_box(search_page, false, true))
-        }))
+                .child(frame::search_box(search_page, false, true)),
+        )
         .child(dynamic(move || {
             if search_mode() {
                 return views::search_results().into_element();

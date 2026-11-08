@@ -215,7 +215,7 @@ pub fn track_row_selectable(
     let field = move |f: fn(&TrackEntry) -> String| {
         move || track.with(|t| t.as_ref().map(f).unwrap_or_default())
     };
-    let title = field(|t| t.title.clone());
+    let title = field(|t| t.display_title().to_owned());
     let path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
     let liked = move || track.with(|t| t.as_ref().is_some_and(|t| is_liked(&t.path)));
     let hovering = signal(false);
@@ -308,7 +308,7 @@ pub fn track_row_selectable(
             let letter = move || {
                 track.with(|t| {
                     t.as_ref()
-                        .map(|t| initial_letter(&t.title, &t.path))
+                        .map(|t| initial_letter(t.display_title(), &t.path))
                         .unwrap_or_default()
                 })
             };
@@ -322,7 +322,7 @@ pub fn track_row_selectable(
                 .min_w(px(0.0))
                 .gap(px(2.0))
                 .child(
-                    text(field(|t| t.title.clone()))
+                    text(field(|t| t.display_title().to_owned()))
                         .number_of_lines(1)
                         .text_size(px(14.0))
                         .line_height(px(14.0))
@@ -332,7 +332,7 @@ pub fn track_row_selectable(
                         .duration(300.0),
                 )
                 .child(
-                    text(field(|t| t.artist.clone()))
+                    text(field(|t| t.display_artist().to_owned()))
                         .number_of_lines(1)
                         .text_size(px(12.0))
                         .line_height(px(12.0))
@@ -342,7 +342,7 @@ pub fn track_row_selectable(
         .child(cols.album.then(|| {
             when(fits_album, move || {
                 view().w(px(W_ALBUM)).child(
-                    text(field(|t| t.album.clone()))
+                    text(field(|t| t.display_album().to_owned()))
                         .number_of_lines(1)
                         .text_size(px(13.0))
                         .line_height(px(13.0))

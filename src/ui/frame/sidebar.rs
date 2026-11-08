@@ -180,64 +180,39 @@ pub(crate) fn adaptive_row(
         )
 }
 
-/// 侧栏内容：展开与图标栏共用同一结构；图标栏时只把文字与搜索框
-/// 藏起（布局不变），放大镜在同一槽位浮出来。
-fn adaptive_body(search: SearchFocus, search_page: SearchFocus) -> View {
+/// 侧栏内容：展开与图标栏共用同一结构；图标栏时只把文字与搜索图标
+/// 藏起（布局不变）；展开态搜索框移至内容区顶部，侧栏不再显示。
+fn adaptive_body(search_page: SearchFocus) -> View {
     let s = store::store();
     let rail = sidebar_collapsed;
     let fade = label_fade(rail);
-    // 搜索区：展开态是输入框，图标栏是放大镜（切到搜索页）；两者在同
-    // 一槽位，输入框隐藏后把指针事件也关掉。
+    // 搜索区：仅图标栏（rail）模式下显示放大镜按钮；展开态不占位。
     let search_area = view().px(px(10.0)).child(
         view()
-            .h(px(SEARCH_H))
-            .child(
-                search_box(search, false, false)
-                    .opacity(fade)
-                    .pointer_events(move || {
-                        if rail() {
-                            PointerEvents::None
-                        } else {
-                            PointerEvents::Auto
-                        }
-                    }),
-            )
+            .h(move || px(if rail() { SEARCH_H } else { 0.0 }))
+            .overflow_hidden()
+            .items_center()
+            .justify_center()
+            // 栏的 overflow_hidden 会裁掉 tooltip，这里不挂提示。
             .child(
                 view()
-                    .absolute()
-                    .inset(px(0.0))
+                    .size(px(28.0))
                     .items_center()
                     .justify_center()
-                    .opacity(move || if rail() { 1.0_f32 } else { 0.0 })
-                    // 展开态透明但仍盖着搜索框：指针事件也要关掉。
-                    .pointer_events(move || {
-                        if rail() {
-                            PointerEvents::Auto
-                        } else {
-                            PointerEvents::None
-                        }
+                    .rounded(px(8.0))
+                    .role(AccessibilityRole::Button)
+                    .label("搜索")
+                    .hover(|st| st.bg(move || primary().opacity(0.08)))
+                    .active(|st| st.opacity(0.7))
+                    .on_press(move |_: &()| {
+                        s.search_open.set(true);
+                        // 聚焦内容区顶部的搜索框。
+                        spawn(async move {
+                            let _ = next_frame().await;
+                            search_page.input.focus();
+                        });
                     })
-                    // 栏的 overflow_hidden 会裁掉 tooltip，这里不挂提示。
-                    .child(
-                        view()
-                            .size(px(28.0))
-                            .items_center()
-                            .justify_center()
-                            .rounded(px(8.0))
-                            .role(AccessibilityRole::Button)
-                            .label("搜索")
-                            .hover(|st| st.bg(move || primary().opacity(0.08)))
-                            .active(|st| st.opacity(0.7))
-                            .on_press(move |_: &()| {
-                                s.search_open.set(true);
-                                // 等搜索页这一帧挂出来再聚焦页顶的输入框。
-                                spawn(async move {
-                                    let _ = next_frame().await;
-                                    search_page.input.focus();
-                                });
-                            })
-                            .child(icon(Icon::Search, 16.0, sidebar_fg)),
-                    ),
+                    .child(icon(Icon::Search, 16.0, sidebar_fg)),
             ),
     );
     view()
@@ -454,7 +429,7 @@ fn sidebar_lower_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
     view().flex_1().min_h(px(0.0)).child(header).child(content)
 }
 
-pub(crate) fn sidebar(search: SearchFocus, search_page: SearchFocus) -> View {
+pub(crate) fn sidebar(search_page: SearchFocus) -> View {
     view()
         .w(move || px(sidebar_width()))
         .flex_shrink_0()
@@ -466,5 +441,5 @@ pub(crate) fn sidebar(search: SearchFocus, search_page: SearchFocus) -> View {
         .border_r_color(sidebar_border())
         // 顶部让给标题栏（侧栏底色一直铺到窗口顶边，交通灯落在上面）。
         .child(view().h(move || px(top_inset())).flex_shrink_0())
-        .child(adaptive_body(search, search_page))
+        .child(adaptive_body(search_page))
 }

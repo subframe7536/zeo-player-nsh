@@ -9,20 +9,19 @@ mod panel;
 mod rename;
 mod table;
 
+use nsh_base::{DataTableSort, popover};
+use nsh_core::prelude::*;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use nsh_base::DataTableSort;
-use nsh_core::prelude::*;
-
-use super::super::components::button::{Size, Variant, text_button};
+use super::super::components::button::{RADIUS_MD, Size, Variant, text_button};
 use super::super::components::checkbox::checkbox;
 use super::super::components::form::input_field;
+use super::super::components::icons::{Icon, icon};
 use super::super::components::page::page_header;
-use super::super::store::{Post, poster, store};
+use super::super::store::store;
 use super::super::theme::*;
 use super::no_library;
 use crate::config::TrackEntry;
@@ -51,6 +50,7 @@ pub(super) enum CoverState {
 }
 
 /// 后台线程读一行（读不出返回 `None`，单元格回落 `TrackEntry` 值）。
+#[allow(dead_code)]
 fn build_row(path: &Path, stamp: u64, has_art: bool) -> Option<MetaRow> {
     let (mut fields, tag_type) = crate::metadata::write::read_row(path).ok()?;
     let embedded = fields
@@ -97,6 +97,282 @@ fn lyrics_preview(raw: &str) -> String {
     String::new()
 }
 
+/// 大小写无关的子串匹配（ASCII 快速路径，不分配 String）。
+fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if haystack.is_ascii() && needle.is_ascii() {
+        let needle_bytes = needle.as_bytes();
+        haystack.as_bytes().windows(needle_bytes.len()).any(|w| {
+            w.iter()
+                .zip(needle_bytes.iter())
+                .all(|(h, n)| h.to_ascii_lowercase() == n.to_ascii_lowercase())
+        })
+    } else {
+        haystack.to_lowercase().contains(&needle.to_lowercase())
+    }
+}
+
+fn all_columns() -> BTreeSet<String> {
+    table::COLUMNS.iter().map(|(k, ..)| k.to_string()).collect()
+}
+
+const COLUMN_GROUPS: &[(&str, &[&str])] = &[
+    (
+        "基本信息",
+        &[
+            "file_name",
+            "title",
+            "artist",
+            "album",
+            "album_artist",
+            "genre",
+            "year",
+            "track_number",
+            "track_total",
+            "disc_number",
+            "discs_total",
+        ],
+    ),
+    (
+        "人员与版权",
+        &[
+            "composer",
+            "conductor",
+            "lyricist",
+            "publisher",
+            "copyright",
+        ],
+    ),
+    ("封面与歌词", &["rating", "pictures", "lyrics", "comment"]),
+    (
+        "ReplayGain",
+        &[
+            "track_replay_gain",
+            "track_replay_peak",
+            "album_replay_gain",
+            "album_replay_peak",
+        ],
+    ),
+];
+
+/// 默认列：包含「基本信息」与「封面与歌词」集合中的全部列（共 15 列）。
+fn default_columns() -> BTreeSet<String> {
+    let mut cols = BTreeSet::new();
+    for (group_name, keys) in COLUMN_GROUPS {
+        if *group_name == "基本信息" || *group_name == "封面与歌词" {
+            for key in *keys {
+                cols.insert((*key).to_string());
+            }
+        }
+    }
+    cols
+}
+
+fn column_selector(visible_cols: Signal<BTreeSet<String>>) -> AnyElement {
+    let open = signal(false);
+    let gate = crate::ui::store::menu_control();
+    effect(gate.evicted(open));
+
+    let trigger = view()
+        .h(px(32.0))
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
+        .px(px(10.0))
+        .rounded(px(RADIUS_MD))
+        .border_1()
+        .border_color(border())
+        .cursor_pointer()
+        .window_drag(false)
+        .bg(move || {
+            if gate.is_open() {
+                hover()
+            } else {
+                nsh_base::theme().card
+            }
+        })
+        .hover(|st| st.bg(hover()))
+        .active(|st| st.opacity(0.8))
+        .role(AccessibilityRole::Button)
+        .label("列显示设置")
+        .child(
+            text(move || {
+                let count = visible_cols.with(|s| s.len());
+                let total = table::COLUMNS.len();
+                format!("显示列 ({count}/{total})")
+            })
+            .text_size(px(13.0))
+            .line_height(px(13.0))
+            .text_color(fg()),
+        )
+        .child(icon(Icon::ChevronDown, 12.0, muted_fg));
+
+    let mut items = Vec::new();
+    for (group_name, keys) in COLUMN_GROUPS {
+        items.push(
+            view()
+                .px(px(8.0))
+                .pt(px(8.0))
+                .pb(px(4.0))
+                .child(
+                    text(*group_name)
+                        .text_size(px(11.0))
+                        .line_height(px(11.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(muted_fg()),
+                )
+                .into_element(),
+        );
+        for key in *keys {
+            let key_s = (*key).to_string();
+            let title_str = table::COLUMNS
+                .iter()
+                .find(|(k, ..)| *k == *key)
+                .map(|(.., t, _, _, _)| *t)
+                .unwrap_or(*key);
+            let is_checked = {
+                let key_s = key_s.clone();
+                move || visible_cols.with(|s| s.contains(&key_s))
+            };
+            let toggle = {
+                let key_s = key_s.clone();
+                move || {
+                    visible_cols.update(|set| {
+                        if set.contains(&key_s) {
+                            if set.len() > 1 {
+                                set.remove(&key_s);
+                            }
+                        } else {
+                            set.insert(key_s.clone());
+                        }
+                    });
+                }
+            };
+            let on_row_click = toggle.clone();
+            items.push(
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(8.0))
+                    .py(px(5.0))
+                    .rounded(px(4.0))
+                    .cursor_pointer()
+                    .hover(|st| st.bg(hover()))
+                    .active(|st| st.opacity(0.85))
+                    .on_press(move || on_row_click())
+                    .child(checkbox(is_checked, || false, title_str, {
+                        let toggle = toggle.clone();
+                        move |_| toggle()
+                    }))
+                    .child(
+                        text(title_str)
+                            .flex_1()
+                            .text_size(px(13.0))
+                            .line_height(px(13.0))
+                            .text_color(fg()),
+                    )
+                    .into_element(),
+            );
+        }
+    }
+
+    let popup = view()
+        .w(px(230.0))
+        .h(px(390.0))
+        .rounded(px(RADIUS_MD))
+        .border_1()
+        .border_color(border())
+        .bg(nsh_base::theme().popover)
+        .shadow_md()
+        .overflow_hidden()
+        .flex_col()
+        .window_drag(false)
+        .child(
+            view()
+                .h(px(36.0))
+                .px(px(12.0))
+                .border_b_1()
+                .border_b_color(border())
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .child(
+                    text("选择显示列")
+                        .text_size(px(12.0))
+                        .line_height(px(12.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(muted_fg()),
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .gap(px(4.0))
+                        .child(text_button(
+                            Variant::Ghost,
+                            Size::Xs,
+                            None,
+                            "全选",
+                            move || visible_cols.set(all_columns()),
+                        ))
+                        .child(text_button(
+                            Variant::Ghost,
+                            Size::Xs,
+                            None,
+                            "默认",
+                            move || visible_cols.set(default_columns()),
+                        )),
+                ),
+        )
+        .child(
+            scroll()
+                .flex_1()
+                .min_h(px(0.0))
+                .child(view().p(px(6.0)).gap(px(2.0)).children(items)),
+        );
+
+    let close = {
+        let open = open.clone();
+        move || {
+            open.set(false);
+            gate.close();
+        }
+    };
+
+    let selector = popover()
+        .open(gate.open_with(open))
+        .on_open_change(gate.popover_change(open))
+        .placement(Placement::Bottom)
+        .align(Align::Start)
+        .offset(px(6.0))
+        .margin(px(8.0))
+        .trigger(trigger)
+        .child(popup);
+
+    view()
+        .child(when(
+            move || gate.is_open(),
+            move || {
+                overlay()
+                    .test_id("column_selector_overlay")
+                    .absolute()
+                    .inset_0()
+                    .on_press({
+                        let close = close.clone();
+                        move || close()
+                    })
+                    .on_context_menu({
+                        let close = close.clone();
+                        move |_: &nsh_core::ContextMenuEvent| close()
+                    })
+            },
+        ))
+        .child(selector)
+        .into_element()
+}
+
 /// 「元数据」页。
 pub fn page() -> View {
     let s = store();
@@ -106,94 +382,39 @@ pub fn page() -> View {
     let filter = signal(String::new());
     let sort = signal(Option::<DataTableSort>::None);
     let rename_open = signal(false);
+    let visible_cols = signal(default_columns());
+    let col_widths = signal(HashMap::<String, f32>::new());
 
-    // 行加载器：补读缺失 / 指纹过期的行，清掉离开曲库的（选中集同步
-    // 修剪）；约 100 条一批回排写信号。代次计数作废上一趟，视图拆掉
-    // 后投递不再写。
-    let generation = Arc::new(AtomicU64::new(0));
-    let alive = Arc::new(AtomicBool::new(true));
-    {
-        let alive_cleanup = alive.clone();
-        cleanup(move || alive_cleanup.store(false, Ordering::Relaxed));
-        effect(move || {
-            let tracks = s.tracks.get();
-            let live: HashSet<&str> = tracks.iter().map(|t| t.path.as_str()).collect();
-            rows.update(|r| r.retain(|p, _| live.contains(p.as_str())));
-            selected.update(|set| set.retain(|p| live.contains(p.as_str())));
-            let need: Vec<(String, u64, bool)> = tracks
-                .iter()
-                .filter(|t| {
-                    rows.with_untracked(|r| r.get(&t.path).map_or(true, |row| row.stamp != t.stamp))
-                })
-                .map(|t| (t.path.clone(), t.stamp, t.has_art))
-                .collect();
-            if need.is_empty() {
-                return;
-            }
-            let run_gen = generation.fetch_add(1, Ordering::Relaxed) + 1;
-            let generation = generation.clone();
-            let alive = alive.clone();
-            let post = poster();
-            std::thread::spawn(move || {
-                // 投递合并：每批到来都重建 `displayed` + 全表 DataTableRows，
-                // 大曲库逐 100 条投递就是 ~100 次全表重算——每 ~250ms 至多
-                // 投一次，末尾兜底收尾。
-                let mut last = std::time::Instant::now() - std::time::Duration::from_millis(250);
-                let mut batch: Vec<(String, Arc<MetaRow>)> = Vec::new();
-                let flush = |post: &Post, batch: &mut Vec<(String, Arc<MetaRow>)>| {
-                    if batch.is_empty() {
-                        return;
-                    }
-                    let chunk = std::mem::take(batch);
-                    let alive = alive.clone();
-                    post.post(move || {
-                        // 视图已拆：信号可能已随 owner 处置，别写。
-                        if !alive.load(Ordering::Relaxed) {
-                            return;
-                        }
-                        rows.update(|r| {
-                            for (p, row) in chunk {
-                                r.insert(p, row);
-                            }
-                        })
-                    });
-                };
-                for (path, stamp, has_art) in need {
-                    if generation.load(Ordering::Relaxed) != run_gen
-                        || !alive.load(Ordering::Relaxed)
-                    {
-                        return;
-                    }
-                    if let Some(row) = build_row(Path::new(&path), stamp, has_art) {
-                        batch.push((path, Arc::new(row)));
-                    }
-                    if last.elapsed() >= std::time::Duration::from_millis(250) {
-                        flush(&post, &mut batch);
-                        last = std::time::Instant::now();
-                    }
-                }
-                flush(&post, &mut batch);
-            });
-        });
-    }
+    // 同步修剪：清掉离开曲库的路径与选中集。曲目元数据直接由 SQLite / 索引条目供给，
+    // 无需后台再逐曲扫描磁盘标签。
+    effect(move || {
+        let tracks = s.tracks.get();
+        let live: HashSet<&str> = tracks.iter().map(|t| t.path.as_str()).collect();
+        rows.update(|r| r.retain(|p, _| live.contains(p.as_str())));
+        selected.update(|set| set.retain(|p| live.contains(p.as_str())));
+    });
 
     // 当前显示序：筛选（文件名 / 标题 / 歌手 / 专辑，不分大小写）+ app
-    // 侧排序（无排序 = 曲库序）。
+    // 侧排序（无排序 = 曲库序）。未排序时不读 `rows`，避免后台分批写入
+    // 频繁导致全表重算与重建。
     let displayed = computed(move || {
         let tracks = s.tracks.get();
-        let map = rows.get(); // 排序读已加载字段，加载批到了要重排
+        let srt = sort.get();
         let q = filter.with(|f| f.trim().to_lowercase());
         let mut list: Vec<TrackEntry> = tracks
             .iter()
             .filter(|t| {
                 q.is_empty()
-                    || [&t.file_name, &t.title, &t.artist, &t.album, &t.album_artist]
-                        .iter()
-                        .any(|f| f.to_lowercase().contains(&q))
+                    || contains_ignore_case(&t.file_name, &q)
+                    || contains_ignore_case(&t.title, &q)
+                    || contains_ignore_case(&t.artist, &q)
+                    || contains_ignore_case(&t.album, &q)
+                    || contains_ignore_case(&t.album_artist, &q)
             })
             .cloned()
             .collect();
-        if let Some(srt) = sort.get() {
+        if let Some(srt) = srt {
+            let map = rows.get();
             table::sort_entries(
                 &mut list,
                 &srt.key,
@@ -238,16 +459,17 @@ pub fn page() -> View {
                         .gap(px(8.0))
                         .px(px(32.0))
                         .pb(px(12.0))
-                        .window_drag(true)
                         .child(
                             input_field(true)
                                 .w(px(280.0))
                                 .label("筛选")
-                                .placeholder("筛选文件名、标题、歌手、专辑")
+                                .placeholder("筛选文件名、标题、艺术家、专辑")
                                 .default_value(untracked(|| filter.get()))
                                 .window_drag(false)
                                 .on_change(move |t: &str| filter.set(t.to_owned())),
                         )
+                        .child(column_selector(visible_cols))
+                        .child(view().flex_1().min_w(px(0.0)).window_drag(true))
                         .child({
                             let displayed = displayed.clone();
                             let selected = selected.clone();
@@ -260,10 +482,15 @@ pub fn page() -> View {
                                     let displayed = displayed.clone();
                                     let selected = selected.clone();
                                     move || {
-                                        displayed.with(|v| {
-                                            !v.is_empty()
-                                                && v.iter()
-                                                    .all(|t| selected.with(|s| s.contains(&t.path)))
+                                        selected.with(|s| {
+                                            if s.is_empty() {
+                                                return false;
+                                            }
+                                            displayed.with(|v| {
+                                                !v.is_empty()
+                                                    && s.len() >= v.len()
+                                                    && v.iter().all(|t| s.contains(&t.path))
+                                            })
                                         })
                                     }
                                 },
@@ -271,11 +498,19 @@ pub fn page() -> View {
                                     let displayed = displayed.clone();
                                     let selected = selected.clone();
                                     move || {
-                                        displayed.with(|v| {
-                                            v.iter().any(|t| selected.with(|s| s.contains(&t.path)))
-                                                && !v
-                                                    .iter()
-                                                    .all(|t| selected.with(|s| s.contains(&t.path)))
+                                        selected.with(|s| {
+                                            if s.is_empty() {
+                                                return false;
+                                            }
+                                            displayed.with(|v| {
+                                                if v.is_empty() {
+                                                    return false;
+                                                }
+                                                let any = v.iter().any(|t| s.contains(&t.path));
+                                                let all = s.len() >= v.len()
+                                                    && v.iter().all(|t| s.contains(&t.path));
+                                                any && !all
+                                            })
                                         })
                                     }
                                 },
@@ -356,7 +591,15 @@ pub fn page() -> View {
                                 .bg(nsh_base::theme().card)
                                 .shadow_xs()
                                 .overflow_hidden()
-                                .child(table::table(displayed, rows, selected, anchor, sort)),
+                                .child(table::table(
+                                    displayed,
+                                    rows,
+                                    selected,
+                                    anchor,
+                                    sort,
+                                    visible_cols,
+                                    col_widths,
+                                )),
                         )
                         .child(when(
                             move || has_selection.get(),
@@ -406,5 +649,40 @@ mod tests {
         assert_eq!(lyrics_preview(""), "");
         // 长行截 40 字（按字符不按字节）。
         assert_eq!(lyrics_preview(&"长".repeat(50)).chars().count(), 40);
+    }
+
+    #[test]
+    fn contains_ignore_case_matches() {
+        assert!(contains_ignore_case("Sine.flac", "sine"));
+        assert!(contains_ignore_case("Sine.flac", "FLAC"));
+        assert!(!contains_ignore_case("Sine.flac", "wav"));
+        assert!(contains_ignore_case("测试歌曲.flac", "测试"));
+        assert!(contains_ignore_case("Hello World", ""));
+    }
+
+    #[test]
+    fn column_sets_have_expected_members() {
+        let all = all_columns();
+        assert!(all.contains("file_name"));
+        assert!(all.contains("title"));
+        assert!(all.contains("artist"));
+        assert!(all.contains("album"));
+        assert_eq!(all.len(), table::COLUMNS.len());
+
+        let default_cols = default_columns();
+        assert!(default_cols.contains("file_name"));
+        assert!(default_cols.contains("title"));
+        assert!(default_cols.contains("artist"));
+        assert!(default_cols.contains("album"));
+        assert!(default_cols.contains("rating"));
+        assert!(default_cols.contains("pictures"));
+        assert!(default_cols.contains("lyrics"));
+        assert!(default_cols.contains("comment"));
+        assert!(!default_cols.contains("composer"));
+        assert!(!default_cols.contains("track_replay_gain"));
+        assert!(default_cols.len() < all.len());
+        for col in &default_cols {
+            assert!(all.contains(col));
+        }
     }
 }

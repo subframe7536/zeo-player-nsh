@@ -93,7 +93,7 @@ fn queue_panel(open: Signal<bool>) -> View {
         let playing = move || is_current() && s.playback.with(|p| p.playing);
         let title = move || {
             entry.with(|e| match e {
-                Some(e) => e.title.clone(),
+                Some(e) => e.display_title().to_owned(),
                 None => path.with(|p| {
                     p.as_deref()
                         .map(|p| super::super::views::last_segment(p).to_owned())
@@ -154,7 +154,11 @@ fn queue_panel(open: Signal<bool>) -> View {
                     )
                     .child(
                         text(move || {
-                            entry.with(|e| e.as_ref().map(|e| e.artist.clone()).unwrap_or_default())
+                            entry.with(|e| {
+                                e.as_ref()
+                                    .map(|e| e.display_artist().to_owned())
+                                    .unwrap_or_default()
+                            })
                         })
                         .number_of_lines(1)
                         .text_size(px(12.0))

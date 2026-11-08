@@ -1371,6 +1371,18 @@ impl MenuGate {
         }
     }
 
+    /// 主动归还令牌。
+    pub fn close(self) {
+        if self.open.get_untracked() == Some(self.id) {
+            self.open.set(None);
+        }
+    }
+
+    /// 当前是否持有令牌。
+    pub fn is_open(self) -> bool {
+        self.open.get() == Some(self.id)
+    }
+
     /// `effect(gate.evicted(local))`：令牌被别的弹层夺走时复位 `popover`
     /// 的本地信号（触发器高亮、面板状态读它，不复位会留下「看着还开着」
     /// 的残影）。

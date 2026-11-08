@@ -154,7 +154,7 @@ mod tests {
         let cases = [
             ("aac.m4a", "格式 aac", "Lossy"),
             ("alac.m4a", "格式 alac", "Lossless"),
-            ("raw.aac", "raw", "Lossy"),
+            ("raw.aac", "", "Lossy"),
             ("vorbis.ogg", "格式 vorbis", "Lossy"),
             ("pcm.aiff", "格式 pcm", "Lossless"),
             ("rg.flac", "格式 rg", "Lossless"),

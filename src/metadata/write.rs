@@ -1098,14 +1098,11 @@ mod tests {
             lrc: None,
         };
         write_tags(&path, &clear).unwrap();
-        assert_eq!(
-            crate::metadata::read_meta(&path).unwrap().album,
-            "Unknown Album"
-        );
+        assert_eq!(crate::metadata::read_meta(&path).unwrap().album, "");
         let blank = edits(&[(TagField::Title, "")]);
         write_tags(&path, &blank).unwrap();
-        // 空串 = Clear：标题回落到文件名。
-        assert_eq!(crate::metadata::read_meta(&path).unwrap().title, "sine");
+        // 空串 = Clear：标题不再回退到文件名，保持空串。
+        assert_eq!(crate::metadata::read_meta(&path).unwrap().title, "");
     }
 
     /// TRACKNUMBER="3/12" 合并写法：动号 / 动总数 / 清号 / 清总数都

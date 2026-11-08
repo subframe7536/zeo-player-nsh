@@ -272,7 +272,7 @@ impl Shelf {
 fn card(t: &TrackEntry, index: usize, five: Rc<Vec<TrackEntry>>) -> ButtonElement {
     // `src` / `letter` 进 `when` 的响应闭包：要 `Copy`，用 `stored` 持有。
     let path = stored(t.path.clone());
-    let title = stored(t.title.clone());
+    let title = stored(t.display_title().to_owned());
     let src = move || cover_for(&path.get(), 140.0);
     let letter = move || initial_letter(&title.get(), &path.get());
     button()
@@ -282,7 +282,7 @@ fn card(t: &TrackEntry, index: usize, five: Rc<Vec<TrackEntry>>) -> ButtonElemen
         .items_center()
         .p(px(10.0))
         .rounded(px(14.0))
-        .accessibility_label(SharedString::from(t.title.clone()))
+        .accessibility_label(SharedString::from(t.display_title().to_owned()))
         .hover(|st| st.bg(hover()))
         .active(|st| st.opacity(0.75))
         .on_press(move |_: &()| play_list(&five, index))
@@ -295,7 +295,7 @@ fn card(t: &TrackEntry, index: usize, five: Rc<Vec<TrackEntry>>) -> ButtonElemen
                 .items_center()
                 .gap(px(2.0))
                 .child(
-                    text(t.title.clone())
+                    text(t.display_title().to_owned())
                         .number_of_lines(1)
                         .text_size(px(13.0))
                         .line_height(px(13.0))
@@ -303,7 +303,7 @@ fn card(t: &TrackEntry, index: usize, five: Rc<Vec<TrackEntry>>) -> ButtonElemen
                         .text_color(fg()),
                 )
                 .child(
-                    text(t.artist.clone())
+                    text(t.display_artist().to_owned())
                         .number_of_lines(1)
                         .text_size(px(12.0))
                         .line_height(px(12.0))
@@ -323,7 +323,7 @@ fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement {
         };
         let path = stored(first.path.clone());
         let art = move || cover_for(&path.get(), 400.0);
-        let title = first.title.clone();
+        let title = first.display_title().to_owned();
         let queue = list.clone();
         let reroll = move || featured.set(Rc::new(pick(&store().tracks.get_untracked(), 6)));
         // 列表行：序号 + 曲名 + 右对齐歌手；点行即以本批为队列从该行播。
@@ -352,7 +352,7 @@ fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement {
                     .px(px(12.0))
                     .rounded(px(8.0))
                     .role(AccessibilityRole::Button)
-                    .label(SharedString::from(t.title.clone()))
+                    .label(SharedString::from(t.display_title().to_owned()))
                     .hover(|st| st.bg(hover()))
                     .on_press(move |_: &()| play_list(&row_list, i))
                     .child(
@@ -363,7 +363,7 @@ fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement {
                             .text_color(faint()),
                     )
                     .child(
-                        text(row_track.title.clone())
+                        text(row_track.display_title().to_owned())
                             .flex_1()
                             .min_w(px(0.0))
                             .number_of_lines(1)
@@ -375,7 +375,7 @@ fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement {
                     .child(
                         // 歌手先省略：封顶 240、收缩权重×2、允许
                         // 缩到 0——标题只在歌手让完位后才被截。
-                        text(row_track.artist.clone())
+                        text(row_track.display_artist().to_owned())
                             .min_w(px(0.0))
                             .max_w(px(240.0))
                             .flex_shrink(2.0)

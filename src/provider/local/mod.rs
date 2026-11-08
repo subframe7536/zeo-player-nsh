@@ -181,7 +181,12 @@ fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> Track
         album_artist: {
             let aa = meta.album_artist.trim();
             if aa.is_empty() {
-                meta.artist.clone()
+                let art = meta.artist.trim();
+                if art.is_empty() {
+                    "Unknown Artist".to_owned()
+                } else {
+                    art.to_owned()
+                }
             } else {
                 aa.to_owned()
             }
@@ -197,12 +202,12 @@ fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> Track
 /// 索引顺序：歌手、专辑、碟号、音轨号、标题。
 pub(crate) fn sort_tracks(entries: &mut [TrackEntry]) {
     entries.sort_by(|a, b| {
-        a.artist
-            .cmp(&b.artist)
-            .then(a.album.cmp(&b.album))
-            .then(a.disk.cmp(&b.disk))
-            .then(a.track.cmp(&b.track))
-            .then(a.title.cmp(&b.title))
+        a.display_artist()
+            .cmp(b.display_artist())
+            .then_with(|| a.display_album().cmp(b.display_album()))
+            .then_with(|| a.disk.cmp(&b.disk))
+            .then_with(|| a.track.cmp(&b.track))
+            .then_with(|| a.display_title().cmp(b.display_title()))
     });
 }
 

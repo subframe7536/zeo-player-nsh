@@ -562,6 +562,7 @@ mod tests {
             composers: Vec::new(),
             art_hue: None,
             replaygain: Default::default(),
+            ..Default::default()
         }
     }
 

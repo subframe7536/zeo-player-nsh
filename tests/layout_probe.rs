@@ -72,6 +72,7 @@ struct Probed {
     scrolls: HashMap<NodeId, Size<Points>>,
     scroll_by: HashMap<NodeId, f32>,
     styles: HashMap<NodeId, (u32, u32, f32)>, // bg, border color, border width
+    test_ids: HashMap<NodeId, String>,
 }
 
 fn probe(app: &mut Headless) -> Arc<Mutex<Probed>> {
@@ -95,11 +96,15 @@ fn probe(app: &mut Headless) -> Arc<Mutex<Probed>> {
                     p.styles.remove(id);
                     p.scrolls.remove(id);
                     p.scroll_by.remove(id);
+                    p.test_ids.remove(id);
                 }
                 MountItem::Frame { id, frame } => {
                     p.frames.insert(*id, *frame);
                 }
                 MountItem::ViewProps { id, props } => {
+                    if let Some(t) = &props.test_id {
+                        p.test_ids.insert(*id, t.to_string());
+                    }
                     if let Some(l) = &props.accessibility.label {
                         p.labels.insert(*id, l.to_string());
                     }
@@ -620,4 +625,48 @@ fn sidebar_collapsed_tree_alignment_probe() {
         x1, x2,
         "侧栏收起时有子目录的文件夹 ({x1:.1}) 与无子目录的文件夹 ({x2:.1}) 图标应完全水平对齐"
     );
+}
+
+#[test]
+fn header_resize_indicator_probe() {
+    let mut app = start(1400.0, 800.0);
+    let probed = probe(&mut app);
+    app.press("元数据").unwrap();
+    app.wait_for("id:resize:title").unwrap();
+    let p = probed.lock().unwrap();
+    let mut found_count = 0;
+    for (id, tid) in &p.test_ids {
+        if tid.starts_with("resize:") {
+            let handle_frame = p.frames.get(id).expect("resize handle 应具有 frame");
+            assert_eq!(
+                handle_frame.origin.y.0, 0.0,
+                "{tid} 把手 origin.y 应为 0 (实际: {})",
+                handle_frame.origin.y.0
+            );
+            assert_eq!(
+                handle_frame.size.height.0, 36.0,
+                "{tid} 把手 height 应为 36pt (实际: {})",
+                handle_frame.size.height.0
+            );
+
+            // 查找指示条子节点
+            for (&child, &par) in &p.parents {
+                if par == *id {
+                    let child_frame = p.frames.get(&child).expect("指示条应具有 frame");
+                    assert_eq!(
+                        child_frame.origin.y.0, 0.0,
+                        "{tid} 的指示条 origin.y 应为 0 (实际: {})",
+                        child_frame.origin.y.0
+                    );
+                    assert_eq!(
+                        child_frame.size.height.0, 36.0,
+                        "{tid} 的指示条 height 应为 36pt (实际: {})",
+                        child_frame.size.height.0
+                    );
+                }
+            }
+            found_count += 1;
+        }
+    }
+    assert!(found_count > 0, "应检测到表头列宽拖拽把手");
 }

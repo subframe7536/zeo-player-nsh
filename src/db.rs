@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::metadata::{CacheEntry, MetaInfo};
 
 /// 当前表结构版本（`PRAGMA user_version`）。改表时加一，并在 [`migrate`] 里迁移。
-const SCHEMA_VERSION: i32 = 7;
+const SCHEMA_VERSION: i32 = 8;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS tracks (
@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS state (
 
 const COLUMNS: &str = "path, stamp, size, modified, title, artist, album, album_artist, duration, has_art, \
     bit_rate, bit_depth, sample_rate, channels, codec, quality, genres, year, track, track_total, disk, disk_total, \
-    album_artists, composers, art_hue, art_sat, rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak";
+    album_artists, composers, art_hue, art_sat, rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, \
+    conductor, lyricist, publisher, copyright, comment, rating, lyrics";
 
 fn db() -> Option<&'static Mutex<Connection>> {
     static DB: OnceLock<Option<Mutex<Connection>>> = OnceLock::new();
@@ -152,6 +153,18 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             );",
         )?;
     }
+    if version < 8 {
+        // 指挥、作词、发行商、版权、注释、评分入库，
+        // 元数据视图可直读 SQLite；老行 NULL = 缺失。
+        conn.execute_batch(
+            "ALTER TABLE tracks ADD COLUMN conductor TEXT;
+             ALTER TABLE tracks ADD COLUMN lyricist TEXT;
+             ALTER TABLE tracks ADD COLUMN publisher TEXT;
+             ALTER TABLE tracks ADD COLUMN copyright TEXT;
+             ALTER TABLE tracks ADD COLUMN comment TEXT;
+             ALTER TABLE tracks ADD COLUMN rating INTEGER;",
+        )?;
+    }
     if version < SCHEMA_VERSION {
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
@@ -248,6 +261,13 @@ fn meta_row(r: &rusqlite::Row) -> rusqlite::Result<(String, CacheEntry)> {
             album_gain: r.get::<_, Option<f64>>(28)?.map(|v| v as f32),
             album_peak: r.get::<_, Option<f64>>(29)?.map(|v| v as f32),
         },
+        conductor: r.get(30)?,
+        lyricist: r.get(31)?,
+        publisher: r.get(32)?,
+        copyright: r.get(33)?,
+        comment: r.get(34)?,
+        rating: r.get(35)?,
+        lyrics: r.get(36)?,
     };
     let entry = CacheEntry {
         stamp: r.get::<_, i64>(1)? as u64,
@@ -321,7 +341,7 @@ fn save_meta_to(conn: &mut Connection, rows: &[(String, CacheEntry)]) -> rusqlit
     {
         let mut stmt = tx.prepare_cached(&format!(
             "INSERT OR REPLACE INTO tracks ({COLUMNS}) VALUES \
-             (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)"
+             (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37)"
         ))?;
         for (path, entry) in rows {
             let m = &entry.value;
@@ -356,6 +376,13 @@ fn save_meta_to(conn: &mut Connection, rows: &[(String, CacheEntry)]) -> rusqlit
                 m.replaygain.track_peak,
                 m.replaygain.album_gain,
                 m.replaygain.album_peak,
+                m.conductor,
+                m.lyricist,
+                m.publisher,
+                m.copyright,
+                m.comment,
+                m.rating,
+                m.lyrics,
             ])?;
         }
     }
@@ -932,6 +959,40 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].0, "a.flac");
         assert_eq!(rows[0].1.value.replaygain, rg);
+    }
+
+    /// 扩展元数据字段（conductor, lyricist, publisher, copyright, comment, rating, lyrics）写入读回。
+    #[test]
+    fn extended_meta_db_roundtrip() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let meta = MetaInfo {
+            conductor: Some("卡拉扬".into()),
+            lyricist: Some("林夕".into()),
+            publisher: Some("Sony Music".into()),
+            copyright: Some("© 2026".into()),
+            comment: Some("经典版本".into()),
+            rating: Some(5),
+            lyrics: Some("[00:01.00]歌词".into()),
+            ..Default::default()
+        };
+        let entry = CacheEntry {
+            stamp: 10,
+            size: 2048,
+            modified: 100,
+            value: Arc::new(meta.clone()),
+        };
+        save_meta_to(&mut conn, &[("track.flac".to_owned(), entry)]).unwrap();
+        let rows = load_meta_from(&conn).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "track.flac");
+        assert_eq!(rows[0].1.value.conductor.as_deref(), Some("卡拉扬"));
+        assert_eq!(rows[0].1.value.lyricist.as_deref(), Some("林夕"));
+        assert_eq!(rows[0].1.value.publisher.as_deref(), Some("Sony Music"));
+        assert_eq!(rows[0].1.value.copyright.as_deref(), Some("© 2026"));
+        assert_eq!(rows[0].1.value.comment.as_deref(), Some("经典版本"));
+        assert_eq!(rows[0].1.value.rating, Some(5));
+        assert_eq!(rows[0].1.value.lyrics.as_deref(), Some("[00:01.00]歌词"));
     }
 
     /// 每曲歌词偏移：写入读回；归零删行。

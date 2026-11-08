@@ -1580,11 +1580,28 @@ fn track_public(
     queue_index: i64,
 ) -> TrackPublic {
     let artwork = crate::metadata::covers::cached_artwork(path);
+    let title = if !meta.title.is_empty() {
+        meta.title.clone()
+    } else {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Unknown".to_owned())
+    };
+    let artist = if !meta.artist.is_empty() {
+        meta.artist.clone()
+    } else {
+        "Unknown Artist".to_owned()
+    };
+    let album = if !meta.album.is_empty() {
+        meta.album.clone()
+    } else {
+        "Unknown Album".to_owned()
+    };
     TrackPublic {
         path: Some(path.to_string_lossy().into_owned()),
-        title: meta.title.clone(),
-        artist: meta.artist.clone(),
-        album: meta.album.clone(),
+        title,
+        artist,
+        album,
         covers_ready: artwork.is_some(),
         artwork,
         duration: meta.duration,

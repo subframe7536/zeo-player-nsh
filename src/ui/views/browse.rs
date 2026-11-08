@@ -41,7 +41,7 @@ impl Group {
     fn albums(&self) -> usize {
         self.tracks
             .iter()
-            .map(|t| t.album.as_str())
+            .map(|t| t.display_album())
             .collect::<HashSet<_>>()
             .len()
     }
@@ -133,9 +133,10 @@ pub fn Artists() -> impl IntoElement {
         let tracks = s.tracks.get();
         let seps = s.library.with(|l| l.config.artist_separators.clone());
         Rc::new(group_by(&tracks, move |t| {
-            let parts = crate::config::split_artists(&t.artist, &seps);
+            let artist = t.display_artist();
+            let parts = crate::config::split_artists(artist, &seps);
             if parts.is_empty() {
-                vec![(t.artist.clone(), t.artist.clone(), String::new())]
+                vec![(artist.to_owned(), artist.to_owned(), String::new())]
             } else {
                 parts
                     .into_iter()
@@ -267,11 +268,12 @@ pub fn Albums() -> impl IntoElement {
         let tracks = s.tracks.get();
         Rc::new(group_by(&tracks, |t| {
             let artist = if t.album_artist.is_empty() {
-                t.artist.clone()
+                t.display_artist().to_owned()
             } else {
                 t.album_artist.clone()
             };
-            vec![(format!("{artist}\u{0}{}", t.album), t.album.clone(), artist)]
+            let album = t.display_album().to_owned();
+            vec![(format!("{artist}\u{0}{}", album), album, artist)]
         }))
     });
     view().flex_1().child(dynamic(move || {

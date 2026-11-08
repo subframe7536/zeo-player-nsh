@@ -99,6 +99,13 @@ pub struct MetaInfo {
     pub disk_total: Option<u32>,
     pub album_artists: Vec<String>,
     pub composers: Vec<String>,
+    pub conductor: Option<String>,
+    pub lyricist: Option<String>,
+    pub publisher: Option<String>,
+    pub copyright: Option<String>,
+    pub comment: Option<String>,
+    pub rating: Option<u32>,
+    pub lyrics: Option<String>,
     /// 封面主色调（色相圈 0..1、饱和度 0..1）：不是标签，由 covers 工作线程
     /// 在解码封面时算好并写进同一行（`MetaCache::set_art_hue`）。
     pub art_hue: Option<(f32, f32)>,
@@ -173,11 +180,6 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
     let file_type = tagged.file_type();
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
 
-    let file_stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "Unknown".to_owned());
-
     let mut codec = codec_of(file_type).map(|s| s.to_owned());
     let quality = match file_type {
         lofty::file::FileType::Flac | lofty::file::FileType::Wav | lofty::file::FileType::Aiff => {
@@ -200,9 +202,9 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
     };
 
     let mut info = MetaInfo {
-        title: file_stem,
-        artist: "Unknown Artist".to_owned(),
-        album: "Unknown Album".to_owned(),
+        title: String::new(),
+        artist: String::new(),
+        album: String::new(),
         album_artist: String::new(),
         duration: props.duration().as_secs_f64(),
         has_art: false,
@@ -220,6 +222,13 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
         disk_total: None,
         album_artists: Vec::new(),
         composers: Vec::new(),
+        conductor: None,
+        lyricist: None,
+        publisher: None,
+        copyright: None,
+        comment: None,
+        rating: None,
+        lyrics: None,
         art_hue: None,
         // 文件已打开，顺手读（无额外 I/O）。
         replaygain: rg_from_tagged(&tagged),
@@ -252,6 +261,13 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
         info.disk_total = disk_total.or_else(|| number(tag, ItemKey::DiscTotal));
         info.album_artists = strings(tag, ItemKey::AlbumArtist);
         info.composers = strings(tag, ItemKey::Composer);
+        info.conductor = first(tag, ItemKey::Conductor);
+        info.lyricist = first(tag, ItemKey::Lyricist);
+        info.publisher = first(tag, ItemKey::Publisher).or_else(|| first(tag, ItemKey::Label));
+        info.copyright = first(tag, ItemKey::CopyrightMessage);
+        info.comment = first(tag, ItemKey::Comment);
+        info.rating = tag.ratings().next().map(|p| p.rating() as u32);
+        info.lyrics = first(tag, ItemKey::Lyrics).or_else(|| first(tag, ItemKey::UnsyncLyrics));
         info.has_art = !tag.pictures().is_empty();
     }
 
