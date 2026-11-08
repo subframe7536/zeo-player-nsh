@@ -1611,8 +1611,6 @@ fn metadata_row_press_opens_single_panel() {
     app.wait_for("text:sine.flac").unwrap();
     app.press("text:sine.flac").unwrap();
     app.wait_for("label:标题").unwrap();
-    // 选择列的「✓」是单元格文本（无自绘格），应进文本树。
-    app.wait_for("text:✓").unwrap();
     assert_eq!(
         app.screen().input_text("label:标题").unwrap(),
         Some("测试歌曲"),

@@ -5,10 +5,10 @@
 //! 状态行是滚动区第一条；滚动区末位不再放操作行。
 
 use std::collections::{BTreeSet, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use nsh_core::prelude::*;
 
@@ -31,7 +31,34 @@ use crate::metadata::write::{self, CoverEdit, Edit, TagEdits, TagField};
 /// 时间（`db::added_at`，随同一后台读捎回——SQLite 读别上界面线程）。
 type FullRow = (HashMap<TagField, String>, Option<&'static str>, Option<u64>);
 
-/// 面板（w 360，左边框）：单选表单 / 批量修改，按选中数切换——两个
+const FULL_CACHE_CAP: usize = 32;
+type FullCache = Mutex<Vec<(String, FullRow)>>;
+
+fn full_cache() -> &'static FullCache {
+    static CACHE: OnceLock<FullCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn get_cached_full(path: &str) -> Option<FullRow> {
+    let mut cache = full_cache().lock().unwrap();
+    let pos = cache.iter().position(|(p, _)| p == path)?;
+    let entry = cache.remove(pos);
+    let row = entry.1.clone();
+    cache.push(entry);
+    Some(row)
+}
+
+fn put_cached_full(path: &str, row: FullRow) {
+    let mut cache = full_cache().lock().unwrap();
+    if let Some(pos) = cache.iter().position(|(p, _)| p == path) {
+        cache.remove(pos);
+    } else if cache.len() >= FULL_CACHE_CAP {
+        cache.remove(0);
+    }
+    cache.push((path.to_owned(), row));
+}
+
+/// 面板（w 380，左边框 + 浮动阴影）：单选表单 / 批量修改，按选中数切换——两个
 /// 分支各按「单选路径 / 批量集合」memo，集合没变不重建（草稿留得住）。
 pub(super) fn panel(
     displayed: Memo<Rc<Vec<TrackEntry>>>,
@@ -49,10 +76,14 @@ pub(super) fn panel(
         (set.len() >= 2).then(|| Rc::new(set.iter().cloned().collect::<Vec<String>>()))
     });
     view()
-        .w(px(360.0))
+        .w(px(380.0))
         .flex_shrink_0()
-        .border_l_1()
-        .border_l_color(border())
+        .rounded(px(12.0))
+        .border_1()
+        .border_color(border())
+        .shadow_xl()
+        .bg(nsh_base::theme().card)
+        .overflow_hidden()
         .child(dynamic(move || {
             if let Some(path) = single.get() {
                 return single_panel(path, rows, selected, close.clone()).into_element();
@@ -65,13 +96,12 @@ pub(super) fn panel(
         }))
 }
 
-/// 固定顶栏（滚动区外）：`px-4 pt-3 pb-2` + 底部分隔线，标题件横排
-/// 后接一颗关闭钮（清空选中集，面板随之收掉）。
+/// 固定顶栏（滚动区外）：高 36pt 与表格表头等高对齐 + 底部分隔线，
+/// 标题件横排后接一颗关闭钮（清空选中集，面板随之收掉）。
 fn panel_header(parts: Vec<AnyElement>, close: Rc<dyn Fn()>) -> View {
     view()
+        .h(px(36.0))
         .px(px(16.0))
-        .pt(px(12.0))
-        .pb(px(8.0))
         .border_b_1()
         .border_b_color(border())
         .flex_row()
@@ -80,7 +110,7 @@ fn panel_header(parts: Vec<AnyElement>, close: Rc<dyn Fn()>) -> View {
         .children(parts)
         .child(icon_button(
             || Icon::Close,
-            14.0,
+            12.0,
             "关闭",
             muted_fg,
             move || {
@@ -135,23 +165,28 @@ fn single_panel(
     selected: Signal<BTreeSet<String>>,
     close: Rc<dyn Fn()>,
 ) -> View {
-    // 完整字段值后台线程读（lofty 整文件过一遍，注释 / 歌词可能很长；
-    // 读不出按全空，仍可填），入库时间随同一趟 `db::added_at` 捎回
-    // （SQLite 读别上界面线程）。`post` 回排把权威值并进草稿——面板
-    // 拆掉（换选 / 换页）后 `alive` 挡住写入。
-    let full = signal(Option::<FullRow>::None);
+    // 完整字段值优先读 LRU 缓存（同曲目重开 / 来回切秒开，无等待占位）；
+    // 未命中走后台异步读取（Lofty 跳过大封面与音频属性解析，亚毫秒完成）。
+    let cached = get_cached_full(&path);
+    let initial_values = cached
+        .as_ref()
+        .map(|(fields, _, _)| fields.clone())
+        .or_else(|| rows.with_untracked(|r| r.get(&path).map(|row| row_seed(row))))
+        .unwrap_or_default();
+    let seeded = signal(cached.is_some() || !initial_values.is_empty());
+    let full = signal(cached.clone());
     let alive = Arc::new(AtomicBool::new(true));
     cleanup({
         let alive = alive.clone();
         move || alive.store(false, Ordering::Relaxed)
     });
-    // 「已进过种子」标记：行（MetaRow）先到用它，完整值回填注释 / 歌词
-    // 与权威原值；完整值先到直接全量。
-    let seeded = signal(false);
     let draft = signal(SingleDraft {
         path: path.clone(),
-        original: HashMap::new(),
-        values: HashMap::new(),
+        original: cached
+            .as_ref()
+            .map(|(f, _, _)| f.clone())
+            .unwrap_or_default(),
+        values: initial_values,
         cover: None,
         cover_src: None,
         saving: false,
@@ -169,39 +204,44 @@ fn single_panel(
         err: signal(None),
         busy: signal(false),
     };
-    // 滚动视口高：内容矮于视口时把歌词输入拉到底（见下面 min_h / flex
-    // 链），首轮 on_layout 未到时为 0——min_h(0) 是空操作。
-    let viewport_h = signal(0.0_f32);
-    {
-        let post = poster();
+
+    if full.get_untracked().is_none() {
         let read = path.clone();
         let alive_t = alive.clone();
-        std::thread::spawn(move || {
-            let (fields, tag_type) = write::read_row(Path::new(&read)).unwrap_or_default();
-            let added = crate::db::added_at(&read);
-            post.post(move || {
-                if !alive_t.load(Ordering::Relaxed) {
-                    return;
-                }
-                let row_seeded = seeded.get_untracked();
-                seeded.set(true);
-                draft.update(|d| {
-                    if row_seeded {
-                        // 行种子只缺注释 / 歌词——补它俩即可（它们的输入
-                        // 等 `full` 才挂载，不可能已被编辑）。
-                        for f in [TagField::Comment, TagField::Lyrics] {
-                            d.values
-                                .insert(f, fields.get(&f).cloned().unwrap_or_default());
-                        }
-                    } else {
-                        d.values = fields.clone();
+        spawn(async move {
+            let read_p = PathBuf::from(&read);
+            let read_target = read.clone();
+            let Ok(res) = blocking(move || {
+                let (fields, tag_type) = write::read_row(&read_p).unwrap_or_default();
+                let added = crate::db::added_at(&read_target);
+                (fields, tag_type, added)
+            })
+            .await
+            else {
+                return;
+            };
+            if !alive_t.load(Ordering::Relaxed) {
+                return;
+            }
+            put_cached_full(&read, res.clone());
+            let (fields, tag_type, added) = res;
+            let row_seeded = seeded.get_untracked();
+            seeded.set(true);
+            draft.update(|d| {
+                if row_seeded {
+                    for f in [TagField::Comment, TagField::Lyrics] {
+                        d.values
+                            .insert(f, fields.get(&f).cloned().unwrap_or_default());
                     }
-                    d.original = fields.clone();
-                });
-                full.set(Some((fields, tag_type, added)));
+                } else {
+                    d.values = fields.clone();
+                }
+                d.original = fields.clone();
             });
+            full.set(Some((fields, tag_type, added)));
         });
     }
+
     // 表单门槛：完整值或行种子谁先到用谁的（行通常先到——表格加载批）。
     let ready = {
         let path = path.clone();
@@ -226,92 +266,77 @@ fn single_panel(
             close,
         ))
         .child(
-            // 包一层量滚动视口高（on_layout 报的是自身 bounds，滚动条
-            // 进出不影响）：内容据此 min_h 撑到视口高，歌词框的 flex 链
-            // 才有空余可分。
-            view()
-                .flex_1()
-                .min_h(px(0.0))
-                .on_layout(move |b: &Bounds<Points>| viewport_h.set(b.size.height.0))
-                .child(
-                    scroll().flex_1().min_h(px(0.0)).child(
-                        view()
-                            .px(px(16.0))
-                            .pt(px(16.0))
-                            // 底部避开浮动播放条：滚动内容能滚过它。
-                            .pb(px(BAR_SPACE))
-                            .gap(px(16.0))
-                            // 内容矮于视口时撑满：歌词行吸收剩余高度，
-                            // 「音频参数」节随之贴到底边（播放条上方）。
-                            .min_h(move || px(viewport_h.get()))
-                            // 状态行是滚动区第一条：写回 / 改名报错（红）与
-                            // 「已保存」（淡色），空着不占位。
-                            .child(when(
-                                move || {
-                                    draft.with(|d| d.error.is_some() || d.saved)
-                                        || rename_state.err.with(|e| e.is_some())
-                                },
-                                move || {
-                                    text(move || {
-                                        let d = draft.get();
-                                        if let Some(e) = &d.error {
-                                            e.clone()
-                                        } else if let Some(e) = rename_state.err.get() {
-                                            e
-                                        } else if d.saved {
-                                            "已保存".to_owned()
-                                        } else {
-                                            String::new()
-                                        }
-                                    })
-                                    .number_of_lines(1)
-                                    .text_size(px(12.0))
-                                    .line_height(px(12.0))
-                                    .text_color(move || {
-                                        if draft.with(|d| d.error.is_some())
-                                            || rename_state.err.with(|e| e.is_some())
-                                        {
-                                            nsh_base::theme().destructive
-                                        } else {
-                                            muted_fg()
-                                        }
-                                    })
-                                },
-                            ))
-                            .child(dynamic(move || {
-                                if !ready.get() {
-                                    return view()
-                                        .h(px(160.0))
-                                        .items_center()
-                                        .justify_center()
-                                        .child(
-                                            text("正在读取元数据…")
-                                                .text_size(px(12.0))
-                                                .line_height(px(12.0))
-                                                .text_color(muted_fg()),
-                                        )
-                                        .into_element();
+            scroll().flex_1().min_h(px(0.0)).child(
+                view()
+                    .px(px(16.0))
+                    .pt(px(14.0))
+                    .pb(px(16.0))
+                    .gap(px(12.0))
+                    // 状态行是滚动区第一条：写回 / 改名报错（红）与
+                    // 「已保存」（淡色），空着不占位。
+                    .child(when(
+                        move || {
+                            draft.with(|d| d.error.is_some() || d.saved)
+                                || rename_state.err.with(|e| e.is_some())
+                        },
+                        move || {
+                            text(move || {
+                                let d = draft.get();
+                                if let Some(e) = &d.error {
+                                    e.clone()
+                                } else if let Some(e) = rename_state.err.get() {
+                                    e
+                                } else if d.saved {
+                                    "已保存".to_owned()
+                                } else {
+                                    String::new()
                                 }
-                                // 行种子兜底（`untracked`：构建期读不把表单
-                                // 订到 rows / full；`full` 先到时 post 已填，
-                                // 这里幂等空转）。
-                                untracked(|| {
-                                    if !seeded.get()
-                                        && full.get().is_none()
-                                        && let Some(seed) =
-                                            rows.get().get(&path).map(|row| row_seed(row))
-                                    {
-                                        seeded.set(true);
-                                        draft.update(|d| {
-                                            d.original = seed.clone();
-                                            d.values = seed;
-                                        });
-                                    }
+                            })
+                            .number_of_lines(1)
+                            .text_size(px(12.0))
+                            .line_height(px(12.0))
+                            .text_color(move || {
+                                if draft.with(|d| d.error.is_some())
+                                    || rename_state.err.with(|e| e.is_some())
+                                {
+                                    nsh_base::theme().destructive
+                                } else {
+                                    muted_fg()
+                                }
+                            })
+                        },
+                    ))
+                    .child(dynamic(move || {
+                        if !ready.get() {
+                            return view()
+                                .h(px(160.0))
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    text("正在读取元数据…")
+                                        .text_size(px(12.0))
+                                        .line_height(px(12.0))
+                                        .text_color(muted_fg()),
+                                )
+                                .into_element();
+                        }
+                        // 行种子兜底（`untracked`：构建期读不把表单
+                        // 订到 rows / full；`full` 先到时已填，这里幂等空转）。
+                        untracked(|| {
+                            if !seeded.get()
+                                && full.get().is_none()
+                                && let Some(seed) = rows.get().get(&path).map(|row| row_seed(row))
+                            {
+                                seeded.set(true);
+                                draft.update(|d| {
+                                    d.original = seed.clone();
+                                    d.values = seed;
                                 });
-                                single_form(path.clone(), draft, rows, full).into_element()
-                            })),
-                    ),
-                ),
+                            }
+                        });
+                        single_form(path.clone(), draft, rows, full).into_element()
+                    })),
+            ),
         )
 }
 
@@ -346,9 +371,8 @@ fn single_header(
         move || commit_rename(&path, rename_state, rows, selected, alive.clone())
     });
     view()
+        .h(px(36.0))
         .px(px(16.0))
-        .pt(px(12.0))
-        .pb(px(8.0))
         .border_b_1()
         .border_b_color(border())
         .child(dynamic(move || {
@@ -360,6 +384,9 @@ fn single_header(
                     input_field(true)
                         .flex_1()
                         .min_w(px(0.0))
+                        .h(px(24.0))
+                        .py(px(0.0))
+                        .text_size(px(12.0))
                         .label("文件名")
                         .auto_focus(true)
                         .default_value(rename_state.name_input.get_untracked())
@@ -392,7 +419,7 @@ fn single_header(
                     );
                 }
                 parts.push(
-                    icon_button(|| Icon::Check, 14.0, "完成重命名", muted_fg, {
+                    icon_button(|| Icon::Check, 12.0, "完成重命名", muted_fg, {
                         let commit = commit.clone();
                         move || commit()
                     })
@@ -402,7 +429,7 @@ fn single_header(
                     .into_element(),
                 );
                 parts.push(
-                    icon_button(|| Icon::Close, 14.0, "取消重命名", muted_fg, {
+                    icon_button(|| Icon::Close, 12.0, "取消重命名", muted_fg, {
                         let stem = stem.clone();
                         move || {
                             rename_state.err.set(None);
@@ -416,25 +443,32 @@ fn single_header(
                 parts
             } else {
                 vec![
-                    text(file_label.clone())
+                    view()
                         .flex_1()
                         .min_w(px(0.0))
-                        .number_of_lines(1)
-                        .text_size(px(13.0))
-                        .line_height(px(13.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(fg())
+                        .flex_row()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            text(file_label.clone())
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .number_of_lines(1)
+                                .text_size(px(13.0))
+                                .line_height(px(13.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(fg()),
+                        )
+                        .child(icon_button(|| Icon::Edit, 12.0, "重命名", muted_fg, {
+                            let stem = stem.clone();
+                            move || {
+                                rename_state.name_input.set((*stem).clone());
+                                rename_state.err.set(None);
+                                rename_state.renaming.set(true);
+                            }
+                        }))
                         .into_element(),
-                    icon_button(|| Icon::Edit, 14.0, "重命名", muted_fg, {
-                        let stem = stem.clone();
-                        move || {
-                            rename_state.name_input.set((*stem).clone());
-                            rename_state.err.set(None);
-                            rename_state.renaming.set(true);
-                        }
-                    })
-                    .into_element(),
-                    text_button(Variant::Default, Size::Sm, None, "保存", {
+                    text_button(Variant::Default, Size::Xs, None, "保存", {
                         let alive = alive.clone();
                         move || save_single(draft, rows, alive.clone())
                     })
@@ -446,7 +480,7 @@ fn single_header(
                             })
                     })
                     .into_element(),
-                    icon_button(|| Icon::Close, 14.0, "关闭", muted_fg, {
+                    icon_button(|| Icon::Close, 12.0, "关闭", muted_fg, {
                         let close = close.clone();
                         move || close()
                     })
@@ -454,6 +488,7 @@ fn single_header(
                 ]
             };
             view()
+                .h_full()
                 .flex_row()
                 .items_center()
                 .gap(px(8.0))
@@ -471,11 +506,7 @@ fn single_form(
     full: Signal<Option<FullRow>>,
 ) -> View {
     view()
-        // 滚动内容根撑到视口高后，表单吃满其中的余高（内容超高时
-        // flex_1 不收缩——min-height 兜底自然高），「歌词与注释」节的
-        // flex_1 才有空余可吸收。
-        .flex_1()
-        .gap(px(16.0))
+        .gap(px(12.0))
         .child(section(
             "基本信息",
             vec![
@@ -485,11 +516,6 @@ fn single_form(
                 field_row("专辑歌手", TagField::AlbumArtist, draft),
                 field_row("流派", TagField::Genre, draft),
                 narrow_row("年份", TagField::Year, draft, 64.0),
-            ],
-        ))
-        .child(section(
-            "编号",
-            vec![
                 pair_row(
                     "音轨",
                     "音轨号",
@@ -509,19 +535,22 @@ fn single_form(
             ],
         ))
         .child(section(
-            "人员",
+            "人员与版权",
             vec![
                 field_row("作曲", TagField::Composer, draft),
                 field_row("指挥", TagField::Conductor, draft),
                 field_row("作词", TagField::Lyricist, draft),
-            ],
-        ))
-        .child(section(
-            "其他",
-            vec![
                 field_row("发行商", TagField::Publisher, draft),
                 field_row("版权", TagField::Copyright, draft),
                 rating_row(draft),
+            ],
+        ))
+        .child(section(
+            "封面与歌词",
+            vec![
+                cover_row(draft),
+                multi_row("歌词", TagField::Lyrics, draft, full, 140.0, 260.0),
+                multi_row("注释", TagField::Comment, draft, full, 64.0, 120.0),
             ],
         ))
         .child(section(
@@ -533,19 +562,6 @@ fn single_form(
                 narrow_row("专辑峰值", TagField::AlbumPeak, draft, 88.0),
             ],
         ))
-        .child(section("封面", vec![cover_row(draft)]))
-        .child(
-            section(
-                "歌词与注释",
-                vec![
-                    multi_row("注释", TagField::Comment, draft, full, 72.0, false),
-                    multi_row("歌词", TagField::Lyrics, draft, full, 160.0, true),
-                ],
-            )
-            // 吃掉表单剩余高度：歌词框跟着拉伸到视口底边（「音频参数」
-            // 节自然高、贴底收尾；表单超出一屏时本节自然高，照常滚）。
-            .flex_1(),
-        )
         .child(tech_section(&path, rows, full))
 }
 
@@ -558,18 +574,23 @@ fn section_title(title: &'static str) -> Text {
         .text_color(muted_fg())
 }
 
-/// 一节：标题 + 行距 8 的若干行；节与节之间由父级 gap(16) 分。
+/// 一节：卡片框体（细边框 + 圆角 + 微底色），标题 + 间距 10 的若干行。
 fn section(title: &'static str, rows: Vec<View>) -> View {
     view()
-        .gap(px(8.0))
+        .p(px(14.0))
+        .rounded(px(10.0))
+        .border_1()
+        .border_color(border().opacity(0.6))
+        .bg(nsh_base::theme().background)
+        .gap(px(10.0))
         .child(section_title(title))
         .children(rows)
 }
 
-/// 行首标签：64pt 列，13pt 淡色，与控件垂直居中。
+/// 行首标签：72pt 列，13pt 淡色，与控件垂直居中。
 fn label_cell(label: &'static str) -> Text {
     text(label)
-        .w(px(64.0))
+        .w(px(72.0))
         .text_size(px(13.0))
         .line_height(px(13.0))
         .text_color(muted_fg())
@@ -728,45 +749,35 @@ fn rating_row(draft: Signal<SingleDraft>) -> View {
         )
 }
 
-/// 多行输入（注释 / 歌词）：只在 `full` 落地后挂真输入——值必须是完整
-/// 的（MetaRow 里注释截 120 字、歌词只剩预览），挂载也晚一拍，顺手避
-/// 开滚动区里多行控件首轮布局缺内容的渲染问题。等待期画同款外观占位。
-/// `fill`（歌词行）：行在节列里 `flex_1` 吃剩余高度，输入只保 `min_h`
-/// 随行拉高（交叉轴 stretch）；普通行定高、标签顶对齐（`items_start`）。
+/// 多行输入（注释 / 歌词）：限制最大高度（歌词 260pt，注释 120pt）；只在
+/// `full` 落地后挂真输入——值必须是完整的（MetaRow 里注释截 120 字、
+/// 歌词只剩预览）。等待期画同款外观占位。
 fn multi_row(
     label: &'static str,
     field: TagField,
     draft: Signal<SingleDraft>,
     full: Signal<Option<FullRow>>,
-    height: f32,
-    fill: bool,
+    min_height: f32,
+    max_height: f32,
 ) -> View {
-    let row = view().flex_row().gap(px(8.0));
-    // 填满变体：标签包装仍由 pt(8) 顶在上方，行的交叉轴拉伸（默认
-    // stretch，写明显式）只作用于输入 / 占位的高度方向。
-    let row = if fill {
-        row.flex_1().items_stretch()
-    } else {
-        row.items_start()
-    };
-    row.child(view().w(px(64.0)).pt(px(8.0)).child(label_cell(label)))
+    view()
+        .flex_row()
+        .items_start()
+        .gap(px(8.0))
+        .child(view().w(px(72.0)).pt(px(8.0)).child(label_cell(label)))
         .child(dynamic(move || {
             if full.get().is_none() {
-                let slot = view()
+                return view()
                     .flex_1()
                     .min_w(px(0.0))
+                    .min_h(px(min_height))
+                    .max_h(px(max_height))
                     .px(px(12.0))
                     .py(px(10.0))
                     .rounded(px(RADIUS_MD))
                     .border_1()
                     .border_color(nsh_base::theme().input)
-                    .bg(nsh_base::theme().card);
-                let slot = if fill {
-                    slot.min_h(px(height))
-                } else {
-                    slot.h(px(height))
-                };
-                return slot
+                    .bg(nsh_base::theme().card)
                     .child(
                         text("加载中…")
                             .text_size(px(13.0))
@@ -780,9 +791,12 @@ fn multi_row(
                     .with(|d| d.values.get(&field).cloned())
                     .unwrap_or_default()
             });
-            let input = input_field(false)
+            input_field(false)
                 .flex_1()
                 .min_w(px(0.0))
+                .h(auto())
+                .min_h(px(min_height))
+                .max_h(px(max_height))
                 .py(px(10.0))
                 .multiline(true)
                 .label(label)
@@ -793,15 +807,8 @@ fn multi_row(
                         d.values.insert(field, t.to_owned());
                         d.saved = false;
                     })
-                });
-            // 填满变体要先把 input_field 烤死的 .h(36) 解回 auto——交叉
-            // 轴 stretch 只对 auto 高度生效，定高件在放长的行里不跟着拉。
-            let input = if fill {
-                input.h(auto()).min_h(px(height))
-            } else {
-                input.h(px(height))
-            };
-            input.into_element()
+                })
+                .into_element()
         }))
 }
 
@@ -812,7 +819,7 @@ fn cover_row(draft: Signal<SingleDraft>) -> View {
         match &d.cover {
             Some(CoverEdit::Replace { .. }) => d.cover_src.clone().map(SharedString::from),
             Some(CoverEdit::Remove) => None,
-            None => store::cover_for_always(&d.path, 96.0),
+            None => store::cover_for_always(&d.path, 80.0),
         }
     };
     let pick = move || {
@@ -848,15 +855,15 @@ fn cover_row(draft: Signal<SingleDraft>) -> View {
     view()
         .flex_row()
         .items_center()
-        .gap(px(8.0))
+        .gap(px(10.0))
         .child(label_cell("封面"))
-        .child(cover(src, Some(48.0), 8.0))
+        .child(cover(src, Some(80.0), 8.0))
         .child(
             view()
                 .gap(px(6.0))
                 .child(text_button(
                     Variant::Outline,
-                    Size::Sm,
+                    Size::Xs,
                     None,
                     "更换图片…",
                     pick,
@@ -864,7 +871,7 @@ fn cover_row(draft: Signal<SingleDraft>) -> View {
                 .child(
                     text_button(
                         Variant::Outline,
-                        Size::Sm,
+                        Size::Xs,
                         None,
                         "移除封面",
                         move || {
@@ -960,7 +967,7 @@ fn tech_section(
     section("音频参数", lines)
 }
 
-/// 技术参数行：64pt 标签 + 值 + 复制钮（`set_clipboard`，标签拼进
+/// 技术参数行：72pt 标签 + 值 + 复制钮（`set_clipboard`，标签拼进
 /// 无障碍名便于测试断言）。
 fn tech_line_dyn(label: &'static str, value: impl Fn() -> String + 'static) -> View {
     let value = Rc::new(value);
@@ -970,7 +977,7 @@ fn tech_line_dyn(label: &'static str, value: impl Fn() -> String + 'static) -> V
         .gap(px(8.0))
         .child(
             text(label)
-                .w(px(64.0))
+                .w(px(72.0))
                 .text_size(px(12.0))
                 .line_height(px(12.0))
                 .text_color(muted_fg()),
@@ -1083,6 +1090,7 @@ fn save_single(
     });
     store::save_tags(path.clone(), edits, move |result| match result {
         Ok(()) => {
+            full_cache().lock().unwrap().retain(|(p, _)| p != &path);
             if !alive.load(Ordering::Relaxed) {
                 return;
             }
@@ -1177,6 +1185,12 @@ fn apply_move(
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
     selected: Signal<BTreeSet<String>>,
 ) {
+    let mut cache = full_cache().lock().unwrap();
+    if let Some(pos) = cache.iter().position(|(p, _)| p == src) {
+        let mut entry = cache.remove(pos);
+        entry.0 = dest.to_owned();
+        cache.push(entry);
+    }
     rows.update(|r| {
         if let Some(row) = r.remove(src) {
             r.insert(dest.to_owned(), row);
@@ -1314,7 +1328,7 @@ fn batch_panel(
                 )
                 .child(text_button(
                     Variant::Outline,
-                    Size::Sm,
+                    Size::Xs,
                     None,
                     "编号",
                     move || {
@@ -1353,7 +1367,7 @@ fn batch_panel(
                 ))
                 .child(text_button(
                     Variant::Outline,
-                    Size::Sm,
+                    Size::Xs,
                     None,
                     "格式化",
                     move || {
@@ -1364,10 +1378,10 @@ fn batch_panel(
                     },
                 )),
         )
-        // 提示跟控件列对齐（64 标签 + 8 间隔），行内不再挤。
+        // 提示跟控件列对齐（72 标签 + 8 间隔），行内不再挤。
         .child(
             text("作用于标题 / 歌手 / 专辑")
-                .pl(px(72.0))
+                .pl(px(80.0))
                 .text_size(px(11.0))
                 .line_height(px(11.0))
                 .text_color(faint()),
@@ -1406,7 +1420,7 @@ fn batch_panel(
                 .child(label_cell("重命名"))
                 .child(text_button(
                     Variant::Outline,
-                    Size::Sm,
+                    Size::Xs,
                     None,
                     "重命名文件…",
                     move || open_rename(),
@@ -1415,7 +1429,7 @@ fn batch_panel(
         // 提示跟控件列对齐（同上行的大小写提示）。
         .child(
             text("按模板重命名所选文件（文件留在原文件夹）")
-                .pl(px(72.0))
+                .pl(px(80.0))
                 .text_size(px(11.0))
                 .line_height(px(11.0))
                 .text_color(faint()),
@@ -1427,7 +1441,7 @@ fn batch_panel(
     let form = view()
         .px(px(16.0))
         .pt(px(16.0))
-        .pb(px(BAR_SPACE))
+        .pb(px(16.0))
         .gap(px(16.0))
         // 消息行是滚动区第一条（同单选面板的状态行），空着不占位。
         .child(when(
@@ -1464,7 +1478,7 @@ fn batch_panel(
                     .into_element(),
                 text_button(
                     Variant::Default,
-                    Size::Sm,
+                    Size::Xs,
                     None,
                     format!("应用到 {m} 首"),
                     {
@@ -1494,10 +1508,32 @@ fn field_of(
         return String::new();
     };
     match field {
-        TagField::Title => t.title.clone(),
-        TagField::Artist => t.artist.clone(),
-        TagField::Album => t.album.clone(),
-        TagField::AlbumArtist => t.album_artist.clone(),
+        TagField::Title => {
+            let stem = Path::new(&t.file_name)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&t.file_name);
+            if t.title == stem {
+                String::new()
+            } else {
+                t.title.clone()
+            }
+        }
+        TagField::Artist => {
+            if t.artist == "Unknown Artist" {
+                String::new()
+            } else {
+                t.artist.clone()
+            }
+        }
+        TagField::Album => {
+            if t.album == "Unknown Album" {
+                String::new()
+            } else {
+                t.album.clone()
+            }
+        }
+        TagField::AlbumArtist => t.meta.album_artist.clone(),
         TagField::Genre => t.genres.join("; "),
         TagField::Year => t.year.map(|n| n.to_string()).unwrap_or_default(),
         TagField::Track => t.track.map(|n| n.to_string()).unwrap_or_default(),
@@ -1626,10 +1662,10 @@ fn cover_mode_row(draft: Signal<BatchDraft>) -> View {
             CoverMode::Keep => view()
                 .flex_row()
                 .gap(px(8.0))
-                .child(text_button(Variant::Outline, Size::Sm, None, "替换…", pick))
+                .child(text_button(Variant::Outline, Size::Xs, None, "替换…", pick))
                 .child(text_button(
                     Variant::Outline,
-                    Size::Sm,
+                    Size::Xs,
                     None,
                     "移除",
                     move || draft.update(|d| d.cover = CoverMode::Remove),
@@ -1656,7 +1692,7 @@ fn cover_mode_row(draft: Signal<BatchDraft>) -> View {
                     )
                     .child(text_button(
                         Variant::Ghost,
-                        Size::Sm,
+                        Size::Xs,
                         None,
                         "撤销",
                         move || draft.update(|d| d.cover = CoverMode::Keep),
@@ -1708,6 +1744,12 @@ fn apply_batch(
             .iter()
             .filter(|p| !errors.iter().any(|(e, _)| e == *p))
             .collect();
+        {
+            let mut cache = full_cache().lock().unwrap();
+            for p in &ok {
+                cache.retain(|(cp, _)| cp != *p);
+            }
+        }
         rows.update(|r| {
             for p in &ok {
                 r.remove(*p);

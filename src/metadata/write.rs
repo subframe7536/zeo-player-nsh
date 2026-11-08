@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use lofty::config::WriteOptions;
+use lofty::config::{ParseOptions, WriteOptions};
 use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::probe::Probe;
@@ -228,7 +228,15 @@ pub fn read_fields(path: &Path) -> Result<HashMap<TagField, String>, String> {
 /// 同 [`read_fields`]，连同读取来源的标签类型显示名（元数据视图的技术
 /// 参数卡片用；文件里没有标签时为 `None`）。两者共享同一次 lofty 读取。
 pub fn read_row(path: &Path) -> Result<(HashMap<TagField, String>, Option<&'static str>), String> {
-    let tagged = lofty::read_from_path(path).map_err(|e| format!("读取标签失败: {e}"))?;
+    let tagged = Probe::open(path)
+        .map_err(|e| format!("无法打开文件: {e}"))?
+        .options(
+            ParseOptions::new()
+                .read_properties(false)
+                .read_cover_art(false),
+        )
+        .read()
+        .map_err(|e| format!("读取标签失败: {e}"))?;
     let mut values: HashMap<TagField, String> =
         TagField::ALL.iter().map(|f| (*f, String::new())).collect();
     let tag_type = read_tag_type(&tagged).map(tag_type_display);

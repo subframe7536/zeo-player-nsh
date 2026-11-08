@@ -7,8 +7,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use nsh_base::{
-    DataTableAlign, DataTableColumn, DataTablePress, DataTableRows, DataTableSelection,
-    DataTableSort, data_table,
+    DataTableAlign, DataTableClasses, DataTableColumn, DataTablePress, DataTableRows,
+    DataTableSelection, DataTableSort, data_table,
 };
 use nsh_core::prelude::*;
 
@@ -16,9 +16,6 @@ use super::super::super::theme::*;
 use super::{CoverState, MetaRow};
 use crate::config::TrackEntry;
 use crate::metadata::write::TagField;
-
-/// 选择标记列的 key（固定第 0 列，不参与选择 / 移动 / 缩放 / 排序）。
-const SELECT: &str = "select";
 
 /// 标签列：key、标题、宽（pt）、对齐、可排序（spec §一）。
 const COLUMNS: &[(&str, &str, f32, DataTableAlign, bool)] = &[
@@ -148,16 +145,41 @@ fn loaded_cell(key: &str, track: &TrackEntry, row: &MetaRow) -> String {
 }
 
 /// 行未加载时回落的索引值（`TrackEntry` / `MetaInfo` 里已有的字段）。
+/// 注意：曲库索引为了播放与分组把无标题回退到主干、无歌手/专辑回退
+/// 到 Unknown，专辑歌手回退到曲目歌手；但元数据表格呈现的是真实标签，
+/// 兜底假值绝不能回落，否则真实标签读完落地后单元格文字会闪烁消失。
 fn fallback_cell(key: &str, t: &TrackEntry) -> String {
     let num = |v: Option<u32>| v.map(|n| n.to_string()).unwrap_or_default();
     let gain = |v: Option<f32>| v.map(|v| format!("{v:.2} dB")).unwrap_or_default();
     let peak = |v: Option<f32>| v.map(|v| format!("{v:.6}")).unwrap_or_default();
     match key {
         "file_name" => t.file_name.clone(),
-        "title" => t.title.clone(),
-        "artist" => t.artist.clone(),
-        "album" => t.album.clone(),
-        "album_artist" => t.album_artist.clone(),
+        "title" => {
+            let stem = std::path::Path::new(&t.file_name)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(&t.file_name);
+            if t.title == stem {
+                String::new()
+            } else {
+                t.title.clone()
+            }
+        }
+        "artist" => {
+            if t.artist == "Unknown Artist" {
+                String::new()
+            } else {
+                t.artist.clone()
+            }
+        }
+        "album" => {
+            if t.album == "Unknown Album" {
+                String::new()
+            } else {
+                t.album.clone()
+            }
+        }
+        "album_artist" => t.meta.album_artist.clone(),
         "genre" => t.genres.join("; "),
         "year" => num(t.year),
         "track_number" => num(t.track),
@@ -223,9 +245,9 @@ pub(super) fn sort_entries(
     list.clone_from_slice(&sorted);
 }
 
-/// 标签表格：工具栏的全选 / 半选与行内「✓」字形都由 `selected` 集合
-/// 驱动（表格自身 `selection` 恒空，不画它竞争的单选高亮）；行高亮
-/// 走 `row_classes`。排序由 app 侧做（`sort` 信号 + `displayed` 重排）。
+/// 标签表格：选中态由 `selected` 集合驱动行高亮（`row_classes` 的
+/// `bg-primary/8`）；表格自身 `selection` 恒空，不画它竞争的单选高亮。
+/// 排序由 app 侧做（`sort` 信号 + `displayed` 重排）。
 pub(super) fn table(
     displayed: Memo<Rc<Vec<TrackEntry>>>,
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
@@ -233,22 +255,7 @@ pub(super) fn table(
     anchor: Signal<Option<String>>,
     sort: Signal<Option<DataTableSort>>,
 ) -> impl IntoElement {
-    let mut defs = Vec::with_capacity(COLUMNS.len() + 1);
-    let mut select_col = DataTableColumn::default();
-    select_col.key = SharedString::from(SELECT);
-    select_col.title = Some(SharedString::default());
-    select_col.width = Some(px(30.0));
-    select_col.align = DataTableAlign::Center;
-    select_col.fixed = true;
-    select_col.resizable = Some(false);
-    select_col.movable = Some(false);
-    select_col.selectable = Some(false);
-    // 选中行画一个主色「✓」文本字形（cell_class 走主题 token，与行高亮
-    // 的 bg-primary/8 同色）；未选中的单元格留空——不画淡色空心框，免得
-    // 悬停 / 选中行底从透明盒里透出来显得和别行不一样（就是用户问的
-    // 「为什么这里颜色不一样」）。
-    select_col.cell_class = Some("text-primary".into());
-    defs.push(select_col);
+    let mut defs = Vec::with_capacity(COLUMNS.len());
     for (key, title, width, align, sortable) in COLUMNS {
         let mut c = DataTableColumn::default();
         c.key = SharedString::from(*key);
@@ -257,14 +264,18 @@ pub(super) fn table(
         c.align = *align;
         c.sortable = *sortable;
         c.fixed = *key == "file_name";
+        if *key == "file_name" {
+            // sticky 固定文件名列：右边框颜色加深（border-foreground/25，
+            // 显著深于普通网格线的 border-border/50），保证与滚动列分界清晰。
+            c.header_class = Some(SharedString::from(
+                "bg-card border-r border-foreground/25 font-medium",
+            ));
+            c.cell_class = Some(SharedString::from("border-r border-foreground/25"));
+        }
         defs.push(c);
     }
 
-    // 标签列数据与选择列拆两截：勾选切换只重写一列字形，不为它把 24 个
-    // 标签列全表重算一遍。`base` 只订 `displayed` / `rows`（选择变化走
-    // memo 缓存命中）；`Cell::Text` 是 `Arc<str>`，clone 全表只是按列
-    // 增引用，便宜。
-    let base = computed({
+    let data = computed({
         let displayed = displayed.clone();
         move || -> DataTableRows {
             let list = displayed.get();
@@ -280,16 +291,6 @@ pub(super) fn table(
             data
         }
     });
-    let data = move || -> DataTableRows {
-        let set = selected.get();
-        displayed.with(|list| {
-            base.get().texts(
-                SELECT,
-                list.iter()
-                    .map(|t| if set.contains(&t.path) { "✓" } else { "" }),
-            )
-        })
-    };
 
     let row_classes = move || -> Vec<SharedString> {
         let set = selected.get();
@@ -301,23 +302,42 @@ pub(super) fn table(
                         // sidebar.rs）——选中行跟着主题色走，不再用 accent 灰底。
                         SharedString::from("bg-primary/8")
                     } else {
-                        SharedString::default()
+                        // 未选中行设不透明背景，横向滚动时固定列不会透光重叠文字。
+                        SharedString::from("bg-card")
                     }
                 })
                 .collect()
         })
     };
 
+    let mut classes = DataTableClasses::default();
+    // 固定列分隔线与投影：线颜色加深且投射平滑阴影
+    classes.fixed_edge = Some(SharedString::from(
+        "bg-foreground/25 shadow-[4px_0_12px_rgba(0,0,0,0.18)]",
+    ));
+    // sticky 表头：底边框颜色加深（border-b border-foreground/25）
+    classes.header = Some(SharedString::from("bg-card border-b border-foreground/25"));
+    // 表头单元格：竖向分隔网格线（border-r border-border/50）
+    classes.header_cell = Some(SharedString::from(
+        "px-3 text-muted-foreground font-medium border-r border-border/50",
+    ));
+    // 普通单元格：竖向分隔网格线（border-r border-border/50）
+    classes.cell = Some(SharedString::from("px-3 border-r border-border/50"));
+    // 行体：横向分隔网格线（border-b border-border/50）
+    classes.row = Some(SharedString::from("border-b border-border/50"));
+    classes.row_hover = Some(SharedString::from("bg-accent/40"));
+
     // 不设 `render_cell`：它是全局开关，一设整表体就走逐格 dynamic +
     // Renderer 的自绘路径（nsh-base data_table/view.rs），列窗口每平移
-    // 一次可见格全部重建——横向滚动卡。全文本格走原生 `text(cell_text)`
-    // 绑定，复选框列也用数据驱动的「✓」字形，不再自绘。
+    // 一次可见格全部重建——横向滚动卡。全文本格走原生 `text(cell_text)` 绑定。
     data_table()
         .flex_1()
         .accessibility_label(Some(SharedString::from("元数据表")))
+        .classes(classes)
         .columns(defs)
-        .data(data)
+        .data(move || data.get())
         .row_height(px(32.0))
+        .header_height(Some(px(36.0)))
         .font_size(px(13.0))
         .stripe(false)
         .movable_columns(false)
@@ -338,17 +358,6 @@ pub(super) fn table(
             let Some(path) = list.get(p.row as usize).map(|t| t.path.clone()) else {
                 return;
             };
-            // 复选框列：文本字形没有自己的按压应答，按列 0 的格同样切换
-            // （命中由表格的 hit 层按位置报列号）。
-            if p.column == Some(0) {
-                selected.update(|set| {
-                    if !set.remove(&path) {
-                        set.insert(path.clone());
-                    }
-                });
-                anchor.set(Some(path));
-                return;
-            }
             if p.shift {
                 // Shift：锚点到本行的范围（当前显示序，替换整个集合）。
                 let from = anchor

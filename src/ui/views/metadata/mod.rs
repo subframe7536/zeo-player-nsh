@@ -205,6 +205,7 @@ pub fn page() -> View {
     });
 
     let count = computed(move || s.tracks.with(|t| t.len()));
+    let has_selection = computed(move || selected.with(|s| !s.is_empty()));
     // 空曲库切换单独成 memo：若直接读 `s.tracks`，每次索引刷新 /
     // `move_path` 都整页重建（表格滚动位、面板草稿、筛选框全丢）。
     let empty = computed(move || s.tracks.with(|t| t.is_empty()));
@@ -319,14 +320,14 @@ pub fn page() -> View {
                                     .gap(px(8.0))
                                     .child(text_button(
                                         Variant::Outline,
-                                        Size::Sm,
+                                        Size::Xs,
                                         None,
                                         "重命名文件…",
                                         move || rename_open.set(true),
                                     ))
                                     .child(text_button(
                                         Variant::Ghost,
-                                        Size::Sm,
+                                        Size::Xs,
                                         None,
                                         "取消选择",
                                         move || {
@@ -342,15 +343,23 @@ pub fn page() -> View {
                         .flex_1()
                         .min_h(px(0.0))
                         .flex_row()
+                        .px(px(32.0))
+                        .pb(px(BAR_SPACE))
+                        .gap(px(16.0))
                         .child(
                             view()
                                 .flex_1()
                                 .min_w(px(0.0))
-                                .pb(px(BAR_SPACE))
+                                .rounded(px(12.0))
+                                .border_1()
+                                .border_color(border())
+                                .bg(nsh_base::theme().card)
+                                .shadow_xs()
+                                .overflow_hidden()
                                 .child(table::table(displayed, rows, selected, anchor, sort)),
                         )
                         .child(when(
-                            move || selected.with(|set| !set.is_empty()),
+                            move || has_selection.get(),
                             move || {
                                 panel::panel(
                                     displayed,
