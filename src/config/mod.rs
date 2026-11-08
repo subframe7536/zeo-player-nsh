@@ -478,6 +478,40 @@ pub fn local_week_start(unix: u64, offset: i64) -> u64 {
     (monday * 86_400 - offset).max(0) as u64
 }
 
+/// `unix` 秒 → 本地 "YYYY-MM-DD HH:MM"（元数据面板的修改 / 入库时间用）。
+pub fn format_local_datetime(unix: u64) -> String {
+    format_local_at(unix, local_offset_seconds())
+}
+
+/// `unix` 秒 + 偏移 → "YYYY-MM-DD HH:MM"（测试可注入偏移）。
+fn format_local_at(unix: u64, offset: i64) -> String {
+    let t = unix as i64 + offset;
+    let (y, m, d) = civil_from_days(t.div_euclid(86_400));
+    let secs = t.rem_euclid(86_400);
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        y,
+        m,
+        d,
+        secs / 3600,
+        secs % 3600 / 60
+    )
+}
+
+/// 纪元日起算的天数 → (年, 月, 日)（Hinnant 的 civil_from_days，公历）。
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097); // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32; // [1, 12]
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
 /// 去空、去重（保持顺序）。分隔符可以为空列表：不拆分。
 pub fn clean_separators(list: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -1393,5 +1427,22 @@ mod tests {
         assert_eq!(local_hour(utc(16, 0), -5 * 3600), 11);
         let m = local_week_start(utc(16, 0), -5 * 3600);
         assert_eq!(local_hour(m, -5 * 3600), 0);
+    }
+
+    /// 本地日期时间格式化：跨日（+8h）、负偏移、纪元与闰日边界。
+    #[test]
+    fn format_local_datetime_math() {
+        // 2026-11-03T16:00:00Z +8h → 次日 00:00。
+        assert_eq!(format_local_at(1_793_721_600, 8 * 3600), "2026-11-04 00:00");
+        // 同一时刻 UTC-5 → 当天上午 11:00。
+        assert_eq!(
+            format_local_at(1_793_721_600, -5 * 3600),
+            "2026-11-03 11:00"
+        );
+        // 纪元零秒；负偏移回前一天。
+        assert_eq!(format_local_at(0, 0), "1970-01-01 00:00");
+        assert_eq!(format_local_at(0, -3600), "1969-12-31 23:00");
+        // 闰日：2024-02-29T12:34:00Z。
+        assert_eq!(format_local_at(1_709_210_040, 0), "2024-02-29 12:34");
     }
 }

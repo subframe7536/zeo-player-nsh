@@ -16,9 +16,10 @@ use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::probe::Probe;
 use lofty::tag::items::Timestamp;
+use lofty::tag::items::popularimeter::{Popularimeter, StarRating};
 use lofty::tag::{Accessor, ItemKey, Tag, TagItem, TagType};
 
-use super::{first, joined, number, pair, strings};
+use super::{first, joined, number, pair, parse_gain, parse_peak, strings};
 
 /// 可编辑的标签字段（「编辑元数据」对话框的每个输入对应一个）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -36,11 +37,20 @@ pub enum TagField {
     Composer,
     Comment,
     Lyrics,
+    Conductor,
+    Lyricist,
+    Publisher,
+    Copyright,
+    Rating,
+    TrackGain,
+    TrackPeak,
+    AlbumGain,
+    AlbumPeak,
 }
 
 impl TagField {
     /// 全部字段（[`read_fields`] 返回的键集合）。
-    pub const ALL: [TagField; 13] = [
+    pub const ALL: [TagField; 22] = [
         TagField::Title,
         TagField::Artist,
         TagField::Album,
@@ -54,6 +64,15 @@ impl TagField {
         TagField::Composer,
         TagField::Comment,
         TagField::Lyrics,
+        TagField::Conductor,
+        TagField::Lyricist,
+        TagField::Publisher,
+        TagField::Copyright,
+        TagField::Rating,
+        TagField::TrackGain,
+        TagField::TrackPeak,
+        TagField::AlbumGain,
+        TagField::AlbumPeak,
     ];
 
     /// 界面与报错里的中文字段名。
@@ -72,6 +91,15 @@ impl TagField {
             TagField::Composer => "作曲",
             TagField::Comment => "注释",
             TagField::Lyrics => "歌词",
+            TagField::Conductor => "指挥",
+            TagField::Lyricist => "作词",
+            TagField::Publisher => "发行商",
+            TagField::Copyright => "版权",
+            TagField::Rating => "评分",
+            TagField::TrackGain => "音轨增益",
+            TagField::TrackPeak => "音轨峰值",
+            TagField::AlbumGain => "专辑增益",
+            TagField::AlbumPeak => "专辑峰值",
         }
     }
 
@@ -92,6 +120,15 @@ impl TagField {
             TagField::Composer => ItemKey::Composer,
             TagField::Comment => ItemKey::Comment,
             TagField::Lyrics => ItemKey::Lyrics,
+            TagField::Conductor => ItemKey::Conductor,
+            TagField::Lyricist => ItemKey::Lyricist,
+            TagField::Publisher => ItemKey::Publisher,
+            TagField::Copyright => ItemKey::CopyrightMessage,
+            TagField::Rating => ItemKey::Popularimeter,
+            TagField::TrackGain => ItemKey::ReplayGainTrackGain,
+            TagField::TrackPeak => ItemKey::ReplayGainTrackPeak,
+            TagField::AlbumGain => ItemKey::ReplayGainAlbumGain,
+            TagField::AlbumPeak => ItemKey::ReplayGainAlbumPeak,
         }
     }
 }
@@ -99,8 +136,7 @@ impl TagField {
 /// 一个字段的改动。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Edit {
-    /// 不动（单编辑对话框不产生；批量编辑的占位用它——plan 012）。
-    #[allow(dead_code, reason = "批量编辑的占位（plan 012）")]
+    /// 不动（单编辑对话框不产生；批量编辑「保持原值」的占位用它）。
     Keep,
     /// 设成新值；空白串与 `Clear` 等价。
     Set(String),
@@ -139,8 +175,7 @@ impl TagEdits {
         self.fields.iter().any(|(_, e)| *e != Edit::Keep) || self.cover.is_some()
     }
 
-    /// 没有任何改动（批量编辑逐条跳过空改动用——plan 012）。
-    #[allow(dead_code, reason = "批量编辑逐条跳过空改动（plan 012）")]
+    /// 没有任何改动（批量编辑逐条跳过空改动用）。
     pub fn is_empty(&self) -> bool {
         !self.has_tag_changes() && self.cover_file.is_none() && self.lrc.is_none()
     }
@@ -187,11 +222,18 @@ pub fn cover_mime(path: &Path) -> Option<String> {
 /// 读出当前标签值作为「编辑元数据」的初值：缺失字段为空串；读取的标签
 /// 与读取顺序与 `read_meta` 一致（主标签 → 第一个非 ID3v1 → ID3v1）。
 pub fn read_fields(path: &Path) -> Result<HashMap<TagField, String>, String> {
+    read_row(path).map(|(fields, _)| fields)
+}
+
+/// 同 [`read_fields`]，连同读取来源的标签类型显示名（元数据视图的技术
+/// 参数卡片用；文件里没有标签时为 `None`）。两者共享同一次 lofty 读取。
+pub fn read_row(path: &Path) -> Result<(HashMap<TagField, String>, Option<&'static str>), String> {
     let tagged = lofty::read_from_path(path).map_err(|e| format!("读取标签失败: {e}"))?;
     let mut values: HashMap<TagField, String> =
         TagField::ALL.iter().map(|f| (*f, String::new())).collect();
+    let tag_type = read_tag_type(&tagged).map(tag_type_display);
     let Some(tag) = read_tag(&tagged) else {
-        return Ok(values);
+        return Ok((values, tag_type));
     };
     let mut put = |field: TagField, value: Option<String>| {
         if let Some(v) = value.filter(|s| !s.trim().is_empty()) {
@@ -243,7 +285,60 @@ pub fn read_fields(path: &Path) -> Result<HashMap<TagField, String>, String> {
         TagField::Lyrics,
         first(tag, ItemKey::Lyrics).or_else(|| first(tag, ItemKey::UnsyncLyrics)),
     );
-    Ok(values)
+    put(TagField::Conductor, first(tag, ItemKey::Conductor));
+    put(TagField::Lyricist, first(tag, ItemKey::Lyricist));
+    // Label 是 Publisher 的别名键（同一帧）：Publisher 缺失时拿它顶。
+    put(
+        TagField::Publisher,
+        first(tag, ItemKey::Publisher).or_else(|| first(tag, ItemKey::Label)),
+    );
+    put(TagField::Copyright, first(tag, ItemKey::CopyrightMessage));
+    put(
+        TagField::Rating,
+        tag.ratings().next().map(|p| (p.rating() as u8).to_string()),
+    );
+    // ReplayGain 读回规范形态（增益两位小数不带单位、峰值六位小数），
+    // 与写入侧一致；解析不了就当没有。
+    put(
+        TagField::TrackGain,
+        first(tag, ItemKey::ReplayGainTrackGain)
+            .and_then(|s| parse_gain(&s))
+            .map(|v| format!("{v:.2}")),
+    );
+    put(
+        TagField::TrackPeak,
+        first(tag, ItemKey::ReplayGainTrackPeak)
+            .and_then(|s| parse_peak(&s))
+            .map(|v| format!("{v:.6}")),
+    );
+    put(
+        TagField::AlbumGain,
+        first(tag, ItemKey::ReplayGainAlbumGain)
+            .and_then(|s| parse_gain(&s))
+            .map(|v| format!("{v:.2}")),
+    );
+    put(
+        TagField::AlbumPeak,
+        first(tag, ItemKey::ReplayGainAlbumPeak)
+            .and_then(|s| parse_peak(&s))
+            .map(|v| format!("{v:.6}")),
+    );
+    Ok((values, tag_type))
+}
+
+/// 标签类型的显示名（[`read_row`] 的第二项）。
+fn tag_type_display(tag_type: TagType) -> &'static str {
+    match tag_type {
+        TagType::Ape => "APE",
+        TagType::Id3v1 => "ID3v1",
+        TagType::Id3v2 => "ID3v2",
+        TagType::Mp4Ilst => "MP4 ilst",
+        TagType::VorbisComments => "Vorbis Comments",
+        TagType::RiffInfo => "RIFF INFO",
+        TagType::AiffText => "AIFF Text",
+        // TagType 是 non_exhaustive：上游新增的类型给个兜底名。
+        _ => "其他",
+    }
 }
 
 /// 把 `path` 的标签改成 `edits`：原子写（复制到同目录 `.<文件名>.zeo-tmp`
@@ -399,6 +494,20 @@ fn validate(edits: &TagEdits) -> Result<(), String> {
             TagField::Year => {
                 if value.parse::<u16>().is_err() {
                     return Err("年份必须是整数".to_owned());
+                }
+            }
+            TagField::Rating => match value.parse::<u8>() {
+                Ok(1..=5) => {}
+                _ => return Err(format!("{}必须是 1 到 5 的整数", field.label())),
+            },
+            TagField::TrackGain | TagField::AlbumGain => {
+                if parse_gain(value).is_none() {
+                    return Err(format!("{}必须是 -60 到 60 之间的数（dB）", field.label()));
+                }
+            }
+            TagField::TrackPeak | TagField::AlbumPeak => {
+                if parse_peak(value).is_none() {
+                    return Err(format!("{}必须是正数", field.label()));
                 }
             }
             _ => {}
@@ -678,6 +787,12 @@ fn clear_field(tag: &mut Tag, field: TagField) -> Result<(), String> {
             tag.remove_key(ItemKey::Lyrics);
             tag.remove_key(ItemKey::UnsyncLyrics);
         }
+        // 发行商两键（读时 Publisher 优先、Label 回退）：删一个留另一个
+        // 还显示旧值。
+        TagField::Publisher => {
+            tag.remove_key(ItemKey::Publisher);
+            tag.remove_key(ItemKey::Label);
+        }
         _ => tag.remove_key(field.key()),
     }
     Ok(())
@@ -751,6 +866,42 @@ fn set_field(tag: &mut Tag, field: TagField, value: &str) -> Result<(), String> 
                 ItemKey::Lyrics
             });
             Ok(())
+        }
+        // 发行商写 Publisher 键并把 Label 别名清掉：读时 Publisher
+        // 优先，旧文件里的 Label 不留下次读回还显示旧值。
+        TagField::Publisher => {
+            insert_text_checked(tag, ItemKey::Publisher, field.label(), value.to_owned())?;
+            tag.remove_key(ItemKey::Label);
+            Ok(())
+        }
+        // 评分写成 Popularimeter 文本（`email|星|播放次数`）：已有评分
+        // 保留来源 email 与播放计数，没有用 MusicBee 格式从零写。
+        TagField::Rating => {
+            let star = match value.parse::<u8>() {
+                Ok(1) => StarRating::One,
+                Ok(2) => StarRating::Two,
+                Ok(3) => StarRating::Three,
+                Ok(4) => StarRating::Four,
+                Ok(5) => StarRating::Five,
+                _ => return Err(format!("{}必须是 1 到 5 的整数", field.label())),
+            };
+            let pop = match tag.ratings().next() {
+                Some(p) => Popularimeter::custom(p.email().to_owned(), star, p.play_counter),
+                None => Popularimeter::musicbee(star, 0),
+            };
+            tag.remove_key(ItemKey::Popularimeter);
+            insert_text_checked(tag, ItemKey::Popularimeter, field.label(), pop.to_string())
+        }
+        // ReplayGain：增益统一写成 `-6.50 dB`，峰值写六位小数；读回经
+        // `parse_*` 规范化，界面看到的与这里写下的同形态。
+        TagField::TrackGain | TagField::AlbumGain => {
+            let gain = parse_gain(value)
+                .ok_or_else(|| format!("{}必须是 -60 到 60 之间的数（dB）", field.label()))?;
+            insert_text_checked(tag, field.key(), field.label(), format!("{gain:.2} dB"))
+        }
+        TagField::TrackPeak | TagField::AlbumPeak => {
+            let peak = parse_peak(value).ok_or_else(|| format!("{}必须是正数", field.label()))?;
+            insert_text_checked(tag, field.key(), field.label(), format!("{peak:.6}"))
         }
         _ => insert_text_checked(tag, field.key(), field.label(), value.to_owned()),
     }
@@ -1268,6 +1419,111 @@ mod tests {
                 assert_eq!(fs::read(&path).unwrap(), before, "失败不能动原文件");
             }
         }
+        assert!(temp_files(path.parent().unwrap()).is_empty());
+    }
+
+    /// 元数据视图新增字段：指挥 / 作词 / 发行商 / 版权 / 评分 /
+    /// ReplayGain 四项写入 → `read_row` 读回（评分、增益、峰值读回
+    /// 规范形态）；逐个 Clear 后全空。
+    #[test]
+    fn tag_write_extended_fields_roundtrip() {
+        let extended = [
+            TagField::Conductor,
+            TagField::Lyricist,
+            TagField::Publisher,
+            TagField::Copyright,
+            TagField::Rating,
+            TagField::TrackGain,
+            TagField::TrackPeak,
+            TagField::AlbumGain,
+            TagField::AlbumPeak,
+        ];
+        let mut covered = 0;
+        for (name, tag_type) in [("sine.flac", "Vorbis Comments"), ("quiet.mp3", "ID3v2")] {
+            let Some(source) = corpus(name) else {
+                eprintln!("跳过 {name}：没有测试语料");
+                continue;
+            };
+            covered += 1;
+            let path = scratch(&source);
+            let set = edits(&[
+                (TagField::Conductor, "指挥甲"),
+                (TagField::Lyricist, "作词乙"),
+                (TagField::Publisher, "发行商丙"),
+                (TagField::Copyright, "版权丁"),
+                (TagField::Rating, "4"),
+                (TagField::TrackGain, "-6.5"),
+                (TagField::TrackPeak, "0.98"),
+                (TagField::AlbumGain, "-3.25"),
+                (TagField::AlbumPeak, "1.05"),
+            ]);
+            write_tags(&path, &set).unwrap_or_else(|e| panic!("{name} 写标签失败: {e}"));
+
+            let (fields, read_type) =
+                read_row(&path).unwrap_or_else(|e| panic!("{name} 写后读字段失败: {e}"));
+            assert_eq!(read_type, Some(tag_type), "{name} 标签类型名");
+            assert_eq!(fields[&TagField::Conductor], "指挥甲", "{name}");
+            assert_eq!(fields[&TagField::Lyricist], "作词乙", "{name}");
+            assert_eq!(fields[&TagField::Publisher], "发行商丙", "{name}");
+            assert_eq!(fields[&TagField::Copyright], "版权丁", "{name}");
+            assert_eq!(fields[&TagField::Rating], "4", "{name}");
+            assert_eq!(fields[&TagField::TrackGain], "-6.50", "{name}");
+            assert_eq!(fields[&TagField::TrackPeak], "0.980000", "{name}");
+            assert_eq!(fields[&TagField::AlbumGain], "-3.25", "{name}");
+            assert_eq!(fields[&TagField::AlbumPeak], "1.050000", "{name}");
+
+            let clear = TagEdits {
+                fields: extended.iter().map(|f| (*f, Edit::Clear)).collect(),
+                cover: None,
+                cover_file: None,
+                lrc: None,
+            };
+            write_tags(&path, &clear).unwrap_or_else(|e| panic!("{name} 清字段失败: {e}"));
+            let fields = read_fields(&path).unwrap();
+            for field in extended {
+                assert!(
+                    fields[&field].is_empty(),
+                    "{name} {:?} 清空后应读不回值",
+                    field
+                );
+            }
+            assert!(decoded_frames(&path) > 0, "{name} 写完解不出声音");
+            assert!(
+                temp_files(path.parent().unwrap()).is_empty(),
+                "{name} 留下 .zeo-tmp"
+            );
+        }
+        assert!(covered > 0, "测试语料缺失，什么都没跑到");
+    }
+
+    /// 评分与 ReplayGain 的校验：非法值在复制文件前就报错，文件不动。
+    #[test]
+    fn tag_write_rejects_bad_rating_and_gain() {
+        let Some(source) = corpus("sine.flac") else {
+            return eprintln!("跳过：没有测试语料");
+        };
+        let path = scratch(&source);
+        let before = fs::read(&path).unwrap();
+        for bad in ["0", "6", "x", "3.5"] {
+            let err = write_tags(&path, &edits(&[(TagField::Rating, bad)]))
+                .expect_err(&format!("评分 {bad} 应当被拒绝"));
+            assert!(err.contains("1 到 5"), "{bad}: {err}");
+        }
+        for bad in ["abc", "100", "-61"] {
+            for field in [TagField::TrackGain, TagField::AlbumGain] {
+                let err = write_tags(&path, &edits(&[(field, bad)]))
+                    .expect_err(&format!("增益 {bad} 应当被拒绝"));
+                assert!(err.contains("dB"), "{bad}: {err}");
+            }
+        }
+        for bad in ["abc", "0", "-1"] {
+            for field in [TagField::TrackPeak, TagField::AlbumPeak] {
+                let err = write_tags(&path, &edits(&[(field, bad)]))
+                    .expect_err(&format!("峰值 {bad} 应当被拒绝"));
+                assert!(err.contains("正数"), "{bad}: {err}");
+            }
+        }
+        assert_eq!(fs::read(&path).unwrap(), before, "原文件不能动");
         assert!(temp_files(path.parent().unwrap()).is_empty());
     }
 }

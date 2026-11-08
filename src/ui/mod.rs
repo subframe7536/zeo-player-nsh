@@ -26,6 +26,8 @@ pub enum Nav {
     Home,
     /// 音乐库：显示全部曲目。
     Library,
+    /// 元数据：全库曲目的标签表格，勾选后单改 / 批改标签与纯文件重命名。
+    Metadata,
     Folders,
     Artists,
     Albums,
@@ -199,6 +201,7 @@ fn page(nav: Signal<Nav>, search_page: frame::SearchFocus) -> AnyElement {
             match nav.get() {
                 Nav::Home => views::home().into_element(),
                 Nav::Library => views::library().into_element(),
+                Nav::Metadata => views::metadata::page().into_element(),
                 Nav::Folders => views::folders().into_element(),
                 Nav::Artists => views::artists().into_element(),
                 Nav::Albums => views::albums().into_element(),

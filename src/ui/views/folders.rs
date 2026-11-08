@@ -637,7 +637,7 @@ fn remove_refs_under(path: &str) {
 /// 正在播的曲目在 `path` 里（含自身）就先停掉：文件马上要被移走或删
 /// 掉，Windows 上解码器还握着文件会移不动。后台线程跑（`store()` 只
 /// 在组件上下文里），用 `player()` 的快照看当前曲。
-fn stop_if_playing_under(path: &str) {
+pub(super) fn stop_if_playing_under(path: &str) {
     let trimmed = path.trim_end_matches(SEP);
     let under = format!("{trimmed}{SEP}");
     if player()

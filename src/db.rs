@@ -635,6 +635,19 @@ pub fn backfill_added(entries: &[(String, u64)]) {
     }
 }
 
+/// 单条的入库时间（元数据面板「音频参数」用；没记过返回 `None`——
+/// `optional` 让无行不进错误日志）。
+pub fn added_at(path: &str) -> Option<u64> {
+    with("读入库时间", |conn| {
+        conn.query_row("SELECT added_at FROM added WHERE path = ?1", [path], |r| {
+            r.get::<_, i64>(0)
+        })
+        .optional()
+    })
+    .flatten()
+    .map(|v| v.max(0) as u64)
+}
+
 /// 播放统计摘要（首页用）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PlayStats {

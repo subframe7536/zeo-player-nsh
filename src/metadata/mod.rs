@@ -5,6 +5,7 @@
 
 pub(crate) mod covers;
 pub(crate) mod lyrics;
+pub(crate) mod rename;
 pub(crate) mod waveform;
 pub(crate) mod write;
 
@@ -37,7 +38,7 @@ impl ReplayGain {
 }
 
 /// `-6.54 dB` / `+1.2dB` / `-6.54` → -6.54；解析失败 `None`。
-fn parse_gain(text: &str) -> Option<f32> {
+pub(crate) fn parse_gain(text: &str) -> Option<f32> {
     let lower = text.trim().to_lowercase();
     let digits = lower.strip_suffix("db").unwrap_or(&lower).trim();
     let value: f32 = digits.parse().ok()?;
@@ -45,7 +46,7 @@ fn parse_gain(text: &str) -> Option<f32> {
 }
 
 /// `0.988525` → 0.988525；非正数或解析失败 `None`。
-fn parse_peak(text: &str) -> Option<f32> {
+pub(crate) fn parse_peak(text: &str) -> Option<f32> {
     let value: f32 = text.trim().parse().ok()?;
     (value.is_finite() && value > 0.0).then_some(value)
 }

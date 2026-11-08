@@ -5,6 +5,7 @@ pub(super) mod browse;
 mod edit_info;
 pub(super) mod folders;
 mod home;
+pub(super) mod metadata;
 pub(super) mod playlists;
 mod settings;
 

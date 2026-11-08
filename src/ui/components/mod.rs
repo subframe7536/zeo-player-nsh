@@ -3,6 +3,7 @@
 //! `page` 页面脚手架。
 
 pub(super) mod button;
+pub(super) mod checkbox;
 pub(super) mod cover;
 pub(super) mod form;
 pub(crate) mod icons;

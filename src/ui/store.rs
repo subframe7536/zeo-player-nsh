@@ -1793,6 +1793,55 @@ pub fn save_tags(
     });
 }
 
+/// 「批量保存」（元数据视图）：后台线程顺序写回每条 `TagEdits`；当前曲目
+/// 在其中就先释放解码器再写、全部写完后重载恢复。成功的路径一次
+/// `refresh_paths`；`done`（回界面侧）收到失败列表 `(路径, 报错)`。
+pub fn save_tags_batch(
+    items: Vec<(String, crate::metadata::write::TagEdits)>,
+    done: impl FnOnce(Vec<(String, String)>) + Send + 'static,
+) {
+    let post = poster();
+    std::thread::spawn(move || {
+        let current = player().state().track.path.clone();
+        // 同 save_tags：release 同步等解码器放下句柄再写，写完重载。
+        let released = current
+            .as_ref()
+            .is_some_and(|cur| items.iter().any(|(p, _)| p == cur))
+            .then(|| player().release_current());
+        let mut ok_paths: Vec<String> = Vec::new();
+        let mut errors: Vec<(String, String)> = Vec::new();
+        for (path, edits) in items {
+            match crate::metadata::write::write_tags(Path::new(&path), &edits) {
+                Ok(()) => ok_paths.push(path),
+                Err(error) => errors.push((path, error)),
+            }
+        }
+        if let Some((position, playing)) = released {
+            player().reload_current(position, playing);
+        }
+        if !ok_paths.is_empty() {
+            library_store().refresh_paths(&ok_paths);
+        }
+        post.post(move || {
+            // 当前曲目写过：详情元数据手动刷（`s.meta` 只在换曲时重读）。
+            if let Some(cur) = store().track.with(|t| t.path.clone())
+                && ok_paths.iter().any(|p| *p == cur)
+                && let Ok(meta) = MetaCache::global().get(Path::new(&cur))
+            {
+                store().meta.set(Some(Same(meta)));
+            }
+            // 已请求过的封面按原尺寸重发（同 save_tags：缓存键折了文件
+            // 指纹必然重新生成）。
+            for path in &ok_paths {
+                if let Some((side, _)) = COVERS.with(|c| c.borrow().get(path.as_str()).copied()) {
+                    crate::metadata::covers::request(path, side);
+                }
+            }
+            done(errors);
+        });
+    });
+}
+
 /// 总时长：1 小时 5 分钟 / 42 分钟。
 pub fn format_total(seconds: f64) -> String {
     let minutes = (seconds / 60.0).round() as u64;
