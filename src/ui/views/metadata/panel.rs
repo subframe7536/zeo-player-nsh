@@ -17,7 +17,7 @@ use super::super::super::components::button::{
 };
 use super::super::super::components::checkbox::checkbox;
 use super::super::super::components::cover::cover;
-use super::super::super::components::form::{SelectOption, input_field, select};
+use super::super::super::components::form::{SelectOption, input_field, select, trigger_chevron};
 use super::super::super::components::icons::{Icon, icon};
 use super::super::super::store::{self, poster};
 use super::super::super::theme::*;
@@ -95,7 +95,7 @@ pub(super) fn panel(
         .overflow_hidden()
         .child(dynamic(move || {
             if let Some(path) = single.get() {
-                return single_panel(path, rows, selected, close.clone()).into_element();
+                return single_panel(path, displayed, rows, selected, close.clone()).into_element();
             }
             if let Some(paths) = batch.get() {
                 return batch_panel(paths, displayed, rows, close.clone(), open_rename.clone())
@@ -158,29 +158,34 @@ struct SingleDraft {
     error: Option<String>,
 }
 
-/// 行（`MetaRow`）值 → 种子映射：注释 / 歌词在 MetaRow 里是截断的，
-/// 不种（完整值由后台读回填）。
-#[allow(dead_code)]
-fn row_seed(row: &MetaRow) -> HashMap<TagField, String> {
-    row.fields
+fn track_seed(t: &TrackEntry) -> HashMap<TagField, String> {
+    TagField::ALL
         .iter()
-        .filter(|(f, _)| !matches!(f, TagField::Comment | TagField::Lyrics))
-        .map(|(f, v)| (*f, v.clone()))
+        .map(|&f| (f, entry_field_of(t, f)))
         .collect()
 }
 
 fn single_panel(
     path: String,
+    displayed: Memo<Rc<Vec<TrackEntry>>>,
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
     selected: Signal<BTreeSet<String>>,
     close: Rc<dyn Fn()>,
 ) -> View {
-    // 完整字段值优先读 LRU 缓存（同曲目重开 / 来回切秒开，无等待占位）；
+    // 完整字段值优先读 LRU 缓存与曲库索引条目（第 0 帧秒开，歌词与注释零延迟呈现）；
     // 未命中走后台异步读取（Lofty 跳过大封面与音频属性解析，亚毫秒完成）。
+    let entry = displayed
+        .with_untracked(|list| list.iter().find(|t| t.path == path).cloned())
+        .or_else(|| {
+            store::store()
+                .tracks
+                .with_untracked(|list| list.iter().find(|t| t.path == path).cloned())
+        });
     let cached = get_cached_full(&path);
     let initial_values = cached
         .as_ref()
         .map(|(fields, _, _)| fields.clone())
+        .or_else(|| entry.as_ref().map(track_seed))
         .unwrap_or_default();
     let full = signal(cached.clone());
     let alive = Arc::new(AtomicBool::new(true));
@@ -190,10 +195,7 @@ fn single_panel(
     });
     let draft = signal(SingleDraft {
         path: path.clone(),
-        original: cached
-            .as_ref()
-            .map(|(f, _, _)| f.clone())
-            .unwrap_or_default(),
+        original: initial_values.clone(),
         values: initial_values,
         cover: None,
         cover_src: None,
@@ -234,7 +236,11 @@ fn single_panel(
             put_cached_full(&read, res.clone());
             let (fields, tag_type, added) = res;
             draft.update(|d| {
-                d.values = fields.clone();
+                for (f, v) in &fields {
+                    if d.values.get(f) == d.original.get(f) {
+                        d.values.insert(*f, v.clone());
+                    }
+                }
                 d.original = fields.clone();
             });
             full.set(Some((fields, tag_type, added)));
@@ -434,7 +440,10 @@ fn single_header(
                                     rename_state.renaming.set(true);
                                 }
                             })
-                            .disabled(move || full.get().is_none() || rename_state.busy.get()),
+                            .disabled(move || {
+                                (draft.with(|d| d.values.is_empty()) && full.get().is_none())
+                                    || rename_state.busy.get()
+                            }),
                         )
                         .into_element(),
                     text_button(Variant::Default, Size::Xs, None, "保存", {
@@ -443,7 +452,7 @@ fn single_header(
                     })
                     .accessibility_label("保存")
                     .disabled(move || {
-                        full.get().is_none()
+                        (draft.with(|d| d.values.is_empty()) && full.get().is_none())
                             || draft.with(|d| {
                                 d.saving || !valid(&d.values) || build_edits(d).is_empty()
                             })
@@ -483,7 +492,7 @@ fn single_form(
                 field_row("歌手", TagField::Artist, draft, full),
                 field_row("专辑", TagField::Album, draft, full),
                 field_row("专辑歌手", TagField::AlbumArtist, draft, full),
-                field_row("流派", TagField::Genre, draft, full),
+                genre_row(draft, full),
                 narrow_row("年份", TagField::Year, draft, full, 64.0),
                 pair_row(
                     "音轨",
@@ -606,12 +615,17 @@ fn field_row(
         .gap(px(8.0))
         .child(label_cell(label))
         .child(dynamic(move || {
-            if full.get().is_none() {
+            let is_ready =
+                untracked(|| draft.with(|d| d.values.contains_key(&field))) || full.get().is_some();
+            if !is_ready {
                 return loading_input(true, None).into_element();
             }
             let initial = untracked(|| {
                 draft
                     .with(|d| d.values.get(&field).cloned())
+                    .or_else(|| {
+                        full.with(|f| f.as_ref().and_then(|(m, _, _)| m.get(&field).cloned()))
+                    })
                     .unwrap_or_default()
             });
             input_field(true)
@@ -630,6 +644,299 @@ fn field_row(
         }))
 }
 
+/// `;` 分隔串 → 标签列表（草稿里流派仍是 "a; b" 形式，写回格式不变）。
+fn split_genres(raw: &str) -> Vec<String> {
+    raw.split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// 流派标签输入行：combobox + 标签 chips，与单个修改（`edit_info`）完全一致。
+fn genre_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow>>) -> View {
+    let s = store::store();
+    let t = nsh_base::theme();
+    let (input_c, ring, popover_c, card_c) = (t.input, t.ring, t.popover, t.card);
+    let gate = store::menu_control();
+    let query = signal(String::new());
+    let genres = move || {
+        let raw = draft.with(|d| {
+            d.values
+                .get(&TagField::Genre)
+                .cloned()
+                .or_else(|| {
+                    full.with(|f| {
+                        f.as_ref()
+                            .and_then(|(m, _, _)| m.get(&TagField::Genre).cloned())
+                    })
+                })
+                .unwrap_or_default()
+        });
+        split_genres(&raw)
+    };
+    let set_genres = move |list: Vec<String>| {
+        draft.update(|d| {
+            d.values.insert(TagField::Genre, list.join("; "));
+            d.saved = false;
+        });
+    };
+    let items = move || {
+        let q = query.get();
+        let q = q.trim();
+        let mut known: Vec<String> = Vec::new();
+        s.tracks.with(|tracks| {
+            for g in tracks.iter().flat_map(|t| &t.genres) {
+                if !known.iter().any(|k| k == g) {
+                    known.push(g.clone());
+                }
+            }
+        });
+        known.sort();
+        let mut items = Vec::with_capacity(known.len() + 1);
+        if !q.is_empty() && !known.iter().any(|g| g.eq_ignore_ascii_case(q)) {
+            items.push(nsh_base::SelectItem::new(
+                q.to_owned(),
+                format!("添加“{q}”"),
+            ));
+        }
+        items.extend(
+            known
+                .into_iter()
+                .map(|g| nsh_base::SelectItem::new(g.clone(), g)),
+        );
+        items
+    };
+    let chips = move || {
+        view()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .gap(px(4.0))
+            .child(dynamic(move || {
+                genres()
+                    .into_iter()
+                    .map(|g| genre_chip(draft, g).into_element())
+                    .collect::<Vec<_>>()
+            }))
+    };
+    view()
+        .flex_row()
+        .items_start()
+        .gap(px(8.0))
+        .child(view().w(px(72.0)).pt(px(8.0)).child(label_cell("标签")))
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .gap(px(4.0))
+                .child(dynamic(move || {
+                    let is_ready =
+                        untracked(|| draft.with(|d| d.values.contains_key(&TagField::Genre)))
+                            || full.get().is_some();
+                    if !is_ready {
+                        return loading_input(true, None).into_element();
+                    }
+                    nsh_base::combobox()
+                        .w(percentage(1.0))
+                        .min_h(px(32.0))
+                        .flex_wrap()
+                        .items_center()
+                        .pl(px(6.0))
+                        .pr(px(28.0))
+                        .py(px(3.0))
+                        .gap(px(4.0))
+                        .rounded(px(RADIUS_MD))
+                        .border_1()
+                        .border_color(input_c)
+                        .shadow_xs()
+                        .bg(card_c)
+                        .focus_within(move |st| {
+                            st.border_color(ring)
+                                .ring(px(3.0))
+                                .ring_color(ring.opacity(0.5))
+                        })
+                        .items(items)
+                        .multiple(true)
+                        .value(move || {
+                            Some(
+                                genres()
+                                    .into_iter()
+                                    .map(SharedString::from)
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
+                        .query(move || Some(SharedString::from(query.get())))
+                        .on_query_change(move |q: &SharedString| query.set(q.to_string()))
+                        .open(gate.open())
+                        .on_open_change(gate.combobox_change())
+                        .on_change(move |v: &Vec<SharedString>| {
+                            let mut list: Vec<String> = Vec::new();
+                            for x in v {
+                                let g = x.trim().to_owned();
+                                if !g.is_empty() && !list.iter().any(|k| k.eq_ignore_ascii_case(&g))
+                                {
+                                    list.push(g);
+                                }
+                            }
+                            set_genres(list);
+                            query.set(String::new());
+                        })
+                        .placeholder(Some(SharedString::from("回车添加")))
+                        .accessibility_label(Some(SharedString::from("标签")))
+                        .disabled(move || draft.with(|d| d.saving))
+                        .placement(Placement::Bottom)
+                        .align(Align::Start)
+                        .offset(px(4.0))
+                        .margin(px(8.0))
+                        .popup_style(move |st| {
+                            st.p(px(4.0))
+                                .rounded(px(10.0))
+                                .overflow_hidden()
+                                .border_1()
+                                .border_color(border())
+                                .bg(popover_c)
+                                .shadow_lg()
+                        })
+                        .list_style(|st| st.max_h(px(224.0)))
+                        .item_class("focus:bg-hover")
+                        .item_style(|st| st.px(px(8.0)).py(px(6.0)).rounded(px(6.0)))
+                        .render_item(move |entry: &nsh_base::SelectEntry| genre_item(draft, entry))
+                        .input_style(move |st| {
+                            st.h(px(24.0))
+                                .flex_1()
+                                .min_w(px(72.0))
+                                .text_size(px(13.0))
+                                .text_color(fg())
+                        })
+                        .prefix(when(move || !genres().is_empty(), move || chips()))
+                        .trigger_button(
+                            view()
+                                .absolute()
+                                .top(px(4.0))
+                                .right(px(6.0))
+                                .h(px(24.0))
+                                .items_center()
+                                .justify_center()
+                                .child(trigger_chevron()),
+                        )
+                        .empty(
+                            text("没有可添加的标签")
+                                .text_size(px(12.0))
+                                .line_height(px(12.0))
+                                .text_color(faint()),
+                        )
+                        .into_element()
+                }))
+                .child(dynamic(move || {
+                    let is_ready =
+                        untracked(|| draft.with(|d| d.values.contains_key(&TagField::Genre)))
+                            || full.get().is_some();
+                    if !is_ready {
+                        return view().into_element();
+                    }
+                    let formatted = genres().join("; ");
+                    text(format!("流派：{formatted}"))
+                        .text_size(px(11.0))
+                        .line_height(px(15.0))
+                        .text_color(muted_fg())
+                        .into_element()
+                })),
+        )
+}
+
+/// 下拉行：左侧复选框（选中打勾）+ 流派名。「添加“…”」项不在已选集
+/// 里，自然显示空框。
+fn genre_item(draft: Signal<SingleDraft>, entry: &nsh_base::SelectEntry) -> View {
+    let value = entry.value.to_string();
+    view()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .child(
+            view()
+                .w(px(16.0))
+                .h(px(16.0))
+                .rounded(px(4.0))
+                .border_1()
+                .border_color(border())
+                .items_center()
+                .justify_center()
+                .child(when(
+                    move || {
+                        draft.with(|d| {
+                            split_genres(
+                                d.values
+                                    .get(&TagField::Genre)
+                                    .map(String::as_str)
+                                    .unwrap_or_default(),
+                            )
+                            .iter()
+                            .any(|g| g == &value)
+                        })
+                    },
+                    || icon(Icon::Check, 10.0, fg),
+                )),
+        )
+        .child(
+            text(entry.title.to_string())
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .text_color(fg()),
+        )
+}
+
+/// 一个流派 chip：文字 + × 按钮。
+fn genre_chip(draft: Signal<SingleDraft>, name: String) -> View {
+    let remove = {
+        let name = name.clone();
+        move || {
+            if draft.with(|d| d.saving) {
+                return;
+            }
+            draft.update(|d| {
+                let mut list = split_genres(
+                    d.values
+                        .get(&TagField::Genre)
+                        .map(String::as_str)
+                        .unwrap_or_default(),
+                );
+                list.retain(|x| x != &name);
+                d.values.insert(TagField::Genre, list.join("; "));
+                d.saved = false;
+            });
+        }
+    };
+    view()
+        .flex_row()
+        .items_center()
+        .gap(px(4.0))
+        .h(px(24.0))
+        .pl(px(8.0))
+        .pr(px(4.0))
+        .rounded(px(6.0))
+        .bg(muted())
+        .child(
+            text(name)
+                .text_size(px(12.0))
+                .line_height(px(12.0))
+                .text_color(fg()),
+        )
+        .child(
+            view()
+                .h(px(16.0))
+                .w(px(16.0))
+                .items_center()
+                .justify_center()
+                .rounded(px(4.0))
+                .hover(|st| st.bg(hover()))
+                .role(AccessibilityRole::Button)
+                .label("移除流派")
+                .on_press(move || remove())
+                .child(icon(Icon::Close, 10.0, muted_fg)),
+        )
+}
+
 /// 一行 `标签 + 定宽输入框`（年份 / ReplayGain 类，控件列从同一 x 起）。
 fn narrow_row(
     label: &'static str,
@@ -644,10 +951,12 @@ fn narrow_row(
         .gap(px(8.0))
         .child(label_cell(label))
         .child(dynamic(move || {
-            if full.get().is_none() {
+            let is_ready =
+                untracked(|| draft.with(|d| d.values.contains_key(&field))) || full.get().is_some();
+            if !is_ready {
                 return loading_input(true, Some(width)).into_element();
             }
-            number_input(field.label(), field, draft, width).into_element()
+            number_input(field.label(), field, draft, full, width).into_element()
         }))
 }
 
@@ -667,7 +976,10 @@ fn pair_row(
         .gap(px(8.0))
         .child(label_cell(label))
         .child(dynamic(move || {
-            if full.get().is_none() {
+            let is_ready = untracked(|| {
+                draft.with(|d| d.values.contains_key(&a) || d.values.contains_key(&b))
+            }) || full.get().is_some();
+            if !is_ready {
                 return view()
                     .flex_row()
                     .items_center()
@@ -686,14 +998,14 @@ fn pair_row(
                 .flex_row()
                 .items_center()
                 .gap(px(6.0))
-                .child(number_input(a_label, a, draft, 56.0))
+                .child(number_input(a_label, a, draft, full, 56.0))
                 .child(
                     text("/")
                         .text_size(px(13.0))
                         .line_height(px(13.0))
                         .text_color(faint()),
                 )
-                .child(number_input(b_label, b, draft, 56.0))
+                .child(number_input(b_label, b, draft, full, 56.0))
                 .into_element()
         }))
 }
@@ -703,11 +1015,13 @@ fn number_input(
     label: &'static str,
     field: TagField,
     draft: Signal<SingleDraft>,
+    full: Signal<Option<FullRow>>,
     width: f32,
 ) -> impl IntoElement {
     let initial = untracked(|| {
         draft
             .with(|d| d.values.get(&field).cloned())
+            .or_else(|| full.with(|f| f.as_ref().and_then(|(m, _, _)| m.get(&field).cloned())))
             .unwrap_or_default()
     });
     input_field(true)
@@ -731,7 +1045,9 @@ fn rating_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow>>) -> View
         .gap(px(8.0))
         .child(label_cell("评分"))
         .child(dynamic(move || {
-            if full.get().is_none() {
+            let is_ready = untracked(|| draft.with(|d| d.values.contains_key(&TagField::Rating)))
+                || full.get().is_some();
+            if !is_ready {
                 return view()
                     .flex_row()
                     .gap(px(2.0))
@@ -799,9 +1115,7 @@ fn rating_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow>>) -> View
         }))
 }
 
-/// 多行输入（注释 / 歌词）：限制最大高度（歌词 260pt，注释 120pt）；只在
-/// `full` 落地后挂真输入——值必须是完整的（MetaRow 里注释截 120 字、
-/// 歌词只剩预览）。等待期画同款外观占位。
+/// 多行输入（注释 / 歌词）：限制最大高度（歌词 260pt，注释 120pt）；未就绪时画同款外观占位。
 fn multi_row(
     label: &'static str,
     field: TagField,
@@ -816,7 +1130,9 @@ fn multi_row(
         .gap(px(8.0))
         .child(view().w(px(72.0)).pt(px(8.0)).child(label_cell(label)))
         .child(dynamic(move || {
-            if full.get().is_none() {
+            let is_ready =
+                untracked(|| draft.with(|d| d.values.contains_key(&field))) || full.get().is_some();
+            if !is_ready {
                 return view()
                     .flex_1()
                     .min_w(px(0.0))
@@ -841,6 +1157,9 @@ fn multi_row(
             let initial = untracked(|| {
                 draft
                     .with(|d| d.values.get(&field).cloned())
+                    .or_else(|| {
+                        full.with(|f| f.as_ref().and_then(|(m, _, _)| m.get(&field).cloned()))
+                    })
                     .unwrap_or_default()
             });
             input_field(false)
@@ -876,7 +1195,8 @@ fn cover_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow>>) -> View 
         }
     };
     let pick = move || {
-        if full.get().is_none() {
+        let is_ready = untracked(|| draft.with(|d| !d.values.is_empty())) || full.get().is_some();
+        if !is_ready {
             return;
         }
         spawn(async move {
@@ -908,7 +1228,9 @@ fn cover_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow>>) -> View 
             }
         });
     };
-    let busy_or_loading = move || full.get().is_none() || draft.with(|d| d.saving);
+    let busy_or_loading = move || {
+        (draft.with(|d| d.values.is_empty()) && full.get().is_none()) || draft.with(|d| d.saving)
+    };
     view()
         .flex_row()
         .items_center()
@@ -1619,14 +1941,6 @@ fn entry_field_of(t: &TrackEntry, field: TagField) -> String {
     }
 }
 
-#[allow(dead_code)]
-fn track_seed(t: &TrackEntry) -> HashMap<TagField, String> {
-    TagField::ALL
-        .iter()
-        .map(|&f| (f, entry_field_of(t, f)))
-        .collect()
-}
-
 /// 三态行：标签 + 模式下拉（保持原值 / 统一设为 / 清空）+ 输入框
 /// （仅「统一设为」可写，占位显示共同值或「多个值」）。
 fn tri_row(
@@ -2096,5 +2410,64 @@ mod tests {
         // are clipped within max_h (260pt and 120pt) and do not expand the scroll content.
         let err = app.scroll("text:基本信息", px(-1.0)).unwrap_err();
         assert!(err.contains("cannot scroll by -1"));
+    }
+
+    #[component]
+    fn SinglePanelInstantSeedTest() -> impl IntoElement {
+        crate::ui::store::install();
+        let p = "mock.flac".to_owned();
+        let meta = Arc::new(crate::metadata::MetaInfo {
+            title: "Mock Title".to_owned(),
+            artist: "Mock Artist".to_owned(),
+            lyrics: Some("[00:01.00]测试歌词".to_owned()),
+            comment: Some("测试注释".to_owned()),
+            ..Default::default()
+        });
+        let entry = TrackEntry(Arc::new(crate::config::TrackShared {
+            provider: crate::config::ProviderId::Local,
+            path: p.clone(),
+            file_name: "mock.flac".to_owned(),
+            album_artist: "Mock Artist".to_owned(),
+            genres: vec!["二次元".to_owned(), "JPOP".to_owned()],
+            size_bytes: 1024,
+            modified: 0,
+            stamp: 1,
+            meta,
+        }));
+        let displayed = computed(move || Rc::new(vec![entry.clone()]));
+        let rows = signal(HashMap::new());
+        let selected = signal(BTreeSet::from([p.clone()]));
+        single_panel(p, displayed, rows, selected, Rc::new(|| {}))
+    }
+
+    #[test]
+    fn single_panel_prefills_lyrics_instantly_from_seed() {
+        use nsh_core::geometry::{px, size};
+        use nsh_engine::{EngineConfig, Root};
+        use nsh_testing::Headless;
+        let theme =
+            nsh_base::Theme::from_json(include_str!("../../../../theme.json")).expect("theme.json");
+        let mut config =
+            EngineConfig::new(Root::of::<SinglePanelInstantSeedTest>().tokens(theme.into_tokens()));
+        config.ui_sets = vec![nsh_base::registry(), crate::registry()];
+        config.viewport = size(px(400.0), px(800.0));
+        let mut app = Headless::start(config).expect("start");
+        app.wait_for("label:歌词").unwrap();
+        assert_eq!(
+            app.screen().input_text("label:歌词").unwrap(),
+            Some("[00:01.00]测试歌词")
+        );
+        assert_eq!(
+            app.screen().input_text("label:注释").unwrap(),
+            Some("测试注释")
+        );
+        assert_eq!(
+            app.screen().input_text("label:标题").unwrap(),
+            Some("Mock Title")
+        );
+        app.wait_for("text:二次元").unwrap();
+        app.wait_for("text:JPOP").unwrap();
+        app.wait_for("text:标签").unwrap();
+        app.wait_for("text:流派：二次元; JPOP").unwrap();
     }
 }

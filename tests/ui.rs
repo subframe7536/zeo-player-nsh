@@ -1113,6 +1113,8 @@ fn edit_info_dialog_opens_with_current_tags() {
         );
     }
     // 流派是标签输入器：语料的三个流派各成一个 chip。
+    app.wait_for("text:标签").unwrap();
+    app.wait_for("text:流派：Rock; Indie; Dream Pop").unwrap();
     for chip in ["Rock", "Indie", "Dream Pop"] {
         assert!(
             app.screen().count(&format!("text:{chip}")).unwrap() >= 1,
@@ -1120,7 +1122,7 @@ fn edit_info_dialog_opens_with_current_tags() {
         );
     }
     // 下拉：输入即过滤，首项「添加“…”」自由新增，回车收下成一个 chip。
-    app.type_text("label:流派", "r").unwrap();
+    app.type_text("label:标签", "r").unwrap();
     app.wait_for("role:option").unwrap();
     app.wait_for("text:添加“r”").unwrap();
     assert!(app.screen().count("role:option").unwrap() >= 2);
@@ -1128,8 +1130,10 @@ fn edit_info_dialog_opens_with_current_tags() {
     // 级 KeyPress 事件、不过 keymap，模拟不了它。
     app.press_key("enter").unwrap();
     app.wait_for("text:r").unwrap();
+    app.wait_for("text:流派：Rock; Indie; Dream Pop; r")
+        .unwrap();
     assert_eq!(
-        app.screen().input_text("label:流派").unwrap(),
+        app.screen().input_text("label:标签").unwrap(),
         Some(""),
         "新增后查询应清空"
     );
