@@ -18,9 +18,9 @@ use super::super::theme::*;
 use crate::engine::audio::LoopMode;
 
 /// 播放条左右两段的宽度：窗口变窄时一起收缩（等宽，播放控制保持居中），
-/// 给中间的进度条留地方。
+/// 给中间的进度条留地方。断点走 `layout_width`——窗口宽度一变即换档。
 fn side_width() -> f32 {
-    let w = window().width.0;
+    let w = layout_width();
     if w >= 1080.0 {
         260.0
     } else if w >= 900.0 {
@@ -32,12 +32,12 @@ fn side_width() -> f32 {
 
 /// 音量滑条只在两边够宽时显示（窄了只剩静音图标）。
 fn fits_volume() -> bool {
-    window().width.0 >= 1080.0
+    layout_width() >= 1080.0
 }
 
 /// 进度条两侧的时间（窄了只留滑条）。
 fn fits_times() -> bool {
-    window().width.0 >= 720.0
+    layout_width() >= 720.0
 }
 
 pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {

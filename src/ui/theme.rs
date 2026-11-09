@@ -7,27 +7,14 @@ use nsh_core::prelude::*;
 
 use crate::config::ThemeColor;
 
-/// 侧栏宽度。
+/// 侧栏宽度（固定，不随窗口宽度收缩）。
 pub const SIDEBAR: f32 = 232.0;
-/// 侧栏收成图标栏后的宽度：图标列中心在 30 pt（10 外边距 + 10 行内
-/// 边距 + 半个 20 pt 图标格），栏宽定 60 正好让整列居中，图标不位移。
-pub const SIDEBAR_RAIL: f32 = 60.0;
-/// 窗口窄于它时侧栏收成只有图标的栏（留出曲目表的最小可用宽度）。
-const SIDEBAR_COLLAPSE: f32 = 900.0;
 
-/// 窄窗口的图标栏模式（读取即订阅窗口大小）。
-pub fn sidebar_collapsed() -> bool {
-    window().width.0 < SIDEBAR_COLLAPSE
-}
-
-/// 侧栏当前占的宽度（内容区尺寸要用它而不是 [`SIDEBAR`]。侧栏自身的
-/// 宽度有收放动画，读的是目标态）。
-pub fn sidebar_width() -> f32 {
-    if sidebar_collapsed() {
-        SIDEBAR_RAIL
-    } else {
-        SIDEBAR
-    }
+/// 宽度断点（播放条布局档、曲目表列显隐、网格列数等）统一的取值：
+/// 实时 `window().width`——窗口宽度变化引起的布局换档与元素显隐都
+/// 即时生效（含拖动缩放途中），不做冻结。
+pub fn layout_width() -> f32 {
+    window().width.0
 }
 /// 自绘标题栏高度（交通灯居中其中）。
 pub const TITLE_BAR: f32 = 40.0;

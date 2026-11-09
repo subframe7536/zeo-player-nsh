@@ -45,21 +45,21 @@ pub const W_FORMAT: f32 = 48.0;
 pub const W_TIME: f32 = 56.0;
 pub const W_LIKE: f32 = 32.0;
 
-/// 内容区宽度（窗口减侧栏；窄窗口侧栏收成图标栏）。读取即订阅窗口大小。
-pub(crate) fn content_width() -> f32 {
-    window().width.0 - sidebar_width()
+/// 内容区的宽度断点取值：实时 `layout_width` 减去固定侧栏。
+pub(crate) fn content_break() -> f32 {
+    layout_width() - SIDEBAR
 }
 
 /// 窄窗口里依次收起：专辑列（< 760 pt）、大小列（< 600 pt）、序号列
 /// （< 420 pt；序号列只在专辑详情存在）。
 pub fn fits_album() -> bool {
-    content_width() >= 760.0
+    content_break() >= 760.0
 }
 pub fn fits_size() -> bool {
-    content_width() >= 600.0
+    content_break() >= 600.0
 }
 pub fn fits_number() -> bool {
-    content_width() >= 420.0
+    content_break() >= 420.0
 }
 
 /// 文件的音频格式（扩展名大写）：MP3、FLAC、WAV、AIFF、M4A、OGG 等。

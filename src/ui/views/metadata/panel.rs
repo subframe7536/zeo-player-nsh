@@ -77,7 +77,7 @@ pub(super) fn panel(
     });
     view()
         .w(move || {
-            let cw = crate::ui::components::tracks::content_width();
+            let cw = crate::ui::components::tracks::content_break();
             if cw < 760.0 {
                 px(280.0)
             } else if cw < 960.0 {
@@ -1162,18 +1162,32 @@ fn multi_row(
                     })
                     .unwrap_or_default()
             });
+            let content_h = signal(0.0f32);
             input_field(false)
                 .flex_1()
                 .min_w(px(0.0))
-                .h(auto())
+                // 文本超过上限时锁成固定高：h(auto) 的输入框 intrinsic 高度
+                // 随内容长，max_h 只裁元素框，宿主编辑器仍按内容高开视口——
+                // 内部永远没有可滚范围（overflow_hidden 再裁一下只是看不见
+                // 溢出）。固定到 max_height 后编辑器视口被框住，原生滚动
+                // 恢复；未超限时仍 auto 随文生长。22 = py(10)×2 + border_1×2。
+                .h(move || {
+                    if content_h.get() + 22.0 > max_height {
+                        Length::from(px(max_height))
+                    } else {
+                        auto()
+                    }
+                })
                 .min_h(px(min_height))
                 .max_h(px(max_height))
                 .py(px(10.0))
                 .multiline(true)
-                .overflow_hidden()
                 .label(label)
                 .default_value(initial)
                 .readonly(move || draft.with(|d| d.saving))
+                .on_content_size_change(move |s: &nsh_core::Size<nsh_core::Points>| {
+                    content_h.set(s.height.0)
+                })
                 .on_change(move |t: &str| {
                     draft.update(|d| {
                         d.values.insert(field, t.to_owned());

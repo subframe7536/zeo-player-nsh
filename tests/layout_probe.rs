@@ -549,11 +549,11 @@ fn smart_playlist_select_probe() {
     );
 }
 
-/// 侧栏收起（窄窗口 rail 模式）时，文件树各行图标必须完全水平对齐：
-/// 之前因为 `when(!rail() && has_children)` 的 otherwise 分支在无子目录行上
-/// 不会触发条件翻转，导致 16px 的占位 spacer 未被移除，产生错位。
+/// 侧栏文件树各行的文件夹图标必须完全水平对齐：有子目录的行是「箭头
+/// + 图标」，无子目录的行是「16pt 占位 + 图标」——行内最靠右的图像
+/// 都是文件夹图标，x 应一致。
 #[test]
-fn sidebar_collapsed_tree_alignment_probe() {
+fn sidebar_tree_alignment_probe() {
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
@@ -566,10 +566,6 @@ fn sidebar_collapsed_tree_alignment_probe() {
     app.press("role:option[文件夹]").unwrap();
     app.wait_for_within("text:测试歌曲", Duration::from_secs(20))
         .unwrap();
-
-    // 窗口收窄到 800（小于 SIDEBAR_COLLAPSE 900），侧栏变为 60pt rail 模式
-    app.set_viewport(size(px(800.0), px(800.0))).unwrap();
-    app.wait(Duration::from_millis(300)).unwrap();
 
     let p = probed.lock().unwrap();
 
@@ -609,25 +605,21 @@ fn sidebar_collapsed_tree_alignment_probe() {
         false
     };
 
-    let img1 = p
-        .images
-        .keys()
-        .find(|&&id| is_descendant(id, root1_id))
-        .copied()
-        .expect("root1 中找不到文件夹图标");
-    let img2 = p
-        .images
-        .keys()
-        .find(|&&id| is_descendant(id, root2_id))
-        .copied()
-        .expect("root2 中找不到文件夹图标");
-
-    let (x1, _, _) = abs(&p, img1).expect("img1 没有 frame");
-    let (x2, _, _) = abs(&p, img2).expect("img2 没有 frame");
+    // 文件夹图标是行内最靠右的图像（有子目录的行左边还有折叠箭头）。
+    let folder_x = |row: NodeId| {
+        p.images
+            .keys()
+            .filter(|&&id| is_descendant(id, row))
+            .filter_map(|&id| abs(&p, id).map(|(x, _, _)| x))
+            .fold(f32::NEG_INFINITY, f32::max)
+    };
+    let x1 = folder_x(root1_id);
+    let x2 = folder_x(root2_id);
+    assert!(x1.is_finite() && x2.is_finite(), "行里找不到文件夹图标");
 
     assert_eq!(
         x1, x2,
-        "侧栏收起时有子目录的文件夹 ({x1:.1}) 与无子目录的文件夹 ({x2:.1}) 图标应完全水平对齐"
+        "有子目录的文件夹 ({x1:.1}) 与无子目录的文件夹 ({x2:.1}) 图标应完全水平对齐"
     );
 }
 

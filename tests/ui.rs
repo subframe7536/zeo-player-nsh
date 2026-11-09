@@ -683,23 +683,6 @@ fn folders_page_shows_tree_and_files() {
     app.press(&format!("label:展开 {root}")).unwrap();
     app.wait_for("text:sub").unwrap();
 
-    // 侧栏缩小时，目录树只显示根文件夹，子文件夹隐藏
-    app.set_viewport(size(px(640.0), px(800.0))).unwrap();
-    app.wait_until(
-        "侧栏缩小时子文件夹应隐藏",
-        Duration::from_secs(5),
-        |s| !s.texts().iter().any(|t| *t == "sub"),
-    )
-    .unwrap();
-    assert!(
-        app.screen()
-            .count(&format!("label:{}", root_name()))
-            .unwrap_or(0)
-            > 0,
-        "缩小时根文件夹仍应显示"
-    );
-    app.set_viewport(size(px(1200.0), px(800.0))).unwrap();
-    app.wait_for("text:sub").unwrap();
     let t = texts(&app);
     assert!(t.iter().any(|s| s == &root_name()), "{t:?}");
     for label in ["大小", "时长", "格式"] {
@@ -1166,11 +1149,18 @@ fn narrow_windows_drop_album_and_size_columns() {
     goto_folders(&mut app);
     app.wait_for_within("大小", Duration::from_secs(20))
         .unwrap();
-    // 侧栏收成图标栏（< 900 pt，导航文字被裁掉不绘制），内容区 572 pt：
-    // 大小与专辑列收起——「专辑」文本一条都不剩（侧栏导航也没有）。
+    // 展开时「专辑」至少有两处：侧栏导航行与曲目表的列头。
+    let expanded = app.screen().count("text:专辑").unwrap_or(0);
+    assert!(expanded >= 2, "{expanded}");
+
+    // 窗口收窄到 640 pt（低于运行时的最小宽，仅无头测试可达），内容区
+    // 408 pt：大小与专辑列收起——「专辑」只剩侧栏导航一处。
     app.set_viewport(size(px(640.0), px(800.0))).unwrap();
     assert!(!has(&app, "大小"));
-    assert!(!has(&app, "专辑"));
+    assert!(
+        app.screen().count("text:专辑").unwrap_or(0) < expanded,
+        "专辑列应收起（只剩侧栏导航）"
+    );
     assert!(has(&app, "时长"));
 }
 
@@ -1255,7 +1245,7 @@ fn sidebar_search_opens_command_palette() {
 }
 
 #[test]
-fn sidebar_collapsed_separators_and_no_track_count() {
+fn sidebar_no_track_count() {
     let mut app = start(1200.0, 800.0);
     // 侧栏底部不再有 "首曲目" 文本
     let t = texts(&app);
@@ -1264,24 +1254,10 @@ fn sidebar_collapsed_separators_and_no_track_count() {
         "侧栏底部不应再出现曲目总数统计: {t:?}"
     );
 
-    // 展开态下能看到「曲库」小标题
-    assert!(has(&app, "曲库"), "展开态应有「曲库」小标题");
+    // 能看到「曲库」小标题
+    assert!(has(&app, "曲库"), "应有「曲库」小标题");
 
-    // 收缩到 rail 模式（宽 800 < 900）
-    app.set_viewport(nsh_core::geometry::size(
-        nsh_core::geometry::px(800.0),
-        nsh_core::geometry::px(800.0),
-    ))
-    .unwrap();
-    app.wait(Duration::from_millis(100)).unwrap();
-
-    // 依然没有 "首曲目" 文本
-    let t_collapsed = texts(&app);
-    assert!(
-        !t_collapsed.iter().any(|s| s.contains("首曲目")),
-        "收起态侧栏不应出现曲目统计: {t_collapsed:?}"
-    );
-    // 搜索按钮依然可以点击
+    // 搜索按钮可以点击
     app.press("label:搜索").unwrap();
     app.wait_for("label:命令面板").unwrap();
 }

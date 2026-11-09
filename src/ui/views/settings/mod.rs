@@ -379,34 +379,17 @@ fn search_box(query: Signal<String>) -> View {
 }
 
 /// 左栏分类行（外观同主侧栏的导航行）。
-fn pane_row(p: Pane, pane: Signal<Pane>, rail: bool) -> AnyElement {
+fn pane_row(p: Pane, pane: Signal<Pane>) -> AnyElement {
     let active = move || pane.get() == p;
-    let b = nsh_base::button()
+    nsh_base::button()
         .rounded(px(8.0))
         .accessibility_label(p.title())
         .selected(active)
         .selected_style(|st| st.bg(move || primary().opacity(0.12)))
         .hover(|st| st.bg(move || primary().opacity(0.08)))
         .active(|st| st.opacity(0.7))
-        .on_press(move |_: &()| pane.set(p));
-    if rail {
-        // tipped 的包装在列里会拉满宽、按钮贴左；再套一层居中让它回到栏中线。
-        return view()
-            .w_full()
-            .items_center()
-            .child(super::super::components::button::tipped(
-                b.size(px(40.0)).items_center().justify_center().child(icon(
-                    p.glyph(),
-                    17.0,
-                    move || {
-                        if active() { primary() } else { sidebar_fg() }
-                    },
-                )),
-                p.title(),
-            ))
-            .into_element();
-    }
-    b.h(px(32.0))
+        .on_press(move |_: &()| pane.set(p))
+        .h(px(32.0))
         .flex_row()
         .items_center()
         .gap(px(8.0))
@@ -477,25 +460,18 @@ fn group_heading(name: &'static str, spaced: bool) -> View {
 }
 
 /// 左栏：顶部搜索框，下面是分类列表（有搜索词时为命中的节列表）。
-/// 窗口窄时收成图标栏：搜索框与标题隐藏，分类只剩图标（悬停提示里看名字）。
 fn nav_column(pane: Signal<Pane>, query: Signal<String>) -> View {
-    let rail = move || window().width.0 < 760.0;
     let rows = dynamic(move || {
-        let rail = rail();
-        let q = if rail {
-            String::new()
-        } else {
-            query.get().trim().to_lowercase()
-        };
+        let q = query.get().trim().to_lowercase();
         if q.is_empty() {
             return Pane::GROUPS
                 .iter()
                 .enumerate()
                 .flat_map(|(i, &(name, panes))| {
-                    let heading = (!rail).then(|| group_heading(name, i > 0).into_element());
-                    heading
+                    let heading = group_heading(name, i > 0).into_element();
+                    [heading]
                         .into_iter()
-                        .chain(panes.iter().map(|&p| pane_row(p, pane, rail)))
+                        .chain(panes.iter().map(|&p| pane_row(p, pane)))
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
@@ -507,27 +483,17 @@ fn nav_column(pane: Signal<Pane>, query: Signal<String>) -> View {
             .collect()
     });
     view()
-        .w(move || px(if rail() { 64.0 } else { 220.0 }))
+        .w(px(220.0))
         .flex_shrink_0()
         .bg(move || sidebar())
         .transition_colors()
         .duration(300.0)
         .test_id("settings-nav")
-        .child(when(
-            move || !rail(),
-            move || view().p(px(10.0)).child(search_box(query)),
-        ))
+        .child(view().p(px(10.0)).child(search_box(query)))
         .child(
-            scroll().flex_1().child(
-                view()
-                    .px(px(10.0))
-                    // 图标栏没有搜索框，顶部留同样的间距。
-                    .pt(move || px(if rail() { 10.0 } else { 0.0 }))
-                    .pb(px(10.0))
-                    .gap(px(2.0))
-                    .style_when(rail, |st| st.items_center())
-                    .child(rows),
-            ),
+            scroll()
+                .flex_1()
+                .child(view().px(px(10.0)).pb(px(10.0)).gap(px(2.0)).child(rows)),
         )
 }
 

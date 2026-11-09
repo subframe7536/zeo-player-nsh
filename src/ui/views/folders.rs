@@ -46,7 +46,7 @@ const FOLDER_COLS: Columns = Columns {
     format: true,
 };
 
-/// 目录树行高（与侧栏 adaptive_row 统一为 34pt，消除收缩时的垂直位移）与每层缩进。
+/// 目录树行高（与侧栏 nav_row 统一为 34pt）与每层缩进。
 const TREE_ROW: f32 = 34.0;
 const INDENT: f32 = 14.0;
 
@@ -1049,14 +1049,6 @@ fn create_folder_ui() -> FolderUi {
         let r = flatten_with(&tree.get(), &s.folder_expanded.get());
         Rc::new(r)
     });
-    let rows = computed(move || {
-        let all = all_rows.get();
-        if sidebar_collapsed() {
-            Rc::new(all.iter().filter(|r| r.depth == 0).cloned().collect())
-        } else {
-            all
-        }
-    });
     let files = computed(move || here.with(|p| p.files.clone()));
 
     let active = signal(None::<DragState>);
@@ -1071,7 +1063,7 @@ fn create_folder_ui() -> FolderUi {
         over,
         anchor,
         extra: s.folder_extra,
-        rows,
+        rows: all_rows,
         scroll,
         geo: Rc::new(Cell::new(None)),
         down: Rc::new(Cell::new(None)),
@@ -1112,18 +1104,10 @@ fn folder_ui() -> FolderUi {
 }
 
 /// 侧栏文件夹树列表。
-pub(crate) fn tree_sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> View {
+pub(crate) fn tree_sidebar_list() -> View {
     let ui = folder_ui();
     let s = store();
     let all_rows = ui.all_rows;
-    let visible_rows = computed(move || {
-        let all = all_rows.get();
-        if rail() {
-            Rc::new(all.iter().filter(|r| r.depth == 0).cloned().collect())
-        } else {
-            all
-        }
-    });
     let here = ui.here;
     let ctx = ui.ctx.clone();
     let ops = ui.ops.clone();
@@ -1132,23 +1116,19 @@ pub(crate) fn tree_sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> Vie
     let scroll_sig = ui.scroll;
     let cell_select = select.clone();
     let cell_toggle = toggle.clone();
-    let tree_list = virtual_list(
-        computed(move || visible_rows.with(|r| r.len())),
-        move |at| {
-            let row = computed(move || visible_rows.with(|r| r.get(at.index()).cloned()));
-            tree_cell(
-                row,
-                here,
-                ctx.clone(),
-                ops.clone(),
-                cell_select.clone(),
-                cell_toggle.clone(),
-                rail,
-            )
-        },
-    )
+    let tree_list = virtual_list(computed(move || all_rows.with(|r| r.len())), move |at| {
+        let row = computed(move || all_rows.with(|r| r.get(at.index()).cloned()));
+        tree_cell(
+            row,
+            here,
+            ctx.clone(),
+            ops.clone(),
+            cell_select.clone(),
+            cell_toggle.clone(),
+        )
+    })
     .keys(move || {
-        visible_rows
+        all_rows
             .get()
             .iter()
             .map(|r| r.path.clone())
@@ -1827,13 +1807,6 @@ pub(crate) fn rescan_button() -> nsh_base::ButtonElement {
         .disabled(move || s.library.with(|l| l.progress.scanning))
 }
 
-fn is_descendant(path: &str, dir: &str) -> bool {
-    let sep = std::path::MAIN_SEPARATOR;
-    path.len() > dir.len()
-        && path.starts_with(dir)
-        && (dir.ends_with('/') || dir.ends_with('\\') || path.as_bytes()[dir.len()] == sep as u8)
-}
-
 /// 树里的一行：缩进 + 折叠箭头（叶子为占位）+ 文件夹图标 + 名字 + 曲目
 /// 数。行是整宽的可点区（选中），箭头单独可点（折叠 / 展开）；行也能拖
 /// 起这个文件夹，或作为别的拖动落下的目标（`over` 命中时高亮）；右键
@@ -1845,9 +1818,7 @@ fn tree_cell(
     ops: Rc<Ops>,
     select: Rc<dyn Fn(&str)>,
     toggle: Rc<dyn Fn(&str, bool)>,
-    rail: impl Fn() -> bool + Copy + 'static,
 ) -> AnyElement {
-    let fade = super::super::frame::label_fade(rail);
     let name = move || row.with(|r| r.as_ref().map(|r| r.name.clone()).unwrap_or_default());
     let depth = move || row.with(|r| r.as_ref().map(|r| r.depth).unwrap_or(0));
     let has_children = move || row.with(|r| r.as_ref().is_some_and(|r| r.has_children));
@@ -1858,18 +1829,7 @@ fn tree_cell(
         nav.get() == crate::ui::Nav::Folders
             && row.with(|r| {
                 let Some(r) = r.as_ref() else { return false };
-                here.with(|p| {
-                    let Some(p_path) = p.path.as_deref() else {
-                        return false;
-                    };
-                    if p_path == r.path {
-                        return true;
-                    }
-                    if rail() && r.depth == 0 {
-                        return is_descendant(p_path, &r.path);
-                    }
-                    false
-                })
+                here.with(|p| p.path.as_deref() == Some(r.path.as_str()))
             })
     };
     let over = ctx.over;
@@ -1882,17 +1842,11 @@ fn tree_cell(
     let cell = view()
         .w_full()
         .h(px(TREE_ROW))
-        .pl(move || {
-            if rail() {
-                px(16.0)
-            } else {
-                px(6.0 + depth() as f32 * INDENT)
-            }
-        })
-        .pr(move || px(if rail() { 16.0 } else { 8.0 }))
+        .pl(move || px(6.0 + depth() as f32 * INDENT))
+        .pr(px(8.0))
         .flex_row()
         .items_center()
-        .gap(move || px(if rail() { 0.0 } else { 6.0 }))
+        .gap(px(6.0))
         .rounded(px(8.0))
         .overflow_hidden()
         .role(AccessibilityRole::Button)
@@ -1917,43 +1871,37 @@ fn tree_cell(
                 select(&r.path);
             }
         })
-        .child(when(
-            move || !rail(),
-            move || {
+        .child(
+            when(has_children, move || {
                 let toggle = toggle.clone();
-                when(has_children, move || {
-                    let toggle = toggle.clone();
-                    view()
-                        .size(px(16.0))
-                        .flex_shrink_0()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(4.0))
-                        .role(AccessibilityRole::Button)
-                        .label(move || {
-                            format!("{}{}", if open() { "收起 " } else { "展开 " }, name())
-                        })
-                        .hover(|st| st.bg(hover()))
-                        .on_press(move |_: &()| {
-                            if let Some(r) = row.get_untracked() {
-                                toggle(&r.path, r.open);
+                view()
+                    .size(px(16.0))
+                    .flex_shrink_0()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(4.0))
+                    .role(AccessibilityRole::Button)
+                    .label(move || format!("{}{}", if open() { "收起 " } else { "展开 " }, name()))
+                    .hover(|st| st.bg(hover()))
+                    .on_press(move |_: &()| {
+                        if let Some(r) = row.get_untracked() {
+                            toggle(&r.path, r.open);
+                        }
+                    })
+                    .child(icon_dyn(
+                        move || {
+                            if open() {
+                                Icon::ChevronDown
+                            } else {
+                                Icon::ChevronRight
                             }
-                        })
-                        .child(icon_dyn(
-                            move || {
-                                if open() {
-                                    Icon::ChevronDown
-                                } else {
-                                    Icon::ChevronRight
-                                }
-                            },
-                            12.0,
-                            faint,
-                        ))
-                })
-                .otherwise(|| view().w(px(16.0)).flex_shrink_0())
-            },
-        ))
+                        },
+                        12.0,
+                        faint,
+                    ))
+            })
+            .otherwise(|| view().w(px(16.0)).flex_shrink_0()),
+        )
         .child(
             view()
                 .size(px(20.0))
@@ -1968,10 +1916,6 @@ fn tree_cell(
             view()
                 .flex_1()
                 .min_w(px(0.0))
-                .opacity(fade)
-                .transition_opacity()
-                .duration(200.0)
-                .ease_in_out()
                 .flex_row()
                 .items_center()
                 .justify_between()

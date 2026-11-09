@@ -391,7 +391,7 @@ pub fn play_pause(
 /// 「外浅内深」需要底，底砖不随 `scale` 缩）。`dy` 把字形在 24 格里整体
 /// 竖移（正向下）：macOS 菜单栏的文字光学中心比格子几何中心高约 1 单位，
 /// 图标要跟着抬。`scale` 把字形绕格子中心 (12,12) 缩放（macOS 菜单栏图标
-/// 用 0.8 让字形比满格小一号）。
+/// 用 0.8 让字形比满格小一号，Windows 用 2/3）。
 pub(crate) fn play_pause_svg(pause: bool, tile: bool, dy: f32, scale: f32) -> String {
     let mut d = String::new();
     for [a, b, c, e] in if pause { PAUSE_SHAPES } else { PLAY_SHAPES } {

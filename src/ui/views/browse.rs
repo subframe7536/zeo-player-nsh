@@ -10,7 +10,7 @@ use super::super::components::button::pill_button;
 use super::super::components::cover::cover_initial;
 use super::super::components::icons::{Icon, icon};
 use super::super::components::page::{empty_state, page_header};
-use super::super::components::tracks::{Columns, track_columns};
+use super::super::components::tracks::{Columns, content_break, track_columns};
 use super::super::store::{cover_for, covers_on, format_total, play_list, store};
 use super::super::theme::*;
 use super::{by_disc_track, compare, hero, no_library, total_duration, track_list};
@@ -200,7 +200,7 @@ pub fn Artists() -> impl IntoElement {
             None => {
                 let count = computed(move || groups.with(|g| g.len()));
                 let columns = move || {
-                    let width = window().width.0 - sidebar_width() - 80.0;
+                    let width = content_break() - 80.0;
                     ((width + 8.0) / (184.0 + 8.0)).floor().clamp(2.0, 10.0) as u32
                 };
                 let grid = virtual_list(count, move |at| {
@@ -350,7 +350,7 @@ pub fn Albums() -> impl IntoElement {
             None => {
                 let count = computed(move || groups.with(|g| g.len()));
                 let columns = move || {
-                    let width = window().width.0 - sidebar_width() - 40.0;
+                    let width = content_break() - 40.0;
                     ((width + 8.0) / (184.0 + 8.0)).floor().clamp(2.0, 10.0) as u32
                 };
                 let grid = virtual_list(count, move |at| {
@@ -498,13 +498,11 @@ pub fn Genres() -> impl IntoElement {
 
 /// 侧栏标签（流派）单行。
 fn tag_sidebar_row(
-    rail: impl Fn() -> bool + Copy + 'static,
     label: String,
     count: usize,
     selected: impl Fn() -> bool + Clone + 'static,
     on_press: impl Fn() + 'static,
 ) -> AnyElement {
-    let fade = super::super::frame::label_fade(rail);
     let sel_icon = selected.clone();
     let sel_text = selected.clone();
     nsh_base::button()
@@ -537,10 +535,6 @@ fn tag_sidebar_row(
             view()
                 .flex_1()
                 .min_w(px(0.0))
-                .opacity(fade)
-                .transition_opacity()
-                .duration(200.0)
-                .ease_in_out()
                 .flex_row()
                 .items_center()
                 .justify_between()
@@ -564,10 +558,9 @@ fn tag_sidebar_row(
 }
 
 /// 侧栏标签（流派）列表。
-pub(crate) fn tags_sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> impl IntoElement {
+pub(crate) fn tags_sidebar_list() -> impl IntoElement {
     let s = store();
     let nav = global::<crate::ui::Nav>();
-    let fade = super::super::frame::label_fade(rail);
     let groups = computed(move || {
         let tracks = s.tracks.get();
         Rc::new(group_by(&tracks, |t| {
@@ -588,16 +581,12 @@ pub(crate) fn tags_sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> imp
                     let list = groups.get();
                     if list.is_empty() {
                         return vec![
-                            view()
-                                .opacity(fade)
-                                .child(
-                                    text("暂无标签")
-                                        .text_size(px(12.0))
-                                        .line_height(px(18.0))
-                                        .text_color(faint())
-                                        .px(px(10.0))
-                                        .py(px(4.0)),
-                                )
+                            text("暂无标签")
+                                .text_size(px(12.0))
+                                .line_height(px(18.0))
+                                .text_color(faint())
+                                .px(px(10.0))
+                                .py(px(4.0))
                                 .into_element(),
                         ];
                     }
@@ -613,7 +602,7 @@ pub(crate) fn tags_sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> imp
                                         && s.genre_sel.with(|sel| sel.as_deref() == Some(&key))
                                 }
                             };
-                            tag_sidebar_row(rail, title, count, active, move || {
+                            tag_sidebar_row(title, count, active, move || {
                                 s.genre_sel.set(Some(key.clone()));
                                 nav.set(crate::ui::Nav::Genres);
                             })

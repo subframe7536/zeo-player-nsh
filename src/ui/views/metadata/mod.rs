@@ -438,21 +438,21 @@ pub fn page() -> View {
                 return no_library().into_element();
             }
             let pad_x = move || {
-                if crate::ui::components::tracks::content_width() < 860.0 {
+                if crate::ui::components::tracks::content_break() < 860.0 {
                     16.0
                 } else {
                     32.0
                 }
             };
             let gap_w = move || {
-                if crate::ui::components::tracks::content_width() < 860.0 {
+                if crate::ui::components::tracks::content_break() < 860.0 {
                     10.0
                 } else {
                     16.0
                 }
             };
             let filter_w = move || {
-                if crate::ui::components::tracks::content_width() < 860.0 {
+                if crate::ui::components::tracks::content_break() < 860.0 {
                     180.0
                 } else {
                     260.0
@@ -582,7 +582,7 @@ pub fn page() -> View {
                                             Variant::Outline,
                                             Size::Xs,
                                             None,
-                                            if crate::ui::components::tracks::content_width()
+                                            if crate::ui::components::tracks::content_break()
                                                 < 860.0
                                             {
                                                 "重命名…"
@@ -598,7 +598,7 @@ pub fn page() -> View {
                                             Variant::Ghost,
                                             Size::Xs,
                                             None,
-                                            if crate::ui::components::tracks::content_width()
+                                            if crate::ui::components::tracks::content_break()
                                                 < 860.0
                                             {
                                                 "取消"

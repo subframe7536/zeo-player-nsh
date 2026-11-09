@@ -207,7 +207,7 @@ pub fn track_menu_selectable(
 
 // --- 侧栏 ---------------------------------------------------------------------
 
-/// 「新建歌单」菜单（表头的「+」与图标栏的加号行共用弹层内容）。
+/// 「新建歌单」菜单（侧栏歌单区表头「+」的弹层内容）。
 fn add_playlist_menu(trigger: View) -> AnyElement {
     let gate = store::menu_control();
     let add = menu()
@@ -244,9 +244,8 @@ pub(crate) fn add_playlist_button() -> AnyElement {
 }
 
 /// 侧栏歌单列表（滚动区）。
-pub(crate) fn sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> impl IntoElement {
+pub(crate) fn sidebar_list() -> impl IntoElement {
     let s = store();
-    let fade = super::super::frame::label_fade(rail);
     scroll()
         .flex_1()
         .child(
@@ -257,20 +256,15 @@ pub(crate) fn sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> impl Int
                 .child(dynamic(move || {
                     let lists = s.playlists.get();
                     // 「我喜欢」固定在最前（`ensure_favorites`），其余按创建顺序。
-                    let mut rows: Vec<AnyElement> =
-                        lists.iter().map(|p| sidebar_row(p, rail)).collect();
+                    let mut rows: Vec<AnyElement> = lists.iter().map(|p| sidebar_row(p)).collect();
                     if lists.iter().all(|p| p.favorite) {
                         rows.push(
-                            view()
-                                .opacity(fade)
-                                .child(
-                                    text("点 + 新建歌单，或在曲目上点右键添加。")
-                                        .text_size(px(12.0))
-                                        .line_height(px(18.0))
-                                        .text_color(faint())
-                                        .px(px(10.0))
-                                        .py(px(4.0)),
-                                )
+                            text("点 + 新建歌单，或在曲目上点右键添加。")
+                                .text_size(px(12.0))
+                                .line_height(px(18.0))
+                                .text_color(faint())
+                                .px(px(10.0))
+                                .py(px(4.0))
                                 .into_element(),
                         );
                     }
@@ -279,7 +273,7 @@ pub(crate) fn sidebar_list(rail: impl Fn() -> bool + Copy + 'static) -> impl Int
         )
 }
 
-fn sidebar_row(p: &Playlist, rail: impl Fn() -> bool + Copy + 'static) -> AnyElement {
+fn sidebar_row(p: &Playlist) -> AnyElement {
     let (id, name, smart, favorite) = (p.id, p.name.clone(), p.is_smart(), p.favorite);
     let nav = global::<Nav>();
     let active = move || nav.get() == Nav::Playlist(id);
@@ -294,8 +288,7 @@ fn sidebar_row(p: &Playlist, rail: impl Fn() -> bool + Copy + 'static) -> AnyEle
     // 同 `page_header` 的返回键：裸 view 包一层。
     let row = view()
         .window_drag(false)
-        .child(super::super::frame::adaptive_row(
-            rail,
+        .child(super::super::frame::nav_row(
             glyph,
             name.clone().into(),
             active,

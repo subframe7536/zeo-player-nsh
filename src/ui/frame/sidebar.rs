@@ -1,11 +1,8 @@
-//! 侧栏：搜索框、曲库导航、歌单区、设置入口与底部状态。窗口窄于
-//! [`theme::SIDEBAR_COLLAPSE`] 时收成只有图标的栏：结构不换，只是把
-//! 文字和搜索框藏起、放大镜浮在同一槽位，行与图标的位置都不动——
-//! 栏宽收窄后图标列正好居中。图标栏里点放大镜直接切到搜索页（页顶
-//! 的输入框自动聚焦）。
+//! 侧栏：搜索框、曲库导航、歌单区、设置入口与底部状态。栏宽固定
+//! [`theme::SIDEBAR`]，不随窗口宽度收缩；点击搜索框直接打开
+//! command palette。
 
 use nsh_core::prelude::*;
-use nsh_core::{LayoutCurve, LayoutTransition};
 
 use super::super::components::icons::{Icon, icon};
 use super::super::theme::{self, *};
@@ -19,36 +16,24 @@ const LIBRARY: [(Nav, &str, Icon); 5] = [
     (Nav::Metadata, "元数据", Icon::Edit),
 ];
 
-/// 侧栏收放动画时长（毫秒）。
-const SIDEBAR_ANIMATION_MS: f32 = 250.0;
-const SIDEBAR_TRANSITION: LayoutTransition =
-    LayoutTransition::new(LayoutCurve::EaseInEaseOut, SIDEBAR_ANIMATION_MS);
-
 /// 搜索框的高度。
 const SEARCH_H: f32 = 28.0;
 
-/// 图标栏模式下文字透明（布局不变，图标留在原列）。
-pub(crate) fn label_fade(rail: impl Fn() -> bool + Copy + 'static) -> impl Fn() -> f32 + Copy {
-    move || if rail() { 0.0 } else { 1.0 }
-}
-
-/// 侧栏里的一行（导航 / 设置 / 歌单共用外观）：图标 + 文字；图标栏时
-/// 只隐藏文字，其余不动。`label` 用 `SharedString`：导航是静态串，歌单是名字。
-pub(crate) fn adaptive_row(
-    rail: impl Fn() -> bool + Copy + 'static,
+/// 侧栏里的一行（导航 / 设置 / 歌单共用外观）：图标 + 文字。`label`
+/// 用 `SharedString`：导航是静态串，歌单是名字。
+pub(crate) fn nav_row(
     glyph: Icon,
     label: SharedString,
     selected: impl Fn() -> bool + Copy + 'static,
     on_press: impl Fn() + 'static,
 ) -> nsh_base::ButtonElement {
-    let fade = label_fade(rail);
     nsh_base::button()
         .w_full()
         .h(px(34.0))
         .flex_row()
         .items_center()
-        // 图标列中心固定在 30 pt：展开态与「曲库」标签对齐；图标栏宽
-        // 60 pt 时正好居中（`SIDEBAR_RAIL` 就是按这个列定的）。
+        // 图标列中心固定在 30 pt（10 外边距 + 10 行内边距 + 半个
+        // 20 pt 图标格），与「曲库」小标题的左缘对齐。
         .pl(px(10.0))
         .pr(px(10.0))
         .gap(px(10.0))
@@ -71,57 +56,33 @@ pub(crate) fn adaptive_row(
                 })),
         )
         .child(
-            view()
-                .flex_1()
-                .min_w(px(0.0))
-                .opacity(fade)
-                .transition_opacity()
-                .duration(200.0)
-                .ease_in_out()
-                .child(
-                    text(label)
-                        .number_of_lines(1)
-                        .text_size(px(14.0))
-                        .line_height(px(14.0))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(move || {
-                            if selected() {
-                                theme::fg()
-                            } else {
-                                sidebar_fg()
-                            }
-                        }),
-                ),
+            view().flex_1().min_w(px(0.0)).child(
+                text(label)
+                    .number_of_lines(1)
+                    .text_size(px(14.0))
+                    .line_height(px(14.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(move || {
+                        if selected() {
+                            theme::fg()
+                        } else {
+                            sidebar_fg()
+                        }
+                    }),
+            ),
         )
 }
 
-/// 侧栏小标题在图标栏（rail）模式下化作的水平分隔线（高度保持恒定 33pt，消除收缩时的垂直位移）。
-fn rail_separator(rail: impl Fn() -> bool + Copy + 'static) -> View {
-    view()
-        .w_full()
-        .h(move || px(if rail() { 33.0 } else { 0.0 }))
-        .overflow_hidden()
-        .opacity(move || if rail() { 1.0_f32 } else { 0.0_f32 })
-        .transition_opacity()
-        .duration(200.0)
-        .ease_in_out()
-        .items_center()
-        .justify_center()
-        .child(view().w(px(32.0)).h(px(1.0)).bg(move || sidebar_border()))
-}
-
-/// 侧栏内容：展开与图标栏共用同一结构；点击搜索框直接打开 command palette。
-fn adaptive_body() -> View {
+/// 侧栏内容；点击搜索框直接打开 command palette。
+fn body() -> View {
     let s = store::store();
-    let rail = sidebar_collapsed;
-    let fade = label_fade(rail);
 
     #[cfg(target_os = "macos")]
     let shortcut_hint = "⌘K";
     #[cfg(not(target_os = "macos"))]
     let shortcut_hint = "Ctrl K";
 
-    // 搜索区：单个按钮自适应展开态（输入框外观、提示词与快捷键）与图标栏（放大镜图标）；点击直接打开 command palette。
+    // 搜索区：输入框外观的按钮（提示词与快捷键提示）；点击直接打开 command palette。
     let search_button = view()
         .w_full()
         .h(px(SEARCH_H))
@@ -135,48 +96,20 @@ fn adaptive_body() -> View {
             s.search_open.set(true);
         })
         .border_1()
-        .border_color(move || {
-            if rail() {
-                AdaptiveColor::TRANSPARENT
-            } else {
-                border()
-            }
-        })
-        .bg(move || {
-            if rail() {
-                AdaptiveColor::TRANSPARENT
-            } else {
-                bg()
-            }
-        })
-        .transition_colors()
-        .duration(200.0)
-        .hover(move |st| {
-            st.bg(move || {
-                if rail() {
-                    primary().opacity(0.08)
-                } else {
-                    primary().opacity(0.06)
-                }
-            })
-            .border_color(move || {
-                if rail() {
-                    AdaptiveColor::TRANSPARENT
-                } else {
-                    primary().opacity(0.3)
-                }
-            })
+        .border_color(border())
+        .bg(move || bg())
+        .hover(|st| {
+            st.bg(move || primary().opacity(0.06))
+                .border_color(move || primary().opacity(0.3))
         })
         .active(|st| st.opacity(0.7))
         .child(
             view()
-                .w(move || px(if rail() { 36.0 } else { 28.0 }))
+                .w(px(28.0))
                 .h_full()
                 .items_center()
                 .justify_center()
-                .child(icon(Icon::Search, 14.0, move || {
-                    if rail() { sidebar_fg() } else { faint() }
-                })),
+                .child(icon(Icon::Search, 14.0, faint)),
         )
         .child(
             view()
@@ -188,10 +121,6 @@ fn adaptive_body() -> View {
                 .pr(px(8.0))
                 .gap(px(6.0))
                 .overflow_hidden()
-                .opacity(fade)
-                .transition_opacity()
-                .duration(200.0)
-                .ease_in_out()
                 .child(
                     text("搜索...")
                         .flex_1()
@@ -231,36 +160,21 @@ fn adaptive_body() -> View {
                 .px(px(10.0))
                 .gap(px(2.0))
                 .child(
-                    // 展开态为「曲库」小标题，图标栏收起时化作居中分隔线（高度恒定 33pt，消除垂直位移）。
-                    view()
-                        .h(px(33.0))
-                        .overflow_hidden()
-                        .child(
-                            view()
-                                .h(move || px(if rail() { 0.0 } else { 33.0 }))
-                                .overflow_hidden()
-                                .opacity(fade)
-                                .transition_opacity()
-                                .duration(200.0)
-                                .ease_in_out()
-                                .child(
-                                    text("曲库")
-                                        .text_size(px(11.0))
-                                        .line_height(px(11.0))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .letter_spacing(px(0.6))
-                                        .text_color(faint())
-                                        .px(px(10.0))
-                                        .pt(px(16.0))
-                                        .pb(px(6.0)),
-                                ),
-                        )
-                        .child(rail_separator(rail)),
+                    view().h(px(33.0)).child(
+                        text("曲库")
+                            .text_size(px(11.0))
+                            .line_height(px(11.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .letter_spacing(px(0.6))
+                            .text_color(faint())
+                            .px(px(10.0))
+                            .pt(px(16.0))
+                            .pb(px(6.0)),
+                    ),
                 )
                 .children(LIBRARY.iter().map(|&(target, label, glyph)| {
                     let nav = global::<Nav>();
-                    adaptive_row(
-                        rail,
+                    nav_row(
                         glyph,
                         label.into(),
                         move || nav.get() == target,
@@ -272,9 +186,8 @@ fn adaptive_body() -> View {
                     .into_element()
                 })),
         )
-        .child(sidebar_lower_section(rail))
-        .child(view().px(px(10.0)).pb(px(12.0)).child(adaptive_row(
-            rail,
+        .child(sidebar_lower_section())
+        .child(view().px(px(10.0)).pb(px(12.0)).child(nav_row(
             Icon::Settings,
             "设置".into(),
             move || s.settings.get(),
@@ -311,9 +224,8 @@ fn sidebar_rescan_button() -> AnyElement {
         .into_element()
 }
 
-fn sidebar_lower_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
+fn sidebar_lower_section() -> View {
     let s = store::store();
-    let fade = label_fade(rail);
     let nav = global::<Nav>();
     // 主视图变化时自动联动侧栏下半部
     effect(move || match nav.get() {
@@ -393,53 +305,30 @@ fn sidebar_lower_section(rail: impl Fn() -> bool + Copy + 'static) -> View {
         store::SidebarSection::Tags => view().into_element(),
     });
 
-    let header_content = view()
-        .h(move || px(if rail() { 0.0 } else { 33.0 }))
-        .overflow_hidden()
-        .opacity(fade)
-        .transition_opacity()
-        .duration(200.0)
-        .ease_in_out()
+    // 小标题行：左侧是「歌单 / 标签 / 文件夹」的视图切换，右侧是该
+    // 视图的快捷操作（新建歌单 / 重新扫描）。
+    let header = view()
+        .h(px(33.0))
         .flex_row()
         .items_center()
         .px(px(10.0))
         .child(view().flex_1().child(select_el))
         .child(view().pt(px(10.0)).child(header_action));
 
-    // 展开态为切换视图与快捷操作的小标题行，图标栏收起时化作居中分隔线（高度恒定 33pt，消除垂直位移）。
-    let header = view()
-        .h(px(33.0))
-        .overflow_hidden()
-        .child(header_content)
-        .child(rail_separator(rail));
-
     let content = dynamic(move || match s.sidebar_section.get() {
         store::SidebarSection::Playlists => {
-            super::super::views::playlists::sidebar_list(rail).into_element()
+            super::super::views::playlists::sidebar_list().into_element()
         }
-        store::SidebarSection::Tags => super::super::views::tags_sidebar_list(rail).into_element(),
-        store::SidebarSection::Folders => {
-            super::super::views::tree_sidebar_list(rail).into_element()
-        }
+        store::SidebarSection::Tags => super::super::views::tags_sidebar_list().into_element(),
+        store::SidebarSection::Folders => super::super::views::tree_sidebar_list().into_element(),
     });
 
     view().flex_1().min_h(px(0.0)).child(header).child(content)
 }
 
 pub(crate) fn sidebar() -> View {
-    let sidebar_el = element_ref();
-    let rail = sidebar_collapsed;
-    let last_rail = stored(untracked(rail));
-    effect(move || {
-        let current = rail();
-        if last_rail.replace(current) != current && !reduce_motion() {
-            sidebar_el.animate_layout(SIDEBAR_TRANSITION);
-        }
-    });
-
     view()
-        .element_ref(&sidebar_el)
-        .w(move || px(sidebar_width()))
+        .w(px(SIDEBAR))
         .flex_shrink_0()
         .overflow_hidden()
         .bg(move || theme::sidebar())
@@ -449,5 +338,5 @@ pub(crate) fn sidebar() -> View {
         .border_r_color(sidebar_border())
         // 顶部让给标题栏（侧栏底色一直铺到窗口顶边，交通灯落在上面）。
         .child(view().h(move || px(top_inset())).flex_shrink_0())
-        .child(adaptive_body())
+        .child(body())
 }

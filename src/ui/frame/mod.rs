@@ -8,5 +8,5 @@ pub(super) mod queue;
 pub(super) mod sidebar;
 pub(super) mod title_bar;
 
-pub(crate) use sidebar::{adaptive_row, label_fade, sidebar};
+pub(crate) use sidebar::{nav_row, sidebar};
 pub(crate) use title_bar::title_bar;

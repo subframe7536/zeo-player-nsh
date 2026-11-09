@@ -18,13 +18,14 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use crate::config::CloseAction;
 
-/// 窗口的最小宽度（点）：播放条还能同时放下进度条两侧时间的最小值
-///（`ui::frame::bar` 的 `fits_times` 阈值）。NSH 没有最小尺寸的接口，
-/// 两个平台都在系统层设（macOS `contentMinSize`，Windows `WM_GETMINMAXINFO`）。
-pub const MIN_WIDTH: f32 = 720.0;
+/// 窗口的最小宽度（点）：侧栏固定 232 pt 展开，最小宽度保住内容区
+/// 768 pt——曲目表「专辑」列的下限（`components::tracks::fits_album`
+/// 断点 760）加页边距刚好放下。NSH 没有最小尺寸的接口，两个平台都在
+/// 系统层设（macOS `contentMinSize`，Windows `WM_GETMINMAXINFO`）。
+pub const MIN_WIDTH: f32 = 1000.0;
 
-/// 窗口的最小高度（点）：与最小宽度一致，窗口最小是 720×720 的方形。
-pub const MIN_HEIGHT: f32 = MIN_WIDTH;
+/// 窗口的最小高度（点）。
+pub const MIN_HEIGHT: f32 = 720.0;
 
 /// 当前关闭行为（界面设置写入）。
 static MODE: AtomicU8 = AtomicU8::new(0);
@@ -354,8 +355,12 @@ mod tray {
         // 字形上移对齐；Windows 没有旁排文字，图形居中。
         let dy = if cfg!(target_os = "macos") { -1.0 } else { 0.0 };
         // macOS 字形缩到格子的 80%（满格顶着菜单栏上下沿显挤）；
-        // Windows 的字形垫着底砖，保持满格。
-        let scale = if cfg!(target_os = "macos") { 0.8 } else { 1.0 };
+        // Windows 字形缩到 2/3，底砖保持满幅。
+        let scale = if cfg!(target_os = "macos") {
+            0.8
+        } else {
+            3.0 / 4.0
+        };
         let svg = crate::ui::components::icons::play_pause_svg(
             pause,
             cfg!(target_os = "windows"),

@@ -486,7 +486,11 @@ pub(super) fn table(
     ));
     // 普通单元格：竖向分隔网格线（border-r border-border/50）
     classes.cell = Some(SharedString::from("px-3 border-r border-border/50"));
-    classes.fixed_edge = Some(SharedString::from("bg-foreground/25"));
+    // 不设 fixed_edge：上游在固定列后缘叠画两条 1pt 分隔（表体一条 +
+    // 固定区逐行各一条，view.rs `edge()`），与固定列单元格自身的
+    // border-r border-foreground/25 连叠后比表头底线明显深。固定列分隔
+    // 只留列级 cell_class / header_class 那条 border-r border-foreground/25，
+    // 与表头底线（border-foreground/25）同深。
     // 行体：横向分隔网格线（border-b border-border/50）
     classes.row = Some(SharedString::from("border-b border-border/50"));
     classes.row_hover = Some(SharedString::from("bg-accent/40"));
@@ -559,13 +563,18 @@ pub(super) fn table(
                         .with(|m| m.get(&key).copied())
                         .unwrap_or(default_w);
                     let start_mouse_x = e.page.x.0;
-                    let pad_x = if crate::ui::components::tracks::content_width() < 860.0 {
+                    let pad_x = if crate::ui::components::tracks::content_break() < 860.0 {
                         16.0
                     } else {
                         32.0
                     };
-                    let table_left = crate::ui::theme::sidebar_width() + pad_x;
-                    let start_guide_x = start_mouse_x - table_left;
+                    // 把手 14pt 宽、贴表头单元格右缘（即列线所在）；`location`
+                    // 是落点在把手内的坐标，随抓握点变。列线页面 x = 落点 +
+                    // 落点到把手右缘的距离，与抓在把手哪里无关。
+                    let to_right = (14.0 - e.location.x.0).clamp(0.0, 14.0);
+                    // 表格容器在页面里的左缘：侧栏 + 页边距 + 卡片 1pt 边框。
+                    let table_left = crate::ui::theme::SIDEBAR + pad_x + 1.0;
+                    let start_guide_x = e.page.x.0 + to_right - table_left - 2.0;
                     drag_origin.set(Some((start_mouse_x, cur_w, start_guide_x)));
                     guide_line_x.set(Some(start_guide_x));
                 }
@@ -668,6 +677,9 @@ pub(super) fn table(
                         .right_0()
                         .w(px(2.0))
                         .bg(primary())
+                        // 不吃命中：触摸落点的 target 恒为把手自身，
+                        // `e.location` 才是把手内坐标，列线位置才好换算。
+                        .pointer_events(PointerEvents::None)
                         .opacity(move || {
                             if is_hovered.get() || is_dragging.get() {
                                 1.0_f32

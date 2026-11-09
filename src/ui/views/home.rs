@@ -15,7 +15,7 @@ use super::super::components::button::icon_button;
 use super::super::components::cover::{cover, cover_initial, initial_letter};
 use super::super::components::icons::{Icon, icon};
 use super::super::components::page::empty_state;
-use super::super::components::tracks::{Columns, content_width, track_columns, track_row};
+use super::super::components::tracks::{Columns, content_break, track_columns, track_row};
 use super::super::store::{cover_for, covers_on, play_list, player, queue_add, store};
 use super::super::theme::*;
 use super::{browse::avatar, no_library, playlists::track_menu};
@@ -339,7 +339,7 @@ fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement {
             .ml(auto())
             .justify_center()
             .gap(px(2.0))
-            .style_when(move || content_width() < 880.0, |s| s.hidden());
+            .style_when(move || content_break() < 880.0, |s| s.hidden());
         for (i, t) in list.iter().take(6).enumerate() {
             let row_track = t.clone();
             let row_list = list.clone();
