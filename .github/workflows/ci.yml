@@ -40,6 +40,9 @@ jobs:
         run: |
           brew install ffmpeg
           sh scripts/make-test-music.sh
+      - name: Setup FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        uses: FedericoCarboni/setup-ffmpeg@v3
       - name: Test corpus (Windows)
         if: runner.os == 'Windows'
         shell: bash

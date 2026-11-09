@@ -892,7 +892,8 @@ fn folders_page_selection_and_multi_selection() {
 /// 侧栏下半部：切换视图（歌单/标签/文件夹）选择项保存在全局状态。
 #[test]
 fn sidebar_section_select_switches_and_persists() {
-    let mut app = start(1200.0, 800.0);
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
     let file =
         std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap()).join("library.json");
     let saved = |section: &str| {
@@ -918,6 +919,7 @@ fn sidebar_section_select_switches_and_persists() {
 
     // 换回歌单（避免影响后续测试环境）
     app.press("label:切换视图").unwrap();
+    app.wait_for("role:option[歌单]").unwrap();
     app.press("role:option[歌单]").unwrap();
     app.wait_for("label:切换视图 >> text:歌单").unwrap();
     for _ in 0..40 {
