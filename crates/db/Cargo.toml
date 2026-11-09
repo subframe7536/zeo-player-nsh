@@ -1,0 +1,12 @@
+[package]
+name = "zeo-db"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# 曲目元数据与播放状态存 SQLite（bundled：自带 SQLite，不依赖系统库）。
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde.workspace = true
+serde_json.workspace = true
+zeo-types.workspace = true

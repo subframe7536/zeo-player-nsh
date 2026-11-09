@@ -1,0 +1,452 @@
+//! 引擎：`mod.rs` 是门面（`Player` 解码/输出/系统媒体会话、`Library` 多根
+//! 曲库、`Meta` 歌词与波形），`audio` / `codec` / `media` 是引擎线程、解码
+//! 与系统媒体会话的实现。纯 Rust 接口，UI（`crate::ui`）与测试直接调用。
+
+pub mod audio;
+pub mod eq;
+mod media;
+
+/// 主窗口原生句柄（Windows SMTC 要挂在窗口上）：shell 找到窗口时写入，
+/// 引擎线程轮询读取。放在引擎侧：引擎在 shell 之下，不反向依赖窗口。
+#[cfg(target_os = "windows")]
+static HWND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// `zeo_shell` 找到主窗口后调用（窗口句柄数值，0 = 未找到）。
+#[cfg(target_os = "windows")]
+pub fn set_hwnd(value: u64) {
+    HWND.store(value, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn hwnd() -> Option<u64> {
+    let v = HWND.load(std::sync::atomic::Ordering::Relaxed);
+    (v != 0).then_some(v)
+}
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use zeo_db::LastPlayed;
+use zeo_library::config::library_store;
+use zeo_types::config::TrackEntry;
+
+use crate::audio::{EngineCmd, EngineHandle, Snapshot};
+use zeo_metadata::lyrics::{LyricOptions, LyricsOutput, parse_lyric};
+
+/// 播放器引擎句柄。
+pub struct Player {
+    engine: EngineHandle,
+    /// 上次写进数据库的播放状态（[`Player::remember`]）。
+    memory: Mutex<Memory>,
+}
+
+/// 已保存的播放状态。
+#[derive(Default)]
+struct Memory {
+    last: Option<LastPlayed>,
+    playing: bool,
+    queue: Option<Arc<Vec<String>>>,
+}
+
+impl Player {
+    /// 新建播放器（启动解码/输出线程与系统媒体会话）。
+    // 不实现 Default：新建会启动线程与系统媒体会话，不该隐式发生。
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Player {
+            engine: EngineHandle::start(),
+            memory: Mutex::new(Memory::default()),
+        }
+    }
+
+    /// 进程内唯一的播放器（UI 用）。
+    pub fn global() -> &'static Player {
+        static PLAYER: OnceLock<Player> = OnceLock::new();
+        PLAYER.get_or_init(Player::new)
+    }
+
+    /// 打开并播放 `path`；`queue` 为所在列表（上一首/下一首）。
+    pub fn open(&self, path: String, queue: Vec<String>) {
+        self.engine.send(EngineCmd::Load {
+            path: PathBuf::from(path),
+            queue,
+        });
+    }
+
+    /// 把 `paths` 追加到当前队尾（当前曲目与循环模式不变）。
+    pub fn queue_add(&self, paths: Vec<String>) {
+        self.engine.send(EngineCmd::QueueAdd(paths));
+    }
+
+    /// 装载 `path` 但不播放，停在 `time` 秒。
+    pub fn cue(&self, path: String, queue: Vec<String>, time: f64) {
+        self.engine.send(EngineCmd::Cue {
+            path: PathBuf::from(path),
+            queue,
+            time,
+        });
+    }
+
+    /// 写回当前曲目文件前释放解码器：阻塞到引擎线程真的丢掉文件句柄
+    /// （Windows 上打开中的文件不能原子替换），返回当时的 `(播放位置, 是否在播)`，
+    /// 由 [`Self::reload`] 传回恢复。当前没有曲目时返回 `(0.0, false)`。
+    pub fn release_current(&self) -> (f64, bool) {
+        let snap = self.state();
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.engine.send(EngineCmd::Release { done: tx });
+        let _ = rx.recv();
+        (snap.current_time, snap.is_playing)
+    }
+
+    /// `release_current` 之后、文件已原子替换：重载当前曲目（快照换
+    /// `MetaCache` 里的新元数据，标题 / 封面刷新），seek 回 `position`，
+    /// 恢复 `playing`。写失败了也要调——原文件没动，照常恢复。
+    pub fn reload_current(&self, position: f64, playing: bool) {
+        self.engine.send(EngineCmd::Reload { position, playing });
+    }
+
+    /// 恢复上次播放的曲目（暂停在上次的位置）：还没有曲目、文件还在时才做。
+    /// 返回是否恢复了。
+    pub fn restore_last(&self) -> bool {
+        if self.state().track.path.is_some() {
+            return false;
+        }
+        let Some((last, mut queue)) = zeo_db::last_played() else {
+            return false;
+        };
+        if !Path::new(&last.path).is_file() {
+            return false;
+        }
+        if !queue.contains(&last.path) {
+            queue = vec![last.path.clone()];
+        }
+        self.cue(last.path, queue, last.time.max(0.0));
+        true
+    }
+
+    /// 记下播放状态（曲目、位置、队列），下次启动由 [`Self::restore_last`]
+    /// 恢复。界面轮询时传入快照；换曲、播放 / 暂停、位置变了 2 秒以上或
+    /// 队列变了才写（数据库写线程）。退出时不另外保存，最多丢 2 秒进度。
+    pub fn remember(&self, snap: &Snapshot) {
+        let Some(path) = snap.track.path.as_deref() else {
+            return;
+        };
+        if snap.is_loading {
+            return;
+        }
+        let mut memory = self.memory.lock().unwrap();
+        let moved = memory.playing != snap.is_playing
+            || memory
+                .last
+                .as_ref()
+                .is_none_or(|old| old.path != path || (old.time - snap.current_time).abs() >= 2.0);
+        let queue = (!memory
+            .queue
+            .as_ref()
+            .is_some_and(|q| Arc::ptr_eq(q, &snap.track.queue)))
+        .then(|| snap.track.queue.clone());
+        if !moved && queue.is_none() {
+            return;
+        }
+        let last = LastPlayed {
+            path: path.to_owned(),
+            time: snap.current_time,
+        };
+        if moved {
+            memory.last = Some(last.clone());
+            memory.playing = snap.is_playing;
+        }
+        if let Some(queue) = &queue {
+            memory.queue = Some(queue.clone());
+        }
+        drop(memory);
+        zeo_db::later(move || {
+            if let Some(queue) = queue {
+                zeo_db::save_queue(&queue);
+            }
+            if moved {
+                zeo_db::save_last_played(&last);
+            }
+        });
+    }
+
+    pub fn play(&self) {
+        self.engine.send(EngineCmd::Play);
+    }
+
+    pub fn pause(&self) {
+        self.engine.send(EngineCmd::Pause);
+    }
+
+    pub fn toggle(&self) {
+        self.engine.send(EngineCmd::Toggle);
+    }
+
+    pub fn stop(&self) {
+        self.engine.send(EngineCmd::Stop);
+    }
+
+    pub fn seek(&self, seconds: f64) {
+        self.engine.send(EngineCmd::Seek(seconds));
+    }
+
+    pub fn seek_by(&self, delta: f64) {
+        self.engine.send(EngineCmd::SeekBy(delta));
+    }
+
+    /// 设置音量：立即写入共享状态（输出回调下一块就生效），再通知引擎线程。
+    pub fn set_volume(&self, volume: f64) {
+        let volume = volume.clamp(0.0, 1.0);
+        self.engine.shared.volume.store(
+            (volume as f32).to_bits(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        self.engine.send(EngineCmd::SetVolume(volume));
+    }
+
+    /// 播放当前队列的第 `index` 首。
+    pub fn jump(&self, index: usize) {
+        self.engine.send(EngineCmd::Jump(index as i64));
+    }
+
+    pub fn next(&self) {
+        self.engine.send(EngineCmd::Next);
+    }
+
+    pub fn previous(&self) {
+        self.engine.send(EngineCmd::Previous);
+    }
+
+    /// 淡入淡出时长（毫秒；0 关闭），用于播放 / 暂停 / 跳转 / 切歌。
+    pub fn set_fade_ms(&self, ms: u32) {
+        self.engine
+            .shared
+            .fade_ms
+            .store(ms.min(5000), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 设置循环模式（队列按新模式重排，当前曲目不变）。
+    pub fn set_loop_mode(&self, mode: crate::audio::LoopMode) {
+        self.engine.send(EngineCmd::SetLoopMode(mode));
+    }
+
+    /// 切到下一个循环模式（顺序 → 单曲 → 随机）。
+    pub fn cycle_loop_mode(&self) {
+        self.set_loop_mode(self.engine.shared.loop_mode().cycle());
+    }
+
+    /// 当前循环模式。
+    pub fn loop_mode(&self) -> crate::audio::LoopMode {
+        self.engine.shared.loop_mode()
+    }
+
+    /// 输出设备变化（拔耳机、切默认设备）时是否暂停播放。
+    pub fn set_pause_on_device_change(&self, on: bool) {
+        self.engine
+            .shared
+            .pause_on_device_change
+            .store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// ReplayGain 设置（立即生效；对正在播放的曲目重算增益）。
+    pub fn set_replaygain(&self, cfg: crate::audio::ReplayGainConfig) {
+        self.engine.send(EngineCmd::SetReplayGain(cfg));
+    }
+
+    /// 播放统计的阈值（听过多少算一次播放）。写共享原子量，引擎主
+    /// 循环下一轮即按新值判定；`min_percent` 限 0–100，`min_secs` 限
+    /// 0–3600，0 表示不用该条件。
+    pub fn set_stats_thresholds(&self, min_percent: u32, min_secs: u32) {
+        self.engine
+            .shared
+            .stats_min_percent
+            .store(min_percent.min(100), std::sync::atomic::Ordering::Relaxed);
+        self.engine
+            .shared
+            .stats_min_secs
+            .store(min_secs.min(3600), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// 播放记录代次：每记一次播放 +1（界面据此刷新统计）。
+    pub fn plays_generation(&self) -> u64 {
+        self.engine
+            .shared
+            .plays_gen
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// 均衡器设置（立即生效：写配置 + 加代次，回调下一块读取）。
+    pub fn set_eq(&self, cfg: crate::eq::EqConfig) {
+        *self
+            .engine
+            .shared
+            .eq_config
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = cfg;
+        self.engine
+            .shared
+            .eq_gen
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
+
+    /// 测试用：注入一个输出设备事件（`#[cfg(test)]` 跨 crate 不可见，只能 pub）。
+    pub fn simulate_device_event(&self, ev: crate::audio::DeviceEvent) {
+        self.engine.send(EngineCmd::Device(ev));
+    }
+
+    /// 当前状态快照。
+    pub fn state(&self) -> Snapshot {
+        self.engine.snapshot()
+    }
+}
+
+/// 本地曲库（多根目录、索引、流派拆分）。
+#[derive(Default)]
+pub struct Library;
+
+impl Library {
+    pub fn new() -> Self {
+        Library
+    }
+
+    pub fn roots(&self) -> Vec<String> {
+        library_store().roots()
+    }
+
+    /// 添加音乐根目录（规范化、去重、持久化）；返回新列表。
+    pub fn add_root(&self, path: String) -> Result<Vec<String>, String> {
+        library_store().add_root(&path)
+    }
+
+    /// 移除音乐根目录；返回新列表。
+    pub fn remove_root(&self, path: String) -> Vec<String> {
+        library_store().remove_root(&path)
+    }
+
+    pub fn tracks(&self) -> Arc<Vec<TrackEntry>> {
+        library_store().tracks()
+    }
+}
+
+/// 歌词来源。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LyricsSource {
+    External,
+    Embedded,
+    None,
+}
+
+/// 歌词与波形。
+pub struct Meta;
+
+/// 已解析歌词的小缓存：只留播放位置附近的几首（当前曲目 + 队尾预载）。
+/// 歌词文本大，不进全局元数据缓存 / 数据库；条目带音频与 `.lrc` 的
+/// 文件指纹，任一变了自动失效。命中时移到队尾（LRU）。
+const LYRICS_CAP: usize = 8;
+type LyricsCache = Mutex<Vec<(String, u64, Arc<(LyricsOutput, LyricsSource)>)>>;
+
+fn lyrics_cache() -> &'static LyricsCache {
+    static CACHE: OnceLock<LyricsCache> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+impl Meta {
+    /// 歌词：外置同名 `.lrc` 优先，其次内嵌（按需 lofty 读，不进全局
+    /// 缓存）；按 ap-spec 算法解析。结果进 [`lyrics_cache`]——在后台
+    /// 线程调它即为队尾曲目的歌词预载。
+    pub fn lyrics(path: &str) -> (LyricsOutput, LyricsSource) {
+        let path = Path::new(path);
+        let lrc = find_external_lrc(path);
+        let prefer = library_store().prefer_local_lyrics();
+        let stamp = |p: &Path| std::fs::metadata(p).map_or(0, |m| zeo_metadata::file_stamp(&m));
+        // 缓存键含 .lrc 指纹与「本地优先」开关：任一变化自动失效。
+        let key = lrc
+            .as_deref()
+            .map_or_else(|| stamp(path), |l| stamp(path) ^ stamp(l).wrapping_mul(31))
+            ^ prefer as u64;
+        let name = path.to_string_lossy().into_owned();
+        {
+            let mut cache = lyrics_cache().lock().unwrap();
+            if let Some(pos) = cache.iter().position(|(p, k, _)| *k == key && p == &name) {
+                let entry = cache.remove(pos);
+                let out = (*entry.2).clone();
+                cache.push(entry);
+                return out;
+            }
+        }
+        let loaded = load_lyrics(path, lrc.as_deref(), prefer);
+        let out = loaded.0.clone();
+        let out_source = loaded.1;
+        {
+            let mut cache = lyrics_cache().lock().unwrap();
+            cache.retain(|(p, _, _)| p != &name);
+            cache.push((name, key, Arc::new(loaded)));
+            while cache.len() > LYRICS_CAP {
+                cache.remove(0);
+            }
+        }
+        (out, out_source)
+    }
+
+    /// 曲目的外置歌词文件路径（同名 `.lrc`）。
+    pub fn external_lrc(path: String) -> Option<String> {
+        find_external_lrc(Path::new(&path)).map(|p| p.to_string_lossy().into_owned())
+    }
+
+    /// 清空歌词缓存（隐藏到托盘时调）：歌词文本大，显示后按需重读。
+    pub fn clear_lyrics() {
+        lyrics_cache().lock().unwrap().clear();
+    }
+
+    /// 曲目封面的主色调（色相 0..360、饱和度 0..1），还没算出来为
+    /// `None`：扫描 / 封面生成时写进全局元数据缓存——这里同步读，不
+    /// 触发计算。
+    pub fn art_hue(path: &str) -> Option<(f32, f32)> {
+        zeo_metadata::covers::art_hue(Path::new(path))
+    }
+}
+
+/// 同目录同名 `.lrc`（大小写两种尝试）。
+fn find_external_lrc(path: &Path) -> Option<PathBuf> {
+    let stem = path.file_stem()?.to_string_lossy().into_owned();
+    let dir = path.parent()?;
+    [format!("{stem}.lrc"), format!("{stem}.LRC")]
+        .into_iter()
+        .map(|name| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+/// 真正读歌词：外置 `.lrc` 与内嵌按「本地优先」开关取序，首选读不到
+/// 回退另一头；解析后由 [`Meta::lyrics`] 放进小缓存。
+fn load_lyrics(
+    path: &Path,
+    lrc: Option<&Path>,
+    prefer_local: bool,
+) -> (LyricsOutput, LyricsSource) {
+    let mut external = || {
+        let text = std::fs::read_to_string(lrc?).ok()?;
+        Some((
+            parse_lyric(&text, LyricOptions::default()),
+            LyricsSource::External,
+        ))
+    };
+    let mut embedded = || {
+        let text = zeo_metadata::read_lyrics(path)?;
+        Some((
+            parse_lyric(&text, LyricOptions::default()),
+            LyricsSource::Embedded,
+        ))
+    };
+    let loaded = if prefer_local {
+        external().or_else(&mut embedded)
+    } else {
+        embedded().or_else(&mut external)
+    };
+    loaded.unwrap_or((
+        LyricsOutput {
+            lines: Vec::new(),
+            timed: false,
+        },
+        LyricsSource::None,
+    ))
+}

@@ -1,0 +1,20 @@
+[package]
+name = "zeo-ui-view-folders"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nsh-core.workspace = true
+nsh-base.workspace = true
+zeo-ui-views-base.workspace = true
+zeo-ui-store.workspace = true
+zeo-ui-components.workspace = true
+zeo-types.workspace = true
+zeo-library.workspace = true
+zeo-playlists.workspace = true
+zeo-shell.workspace = true
+zeo-ui-view-playlists.workspace = true
+
+[dev-dependencies]
+zeo-metadata.workspace = true

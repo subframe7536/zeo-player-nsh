@@ -7,11 +7,11 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use crate::config::library_store;
-use crate::engine::{Library, Meta, Player};
-use crate::metadata::MetaCache;
-use crate::metadata::lyrics::{LyricOptions, parse_lyric};
-use crate::metadata::waveform::waveform;
+use zeo_engine::{Library, Meta, Player};
+use zeo_library::config::library_store;
+use zeo_metadata::MetaCache;
+use zeo_metadata::lyrics::{LyricOptions, parse_lyric};
+use zeo_metadata::waveform::waveform;
 
 fn corpus() -> Option<std::path::PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(".nsh/tmp/zeo-player-test-music");
@@ -111,7 +111,7 @@ fn end_to_end_playback() {
 
     // 4. 波形：56 根、归一化
     let bars = waveform(&root.join("sine.wav")).expect("waveform");
-    assert_eq!(bars.len(), crate::metadata::waveform::BARS);
+    assert_eq!(bars.len(), zeo_metadata::waveform::BARS);
     // 音量恒定的正弦波：波形平、且偏高。2 秒只有约 2000 块、每块约 44 个
     // 样本，不到 440 Hz 的一个周期，块 RMS 随相位起伏；95 分位取到偏高的块，
     // 每根再平均约 40 块，于是稳定在 0.8 多一点而不是 0.9（参考实现同样如此）。
@@ -231,7 +231,7 @@ fn device_invalidated_rebuilds_and_resumes() {
     // 不设「设备变化时暂停」：Invalidated 重建流，位置不回跳、播放继续。
     player.set_pause_on_device_change(false);
     let before = player.state().current_time;
-    player.simulate_device_event(crate::engine::audio::DeviceEvent::Invalidated);
+    player.simulate_device_event(zeo_engine::audio::DeviceEvent::Invalidated);
     std::thread::sleep(Duration::from_millis(1500));
     let state = player.state();
     assert!(state.is_playing, "重建后仍在播放: {:?}", state.track.error);
@@ -243,7 +243,7 @@ fn device_invalidated_rebuilds_and_resumes() {
 
     // 打开「设备变化时暂停」：Rerouted 只暂停（macOS 已自动改道，不重建）。
     player.set_pause_on_device_change(true);
-    player.simulate_device_event(crate::engine::audio::DeviceEvent::Rerouted);
+    player.simulate_device_event(zeo_engine::audio::DeviceEvent::Rerouted);
     assert!(
         wait_for(300, || !player.state().is_playing),
         "Rerouted 后应暂停"

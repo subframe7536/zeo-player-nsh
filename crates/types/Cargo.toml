@@ -1,0 +1,17 @@
+[package]
+name = "zeo-types"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+serde.workspace = true
+dirs.workspace = true
+nsh-core.workspace = true
+
+# local_offset_seconds：NSTimeZone（macOS）/ GetTimeZoneInformation（Windows）。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSTimeZone"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Time"] }

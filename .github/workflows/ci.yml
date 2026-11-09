@@ -25,8 +25,44 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  # 只编译 / 测试 diff 到的 crate，绝不全量：scripts/ci-scope.sh 把改动文件
+  # 映射到 crate，再经 cargo metadata 算反向依赖闭包——改了的跑 cargo test，
+  # 依赖它的只跑 cargo check（API 破坏在 check 阶段就能抓到，不产生代码）。
+  scope:
     if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      test: ${{ steps.scope.outputs.TEST_PKGS }}
+      check: ${{ steps.scope.outputs.CHECK_PKGS }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: scope
+        shell: bash
+        env:
+          # push：上次推送的 commit；PR：base 分支的 merge-base。
+          BEFORE: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            base="$(git merge-base "origin/$BASE_REF" HEAD)"
+          elif [ -n "$BEFORE" ] && ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            # 新分支 / force-push 找不到 before：跟默认分支的 merge-base 比。
+            base="$(git merge-base origin/HEAD HEAD || true)"
+          else
+            base="$BEFORE"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "TEST_PKGS=FULL" >> "$GITHUB_OUTPUT"
+            echo "CHECK_PKGS=FULL" >> "$GITHUB_OUTPUT"
+          else
+            sh scripts/ci-scope.sh "$base" | tee "$GITHUB_OUTPUT"
+          fi
+
+  test:
+    if: github.event_name != 'workflow_dispatch' && needs.scope.outputs.test != ''
+    needs: scope
     strategy:
       fail-fast: false
       matrix:
@@ -36,21 +72,29 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
       - name: Test corpus (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && needs.scope.outputs.test != ''
         run: |
           brew install ffmpeg
           sh scripts/make-test-music.sh
       - name: Setup FFmpeg (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && needs.scope.outputs.test != ''
         uses: FedericoCarboni/setup-ffmpeg@v3
       - name: Test corpus (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && needs.scope.outputs.test != ''
         shell: bash
         run: |
           bash scripts/make-test-music.sh
-      # nsh test 自己编译全部目标并跑测试——先跑一遍 nsh check 是重复的
-      # 编译工作（Windows runner 上要 ~5 分钟），故不跑。
-      - run: nsh test .
+      - name: Test changed crates
+        if: needs.scope.outputs.test != 'FULL'
+        shell: bash
+        run: cargo test $(for p in ${{ needs.scope.outputs.test }}; do echo -n "-p $p "; done)
+      - name: Test all (scope fallback)
+        if: needs.scope.outputs.test == 'FULL'
+        run: cargo test --workspace
+      - name: Check dependents
+        if: needs.scope.outputs.check != '' && needs.scope.outputs.check != 'FULL'
+        shell: bash
+        run: cargo check --all-targets $(for p in ${{ needs.scope.outputs.check }}; do echo -n "-p $p "; done)
 
   package:
     if: github.event_name == 'workflow_dispatch'

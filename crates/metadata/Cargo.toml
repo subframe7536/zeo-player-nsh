@@ -1,0 +1,16 @@
+[package]
+name = "zeo-metadata"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# lofty 标签 / 封面；symphonia 只借 codec::Source（波形与写后校验用）。
+lofty = "0.25"
+symphonia = { version = "0.6", features = ["mp3", "flac", "wav", "aac", "alac", "isomp4", "ogg", "vorbis", "aiff"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
+color-thief = "0.2.2"
+walkdir = "2"
+dirs.workspace = true
+zeo-types.workspace = true
+zeo-db.workspace = true

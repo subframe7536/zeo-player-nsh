@@ -1,0 +1,20 @@
+[package]
+name = "zeo-ui-view-settings"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nsh-core.workspace = true
+nsh-base.workspace = true
+zeo-ui-views-base.workspace = true
+zeo-ui-store.workspace = true
+zeo-ui-components.workspace = true
+zeo-types.workspace = true
+zeo-library.workspace = true
+zeo-engine.workspace = true
+zeo-playlists.workspace = true
+zeo-shell.workspace = true
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+rfd = { version = "0.17", default-features = false }

@@ -1,0 +1,15 @@
+[package]
+name = "zeo-ui-frame"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nsh-core.workspace = true
+nsh-base.workspace = true
+zeo-types.workspace = true
+zeo-engine.workspace = true
+zeo-shell.workspace = true
+zeo-ui-store.workspace = true
+zeo-ui-components.workspace = true
+zeo-ui-views.workspace = true

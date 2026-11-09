@@ -1268,7 +1268,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.9",
 ]
 
 [[package]]
@@ -3338,7 +3338,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -6671,38 +6671,341 @@ dependencies = [
 ]
 
 [[package]]
-name = "zeo-player"
+name = "zeo-db"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "zeo-types",
+]
+
+[[package]]
+name = "zeo-engine"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "playwire",
+ "rubato",
+ "serde",
+ "windows",
+ "windows-sys 0.61.2",
+ "zeo-db",
+ "zeo-library",
+ "zeo-metadata",
+ "zeo-types",
+]
+
+[[package]]
+name = "zeo-icons"
+version = "0.1.0"
+
+[[package]]
+name = "zeo-library"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "dunce",
+ "notify",
+ "nsh-core",
+ "serde",
+ "serde_json",
+ "trash",
+ "walkdir",
+ "zeo-db",
+ "zeo-metadata",
+ "zeo-types",
+]
+
+[[package]]
+name = "zeo-metadata"
 version = "0.1.0"
 dependencies = [
  "color-thief",
- "cpal",
  "dirs",
- "dispatch2",
- "dunce",
- "font-enumeration",
  "image",
  "lofty",
- "notify",
+ "symphonia",
+ "walkdir",
+ "zeo-db",
+ "zeo-types",
+]
+
+[[package]]
+name = "zeo-player"
+version = "0.1.0"
+dependencies = [
+ "dunce",
  "nsh-base",
  "nsh-core",
  "nsh-engine",
  "nsh-testing",
+ "serde_json",
+ "zeo-db",
+ "zeo-engine",
+ "zeo-library",
+ "zeo-metadata",
+ "zeo-playlists",
+ "zeo-shell",
+ "zeo-types",
+ "zeo-ui-components",
+ "zeo-ui-frame",
+ "zeo-ui-now-playing",
+ "zeo-ui-store",
+ "zeo-ui-views",
+]
+
+[[package]]
+name = "zeo-playlists"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "zeo-types",
+]
+
+[[package]]
+name = "zeo-shell"
+version = "0.1.0"
+dependencies = [
+ "dispatch2",
+ "nsh-core",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
- "playwire",
- "rfd",
- "rubato",
- "rusqlite",
- "serde",
- "serde_json",
- "symphonia",
  "tokio",
- "trash",
  "tray-icon",
- "walkdir",
- "windows",
  "windows-sys 0.61.2",
+ "zeo-engine",
+ "zeo-icons",
+ "zeo-types",
+]
+
+[[package]]
+name = "zeo-types"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "nsh-core",
+ "objc2-foundation",
+ "serde",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "zeo-ui-components"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "zeo-icons",
+ "zeo-types",
+ "zeo-ui-store",
+]
+
+[[package]]
+name = "zeo-ui-frame"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "zeo-engine",
+ "zeo-shell",
+ "zeo-types",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-views",
+]
+
+[[package]]
+name = "zeo-ui-now-playing"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "zeo-engine",
+ "zeo-library",
+ "zeo-metadata",
+ "zeo-shell",
+ "zeo-types",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-views",
+]
+
+[[package]]
+name = "zeo-ui-store"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "font-enumeration",
+ "image",
+ "nsh-base",
+ "nsh-core",
+ "rfd",
+ "serde_json",
+ "zeo-db",
+ "zeo-engine",
+ "zeo-library",
+ "zeo-metadata",
+ "zeo-playlists",
+ "zeo-shell",
+ "zeo-types",
+]
+
+[[package]]
+name = "zeo-ui-view-browse"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "zeo-library",
+ "zeo-types",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-views-base",
+]
+
+[[package]]
+name = "zeo-ui-view-command-palette"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-views-base",
+]
+
+[[package]]
+name = "zeo-ui-view-edit-info"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "rfd",
+ "zeo-engine",
+ "zeo-metadata",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-views-base",
+]
+
+[[package]]
+name = "zeo-ui-view-folders"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "zeo-library",
+ "zeo-metadata",
+ "zeo-playlists",
+ "zeo-shell",
+ "zeo-types",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-view-playlists",
+ "zeo-ui-views-base",
+]
+
+[[package]]
+name = "zeo-ui-view-home"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "zeo-db",
+ "zeo-types",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-view-browse",
+ "zeo-ui-views-base",
+]
+
+[[package]]
+name = "zeo-ui-view-metadata"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "nsh-engine",
+ "nsh-testing",
+ "rfd",
+ "zeo-db",
+ "zeo-engine",
+ "zeo-library",
+ "zeo-metadata",
+ "zeo-player",
+ "zeo-playlists",
+ "zeo-types",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-view-folders",
+ "zeo-ui-views-base",
+]
+
+[[package]]
+name = "zeo-ui-view-playlists"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "zeo-playlists",
+ "zeo-shell",
+ "zeo-types",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-views-base",
+]
+
+[[package]]
+name = "zeo-ui-view-settings"
+version = "0.1.0"
+dependencies = [
+ "nsh-base",
+ "nsh-core",
+ "rfd",
+ "zeo-engine",
+ "zeo-library",
+ "zeo-playlists",
+ "zeo-shell",
+ "zeo-types",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-views-base",
+]
+
+[[package]]
+name = "zeo-ui-views"
+version = "0.1.0"
+dependencies = [
+ "nsh-core",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-view-browse",
+ "zeo-ui-view-command-palette",
+ "zeo-ui-view-edit-info",
+ "zeo-ui-view-folders",
+ "zeo-ui-view-home",
+ "zeo-ui-view-metadata",
+ "zeo-ui-view-playlists",
+ "zeo-ui-view-settings",
+ "zeo-ui-views-base",
+]
+
+[[package]]
+name = "zeo-ui-views-base"
+version = "0.1.0"
+dependencies = [
+ "dunce",
+ "nsh-base",
+ "nsh-core",
+ "zeo-library",
+ "zeo-playlists",
+ "zeo-shell",
+ "zeo-types",
+ "zeo-ui-components",
+ "zeo-ui-store",
 ]
 
 [[package]]
