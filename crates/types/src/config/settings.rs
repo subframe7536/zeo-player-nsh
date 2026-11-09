@@ -72,6 +72,9 @@ pub struct LibraryConfig {
     /// 输出设备变化（拔耳机、切默认设备）时暂停播放。
     #[serde(default = "default_true")]
     pub pause_on_device_change: bool,
+    /// 启动时自动检查更新（「关于」页可关）。
+    #[serde(default = "default_true")]
+    pub auto_check_updates: bool,
     /// 播放统计：听过整首的该百分比算一次播放（0 = 不用此条件）。
     #[serde(default = "default_stats_min_percent")]
     pub stats_min_percent: u32,
@@ -143,6 +146,7 @@ impl Default for LibraryConfig {
             show_covers: default_true(),
             delete_permanently: false,
             pause_on_device_change: true,
+            auto_check_updates: true,
             stats_min_percent: default_stats_min_percent(),
             stats_min_secs: default_stats_min_secs(),
             replaygain: crate::audio::ReplayGainConfig::default(),

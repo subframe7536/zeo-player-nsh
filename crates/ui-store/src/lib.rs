@@ -20,6 +20,7 @@ mod tags;
 #[cfg(test)]
 mod tests;
 mod types;
+mod update;
 
 pub(crate) use std::cell::{Cell, RefCell};
 pub(crate) use std::collections::{BTreeSet, HashMap};
@@ -48,3 +49,4 @@ pub use playlists::*;
 pub use settings::*;
 pub use tags::*;
 pub use types::*;
+pub use update::*;

@@ -1,0 +1,105 @@
+name: Release
+
+# 打 v* tag（或 Actions → Release → Run workflow 手动跑）：macOS / Windows
+# 各打包一份，nsh update-manifest 生成更新清单 latest.json，建 GitHub
+# Release 并上传全部资产。设置 →「关于」的自更新查的就是这个 release 的
+# releases/latest/download/latest.json（nsh.json `updater.github`）。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: macos
+          # Windows 用满幅图标（macOS 惯例的留白图标在任务栏里小一圈；见 AGENTS.md「应用图标」）
+          - os: windows-latest
+            target: windows
+            icon: --icon resources/icon-windows.png
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: nsh package . --target ${{ matrix.target }} ${{ matrix.icon }}
+      - name: DMG (macOS)
+        if: runner.os == 'macOS'
+        # 用户下载的安装镜像：拖 .app 到 Applications。更新归档
+        # ZeoPlayer-<ver>-macos-*.tar.gz 是 `nsh package` 按 updater 配置
+        # 写的（文件名带版本 + 平台三元组，update-manifest 靠它认平台）。
+        run: |
+          brew install create-dmg
+          create-dmg --volname "Zeo Player" --window-size 640 400 \
+            --icon-size 100 --icon "ZeoPlayer.app" 170 190 \
+            --hide-extension "ZeoPlayer.app" --app-drop-link 470 190 \
+            --no-internet-enable \
+            ".nsh/out/ZeoPlayer-macOS.dmg" ".nsh/out/ZeoPlayer.app" || \
+          { # create-dmg 的 Finder 布局脚本在 CI 上偶发失败：退而求其次
+            # 出一个普通 UDZO（无窗口布局，内容一样）。
+            hdiutil create -volname "Zeo Player" -srcfolder ".nsh/out/ZeoPlayer.app" \
+              -ov -format UDZO ".nsh/out/ZeoPlayer-macOS.dmg"; }
+      - name: Setup exe (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $v = (Get-Content nsh.json -Raw | ConvertFrom-Json).version
+          $src = (Get-Item ".nsh/out/ZeoPlayer").FullName
+          $out = (New-Item -ItemType Directory -Force ".nsh/out").FullName
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/O$out" "/DAppVersion=$v" "/DSourceDir=$src" scripts/setup.iss
+      # archive: false：产物就是 zip / tar.gz 本身，不再套一层压缩；
+      # 产物名取文件名。
+      - uses: actions/upload-artifact@v7
+        with:
+          path: |
+            .nsh/out/ZeoPlayer-*.zip
+            .nsh/out/ZeoPlayer-*.tar.gz
+            .nsh/out/ZeoPlayer-*.dmg
+            .nsh/out/ZeoPlayer-Setup.exe
+          archive: false
+
+  release:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      # 产物是文件本身：保持文件形态（解压会改掉压缩包的位）。
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: ZeoPlayer-*
+          merge-multiple: true
+          skip-decompress: true
+      - run: ls -l dist
+      - name: Update manifest (latest.json)
+        run: |
+          # 只喂「版本 + 平台」命名的更新归档；用户整包（ZeoPlayer-macOS /
+          # Windows.zip，无版本段）不能进清单。资产 URL 默认解析在清单
+          # 旁边——清单本身放在 release 资产里即 releases/latest/download/。
+          nsh update-manifest dist/ZeoPlayer-*-macos-*.tar.gz dist/ZeoPlayer-*-windows-*.zip --entry . --out dist
+          # 要签清单：仓库加 secret UPDATE_SECRET（`nsh keygen` 的 .secret），
+          # nsh.json 的 updater.publicKey 配上 .pub 后启用下面这行：
+          #   nsh update-manifest ... --key update.secret
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v$(jq -r .version nsh.json)"
+          fi
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --target "$GITHUB_SHA" \
+              --title "Zeo Player $tag" --generate-notes
+          fi

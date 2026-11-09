@@ -13,6 +13,7 @@ pub(crate) use catalog::*;
 pub(crate) use nav::*;
 pub(crate) use widgets::*;
 
+mod about;
 mod appearance;
 mod covers;
 mod library;

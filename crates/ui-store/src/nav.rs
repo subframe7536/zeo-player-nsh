@@ -36,12 +36,13 @@ pub enum Pane {
     Covers,
     Window,
     Other,
+    About,
 }
 
 impl Pane {
     /// 左栏分组（小标题 + 分类，不折叠）：通用是外观 / 曲库 / 播放 /
     /// 窗口；歌词、封面、其他这些描述曲目信息的归「元数据」。
-    pub const GROUPS: [(&'static str, &'static [Pane]); 2] = [
+    pub const GROUPS: [(&'static str, &'static [Pane]); 3] = [
         (
             "通用",
             &[
@@ -52,6 +53,7 @@ impl Pane {
             ],
         ),
         ("元数据", &[Pane::Lyrics, Pane::Covers, Pane::Other]),
+        ("关于", &[Pane::About]),
     ];
 
     /// 全部分类（显示顺序）。
@@ -71,6 +73,7 @@ impl Pane {
             Pane::Covers => "封面",
             Pane::Window => "窗口",
             Pane::Other => "其他",
+            Pane::About => "关于",
         }
     }
 }

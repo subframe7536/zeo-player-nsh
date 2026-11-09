@@ -142,6 +142,11 @@ impl LibraryStore {
         self.config().delete_permanently
     }
 
+    /// 启动时自动检查更新（持久化）。
+    pub fn set_auto_check_updates(&self, on: bool) {
+        self.update_config(|c| c.auto_check_updates = on);
+    }
+
     pub fn set_delete_permanently(&self, on: bool) {
         self.update_config(|c| c.delete_permanently = on);
     }

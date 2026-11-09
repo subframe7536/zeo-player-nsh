@@ -5,7 +5,10 @@ pub mod single_instance;
 pub mod tray;
 pub mod window;
 
-pub use tray::{TrayAction, TrayState, simulate_tray, take_tray_actions};
+pub use tray::{TrayAction, TrayState, take_tray_actions};
+
+#[cfg(any(debug_assertions, test))]
+pub use tray::simulate_tray;
 pub use window::*;
 
 /// 「在文件管理器中显示」的文字。

@@ -164,6 +164,8 @@ pub struct Store {
     pub folder_message: Signal<String>,
     /// 文件夹增删改弹窗（`Some` 时打开）。
     pub folder_op: Signal<Option<FileOp>>,
+    /// 应用更新状态（「关于」页）。
+    pub update: Signal<UpdateState>,
     /// 当前开着的弹出菜单（`menu_control` 的 id）：同一时刻只开一个。
     /// 桌面上右键按下不产生 PressOutside（平台只发 ContextMenu 事件），
     /// 已开的菜单不会被平台关掉，由它互斥。
@@ -205,4 +207,30 @@ thread_local! {
     /// 整个 dispose——`COVERS` 清掉的只是 `Copy` 句柄，节点与它们存
     /// 的值要靠 dispose 才真正释放。
     pub(crate) static COVER_OWNER: RefCell<Option<Owner>> = const { RefCell::new(None) };
+}
+
+/// 应用更新的进度状态（「关于」页；检查 / 下载在后台线程跑）。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum UpdateState {
+    /// 尚未检查（或打包外运行不显示更新区）。
+    #[default]
+    Idle,
+    /// 检查中。
+    Checking,
+    /// 已是最新。
+    Current,
+    /// 有新版本：版本号、说明、能否原地安装、产物地址。
+    Available {
+        version: String,
+        notes: Option<String>,
+        can_install: bool,
+        url: String,
+        can_download: bool,
+    },
+    /// 下载中（已收字节 / 总字节）。
+    Downloading { received: u64, total: Option<u64> },
+    /// 下好并安装完成，待重启。
+    Ready { version: String },
+    /// 失败。
+    Error(String),
 }

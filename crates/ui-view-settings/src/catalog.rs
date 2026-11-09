@@ -10,6 +10,7 @@ pub(crate) fn pane_glyph(pane: Pane) -> Icon {
         Pane::Window => Icon::Monitor,
         Pane::Other => Icon::More,
         Pane::Appearance => Icon::Sun,
+        Pane::About => Icon::Info,
     }
 }
 
@@ -143,9 +144,21 @@ pub(crate) const SECTIONS: &[Section] = &[
         keys: "字体 系统字体 已安装 预览 字形",
         build: appearance::font_section,
     },
+    Section {
+        pane: Pane::About,
+        title: "应用信息",
+        keys: "关于 版本 版本号 名称 主页 项目 GitHub 仓库 开源 许可证",
+        build: about::app_section,
+    },
+    Section {
+        pane: Pane::About,
+        title: "应用更新",
+        keys: "更新 检查更新 升级 新版本 下载 安装 重启 自动检查",
+        build: about::update_section,
+    },
 ];
 
-/// 搜索词是否命中一段文本（调用方已把 `q` 转成小写并去掉两端空格）。
+/// 不区分大小写命中。
 pub(crate) fn matches(q: &str, s: &str) -> bool {
     s.to_lowercase().contains(q)
 }

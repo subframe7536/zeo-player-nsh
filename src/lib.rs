@@ -25,7 +25,9 @@ pub use zeo_metadata as metadata;
 pub use zeo_playlists as playlists;
 pub use zeo_shell::{single_instance, window};
 
-pub use zeo_ui_store::{BENCH_GRID, Nav};
+#[cfg(any(debug_assertions, test))]
+pub use zeo_ui_store::BENCH_GRID;
+pub use zeo_ui_store::Nav;
 
 /// 应用根组件（`nsh.json` `"root"`）。
 #[component]

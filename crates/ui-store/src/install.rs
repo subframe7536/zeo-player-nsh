@@ -106,12 +106,14 @@ pub fn install() -> Store {
         folder_extra: signal(BTreeSet::new()),
         folder_message: signal(String::new()),
         folder_op: signal(None),
+        update: signal(UpdateState::Idle),
         menu_open: signal(None),
     };
     STORE.with(|cell| cell.set(Some(s)));
     let (tx, posted) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
     POSTER.with(|p| *p.borrow_mut() = Some(Post(tx)));
     apply_accent();
+    auto_check_updates();
 
     // 引擎状态：100 ms 轮询共享状态（信号只在值变化时通知）。
     spawn(async move {
@@ -278,6 +280,7 @@ pub fn install() -> Store {
             s.library.set(state);
             if changed {
                 apply_accent();
+                auto_check_updates();
             }
             s.tracks.set(Same(library_store().tracks()));
             s.dirs.set(Same(library_store().dirs()));
