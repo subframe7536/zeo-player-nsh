@@ -159,9 +159,12 @@ pub fn install() -> Store {
     });
 
     // 窗口与托盘：等窗口事件（关闭请求、托盘操作、显示 / 隐藏）再处理。
+    // 先绑实例：关闭请求 / 隐藏状态按实例归属，并行宿主（界面测试）互不串。
+    zeo_shell::bind_instance();
+    let listener = zeo_shell::listener();
     spawn(async move {
         loop {
-            zeo_shell::changed().await;
+            listener.notified().await;
             if zeo_shell::take_close_request() {
                 s.close_prompt.set(true);
             }

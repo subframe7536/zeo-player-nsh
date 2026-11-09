@@ -184,10 +184,28 @@ pub fn top_inset() -> f32 {
 }
 
 /// 右上角被窗口按钮占去的宽度（Windows 约 138 pt；macOS 为 0）。Windows 上
-/// 按钮由应用画（`caption`），接管前由 NSH 画、宽度由它报告。
+/// 按钮由应用画（`zeo_ui_frame::caption`——store 在它之下不能反向依赖，
+/// 宽度经 `set_caption_width_hook` 注入），接管前由 NSH 画、宽度由它报告。
 pub fn controls_right() -> f32 {
     let system = nsh_core::element::desktop::title_bar().right.0;
     #[cfg(target_os = "windows")]
-    let system = system.max(super::frame::caption::width());
+    let system = system.max(caption_width());
     system
+}
+
+/// 自绘窗口按钮的宽度查询（`zeo_ui_frame::caption::width` 在安装时注入；
+/// 未注入按 0——real app 总是先装）。
+#[cfg(target_os = "windows")]
+static CAPTION_WIDTH: std::sync::OnceLock<fn() -> f32> = std::sync::OnceLock::new();
+
+/// 注入自绘窗口按钮的宽度查询（`zeo_ui_frame` 调用；读取即订阅——hook
+/// 内部读窗口信号，调用点挂在绑定里才会跟着更新）。
+#[cfg(target_os = "windows")]
+pub fn set_caption_width_hook(hook: fn() -> f32) {
+    let _ = CAPTION_WIDTH.set(hook);
+}
+
+#[cfg(target_os = "windows")]
+fn caption_width() -> f32 {
+    CAPTION_WIDTH.get().map_or(0.0, |f| f())
 }

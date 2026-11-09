@@ -25,6 +25,8 @@ struct Own(bool);
 
 /// 等窗口子类化完成，再切换标题栏样式、显示应用的按钮。
 pub fn install() {
+    // 按钮宽度给 `theme::controls_right`（store 在本 crate 之下，靠注入拿）。
+    zeo_ui_store::theme::set_caption_width_hook(width);
     let own = global::<Own>();
     // `current_window()` 要在渲染里取（找树的窗口），句柄带进任务里用。
     let win = current_window();

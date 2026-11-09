@@ -21,7 +21,7 @@
 //!   画，NSH 的标题栏样式切到 Default 后就不画它自己的了），窗口销毁后
 //!   直接结束进程（见 `exit_now`）；托盘在自己的线程上，带消息循环。
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
 use zeo_types::config::CloseAction;
 
@@ -34,34 +34,74 @@ pub const MIN_WIDTH: f32 = 1000.0;
 /// 窗口的最小高度（点）。
 pub const MIN_HEIGHT: f32 = 720.0;
 
-/// 当前关闭行为（界面设置写入）。
+// 应用实例：并行宿主（界面测试一个进程挂多个引擎）下区分窗口事件的
+// 归属。实例 id 绑在调用线程上——事件的生产与消费都在各实例自己的
+// 引擎线程（`install` 里 `bind_instance`）；托盘、主线程、测量脚本
+// 这些没绑的线程记 0（广播：任一实例可处理——真实进程只有一个实例）。
+thread_local! {
+    static INSTANCE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+static INSTANCE_SEQ: AtomicU64 = AtomicU64::new(1);
+
+/// 把当前线程绑到一个应用实例（`zeo_ui_store::install` 在引擎线程调）。
+pub fn bind_instance() -> u64 {
+    let id = INSTANCE_SEQ.fetch_add(1, Ordering::Relaxed);
+    INSTANCE.set(id);
+    id
+}
+
+fn instance() -> u64 {
+    INSTANCE.get()
+}
+
+/// 当前关闭行为（界面设置写入；配置存在共享的曲库存储里，各实例一致）。
 static MODE: AtomicU8 = AtomicU8::new(0);
-/// 窗口里点了关闭、需要问用户。
-static CLOSE_REQUESTED: AtomicBool = AtomicBool::new(false);
+/// 点了关闭、在等回答的实例集（0 是系统侧不指明实例的调用，任一实例
+/// 可取走）。记归属才不会被并行宿主的别的实例取走、弹窗弹错窗口。
+static CLOSE_REQUESTED: std::sync::Mutex<std::collections::BTreeSet<u64>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
 /// 真的要退出（托盘「退出」、选择「退出」）：关闭不再拦截。
 static QUITTING: AtomicBool = AtomicBool::new(false);
-/// 窗口已隐藏到托盘。
-static HIDDEN: AtomicBool = AtomicBool::new(false);
+/// 隐藏到托盘的实例集（0 是系统侧不指明实例的调用，所有实例都当隐藏）。
+static HIDDEN: std::sync::Mutex<std::collections::BTreeSet<u64>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
 /// 重新打开时恢复上次的窗口大小与位置（界面设置写入）。
 static REMEMBER: AtomicBool = AtomicBool::new(false);
-/// 窗口事件（关闭请求、托盘操作、显示 / 隐藏）发生时唤醒界面
-/// （[`changed`]），界面不必轮询。
-static CHANGED: tokio::sync::Notify = tokio::sync::Notify::const_new();
-/// 托盘上发生、还没被界面取走的操作。
+/// 窗口事件（关闭请求、托盘操作、显示 / 隐藏）每实例一条唤醒通道：
+/// `Notify` 一次只醒一个等待者，事件会被先醒的实例偷走——每个实例
+/// 发自己的 `Notify`（[`listener`]），许可各存各的，不偷不漏。
+static LISTENERS: std::sync::Mutex<Vec<std::sync::Weak<tokio::sync::Notify>>> =
+    std::sync::Mutex::new(Vec::new());
 
-/// 等到下一个窗口事件（之前错过的也算：`Notify` 存一个许可）。
-pub async fn changed() {
-    CHANGED.notified().await;
+/// 本实例的窗口事件通道（`install` 时拿一条，事件来时 `notified`）。
+/// 之前错过的也算：`Notify` 存一个许可。
+pub fn listener() -> std::sync::Arc<tokio::sync::Notify> {
+    let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+    LISTENERS
+        .lock()
+        .unwrap()
+        .push(std::sync::Arc::downgrade(&notify));
+    notify
 }
 
 pub(crate) fn notify() {
-    CHANGED.notify_one();
+    LISTENERS.lock().unwrap().retain(|w| match w.upgrade() {
+        Some(n) => {
+            n.notify_one();
+            true
+        }
+        None => false,
+    });
 }
 
 /// 窗口被系统重新显示（macOS 点 Dock 图标，Windows 任务栏 / Alt+Tab）而
-/// 不是走 [`show`]：同样算显示，界面重新装上（否则窗口是空的）。
+/// 不是走 [`show`]：同样算显示，界面重新装上（否则窗口是空的）。系统
+/// 事件不带实例归属，全清（真实进程只有一个实例）。
 fn shown_by_system() {
-    if HIDDEN.swap(false, Ordering::Relaxed) {
+    let mut hidden = HIDDEN.lock().unwrap();
+    if !hidden.is_empty() {
+        hidden.clear();
+        drop(hidden);
         notify();
     }
 }
@@ -98,13 +138,16 @@ pub fn set_close_action(action: CloseAction) {
     );
 }
 
-/// 有没有待回答的关闭请求（读取后清除）。
+/// 有没有发给本实例、还没回答的关闭请求（读取后清除）。别实例的请
+/// 求不动（[`listener`] 的唤醒所有实例都收得到，各取各的）。
 pub fn take_close_request() -> bool {
-    CLOSE_REQUESTED.swap(false, Ordering::Relaxed)
+    let mut requested = CLOSE_REQUESTED.lock().unwrap();
+    requested.remove(&instance()) || requested.remove(&0)
 }
 
 pub fn is_hidden() -> bool {
-    HIDDEN.load(Ordering::Relaxed)
+    let hidden = HIDDEN.lock().unwrap();
+    hidden.contains(&instance()) || hidden.contains(&0)
 }
 
 /// 用户点了关闭（NSH 的 `on_close_press`、测量脚本的 [`simulate_close`]）：
@@ -120,7 +163,7 @@ pub fn close_requested() -> bool {
             false
         }
         CloseAction::Ask => {
-            CLOSE_REQUESTED.store(true, Ordering::Relaxed);
+            CLOSE_REQUESTED.lock().unwrap().insert(instance());
             notify();
             false
         }
@@ -157,14 +200,17 @@ pub fn start() {
 
 /// 隐藏窗口（播放继续）。
 pub fn hide() {
-    HIDDEN.store(true, Ordering::Relaxed);
+    HIDDEN.lock().unwrap().insert(instance());
     notify();
     nsh_core::element::desktop::main_window().hide();
 }
 
 /// 显示并激活窗口。
 pub fn show() {
-    HIDDEN.store(false, Ordering::Relaxed);
+    let mut hidden = HIDDEN.lock().unwrap();
+    hidden.remove(&instance());
+    hidden.remove(&0);
+    drop(hidden);
     notify();
     let window = nsh_core::element::desktop::main_window();
     window.show();
