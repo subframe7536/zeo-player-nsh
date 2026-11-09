@@ -60,6 +60,8 @@ fn start(width: f32, height: f32) -> Headless {
 
 fn start_inner(width: f32, height: f32) -> Headless {
     isolate();
+    zeo_player::config::library_store()
+        .set_sidebar_section(zeo_player::config::SidebarSection::Playlists);
     let theme = nsh_base::Theme::from_json(include_str!("../theme.json")).expect("theme.json");
     let mut config = EngineConfig::new(Root::of::<App>().tokens(theme.into_tokens()));
     config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];

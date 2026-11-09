@@ -4,7 +4,7 @@
 
 use nsh_core::prelude::*;
 
-mod config;
+pub mod config;
 mod db;
 #[cfg(test)]
 mod e2e;

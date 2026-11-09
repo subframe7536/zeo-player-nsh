@@ -151,7 +151,20 @@ pub fn Artists() -> impl IntoElement {
         }
         match selected.get() {
             Some(key) => {
-                let group = untracked(|| groups.with(|g| g.iter().find(|g| g.key == key).cloned()));
+                let group = untracked(|| {
+                    groups.with(|g| {
+                        g.iter()
+                            .find(|g| g.key == key)
+                            .or_else(|| {
+                                let seps = s.library.with(|l| l.config.artist_separators.clone());
+                                let parts = crate::config::split_artists(&key, &seps);
+                                parts
+                                    .into_iter()
+                                    .find_map(|part| g.iter().find(|item| item.key == part))
+                            })
+                            .cloned()
+                    })
+                });
                 let Some(group) = group else {
                     selected.set(None);
                     return view().into_element();

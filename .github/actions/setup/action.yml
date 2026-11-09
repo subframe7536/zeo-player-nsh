@@ -9,7 +9,6 @@ runs:
       with:
         workspaces: |
           .
-          .nsh/rust
 
     # QuickJS' bindings (the headless test runner) need libclang on Windows.
     - name: LLVM (Windows)

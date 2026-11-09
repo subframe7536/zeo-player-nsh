@@ -6,12 +6,22 @@ name: CI
 on:
   push:
     paths:
-      - src/*
-      - tests/*
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "nsh.json"
+      - ".github/**"
   pull_request:
     paths:
-      - src/*
-      - tests/*
+      - "src/**"
+      - "tests/**"
+      - "scripts/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "nsh.json"
+      - ".github/**"
   workflow_dispatch:
 
 jobs:
@@ -25,11 +35,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-      - name: Test corpus
+      - name: Test corpus (macOS)
         if: runner.os == 'macOS'
         run: |
           brew install ffmpeg
           sh scripts/make-test-music.sh
+      - name: Test corpus (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          bash scripts/make-test-music.sh
       - run: nsh check .
       - run: nsh test .
 
