@@ -48,7 +48,8 @@ jobs:
         shell: bash
         run: |
           bash scripts/make-test-music.sh
-      - run: nsh check .
+      # nsh test 自己编译全部目标并跑测试——先跑一遍 nsh check 是重复的
+      # 编译工作（Windows runner 上要 ~5 分钟），故不跑。
       - run: nsh test .
 
   package:

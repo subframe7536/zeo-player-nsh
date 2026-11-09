@@ -590,9 +590,11 @@ impl ResamplerState {
     }
 }
 
-/// 当前输出：流 + 设备格式。`stream` 为 `None` 时没有可用设备。
+/// 当前输出：消费方 + 设备格式。没有可用设备时是 [`Sink::Null`] 空输出——
+/// 按设备节拍消费环形缓冲（位置 / 播放统计 / 无缝换曲照常推进），设备
+/// 插回时由 `retry_at` 换成真流并续回原位。
 struct Output {
-    stream: Option<cpal::Stream>,
+    sink: Option<Sink>,
     rate: u32,
     channels: usize,
     /// 流是否在跑（`play()`/`pause()` 的成功态）。停着时暂停流：省空闲
@@ -600,46 +602,153 @@ struct Output {
     running: bool,
 }
 
-/// 在系统默认设备上打开输出流（失败时 `stream: None`，格式沿用 `fallback`）。
+impl Output {
+    /// 真输出设备在跑（cpal 流），不是空输出兜底。
+    fn real(&self) -> bool {
+        matches!(self.sink, Some(Sink::Cpal(_)))
+    }
+}
+
+enum Sink {
+    Cpal(cpal::Stream),
+    /// 无输出设备时的空输出：线程按设备节拍从环形缓冲取数，输出回调照常
+    /// 走（EQ / 增益 / `played` / `listened` 全都一致）。CI 与无声卡
+    /// 机器上播放通路仍可用；`running` 跟随播放态，暂停即停取。
+    Null(NullSink),
+}
+
+struct NullSink {
+    running: Arc<AtomicBool>,
+    quit: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl NullSink {
+    fn start(shared: Arc<Shared>, rate: u32, channels: usize) -> NullSink {
+        let running = Arc::new(AtomicBool::new(true));
+        let quit = Arc::new(AtomicBool::new(false));
+        let handle = std::thread::Builder::new()
+            .name("zeo-player-null-out".into())
+            .spawn({
+                let running = running.clone();
+                let quit = quit.clone();
+                move || null_output_loop(&shared, &running, &quit, rate, channels)
+            })
+            .ok();
+        NullSink {
+            running,
+            quit,
+            handle,
+        }
+    }
+}
+
+impl Drop for NullSink {
+    fn drop(&mut self) {
+        self.quit.store(true, Ordering::Relaxed);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+/// 空输出的消费循环：每 ~10ms 取一块（和 `OUTPUT_BUFFER_MS` 量级相当），
+/// 节拍对齐 `Instant`——线程被抢占后不追赶，位置就是真实播放时长。
+fn null_output_loop(
+    shared: &Arc<Shared>,
+    running: &Arc<AtomicBool>,
+    quit: &Arc<AtomicBool>,
+    rate: u32,
+    channels: usize,
+) {
+    let mut eq = crate::engine::eq::Equalizer::new();
+    let mut eq_seen = u64::MAX;
+    let mut starved = false;
+    let chunk_frames = (rate as usize / 100).max(1);
+    let mut data = vec![0.0f32; chunk_frames * channels.max(1)];
+    let mut tick = Instant::now();
+    while !quit.load(Ordering::Relaxed) {
+        if !running.load(Ordering::Relaxed) {
+            tick = Instant::now();
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
+        }
+        let g = shared.eq_gen.load(Ordering::Acquire);
+        if g != eq_seen
+            && let Ok(cfg) = shared.eq_config.try_lock()
+        {
+            eq.configure(&cfg, rate);
+            eq_seen = g;
+        }
+        output_callback(shared, &mut eq, &mut starved, &mut data, channels);
+        tick += Duration::from_secs_f64(chunk_frames as f64 / rate.max(1) as f64);
+        let now = Instant::now();
+        if tick > now {
+            std::thread::sleep(tick - now);
+        } else {
+            tick = now;
+        }
+    }
+}
+
+/// 在系统默认设备上试开输出流：成功返回流与实际格式；任何失败记错误、
+/// 返回 `None`（调用方落空输出兜底）。
+fn probe_stream(
+    shared: &Arc<Shared>,
+    tx: &std::sync::mpsc::Sender<EngineCmd>,
+) -> Option<(cpal::Stream, u32, usize)> {
+    let Some(device) = cpal::default_host().default_output_device() else {
+        set_error(shared, "没有可用的音频输出设备");
+        return None;
+    };
+    let config = match device.default_output_config() {
+        Ok(config) => config,
+        Err(err) => {
+            set_error(shared, &format!("音频设备读取失败: {err}"));
+            return None;
+        }
+    };
+    let rate = config.sample_rate();
+    let channels = config.channels() as usize;
+    let mut stream_config = config.config();
+    stream_config.buffer_size = desired_buffer_size(config.buffer_size(), rate);
+    let build = build_stream(&device, stream_config, shared, tx, rate, channels).or_else(|first| {
+        // 设备不接受指定缓冲：退回系统默认（能响，只是调度余量小）。
+        eprintln!("zeo-player cpal: {first}（退回默认缓冲）");
+        build_stream(&device, config.config(), shared, tx, rate, channels)
+    });
+    match build {
+        Ok(s) => (s.play().is_ok()).then_some((s, rate, channels)),
+        Err(err) => {
+            set_error(shared, &format!("音频输出打开失败: {err}"));
+            None
+        }
+    }
+}
+
+/// 打开输出：默认设备可用就用真流，不可用落 [`Sink::Null`] 空输出兜底
+/// （格式沿用 `fallback`；消费不中断，位置照常推进）。
 fn open_output(
     shared: &Arc<Shared>,
     tx: &std::sync::mpsc::Sender<EngineCmd>,
     fallback: (u32, usize),
 ) -> Output {
-    let mut rate = fallback.0;
-    let mut channels = fallback.1;
-    let mut stream = None;
-    let mut running = false;
-    match cpal::default_host().default_output_device() {
-        Some(device) => match device.default_output_config() {
-            Ok(config) => {
-                rate = config.sample_rate();
-                channels = config.channels() as usize;
-                let mut stream_config = config.config();
-                stream_config.buffer_size = desired_buffer_size(config.buffer_size(), rate);
-                let build = build_stream(&device, stream_config, shared, tx, rate, channels)
-                    .or_else(|first| {
-                        // 设备不接受指定缓冲：退回系统默认（能响，只是调度余量小）。
-                        eprintln!("zeo-player cpal: {first}（退回默认缓冲）");
-                        build_stream(&device, config.config(), shared, tx, rate, channels)
-                    });
-                match build {
-                    Ok(s) => {
-                        running = s.play().is_ok();
-                        stream = Some(s);
-                    }
-                    Err(err) => set_error(shared, &format!("音频输出打开失败: {err}")),
-                }
-            }
-            Err(err) => set_error(shared, &format!("音频设备读取失败: {err}")),
+    match probe_stream(shared, tx) {
+        Some((stream, rate, channels)) => Output {
+            sink: Some(Sink::Cpal(stream)),
+            rate,
+            channels,
+            running: true,
         },
-        None => set_error(shared, "没有可用的音频输出设备"),
-    }
-    Output {
-        stream,
-        rate,
-        channels,
-        running,
+        None => {
+            let (rate, channels) = fallback;
+            Output {
+                sink: Some(Sink::Null(NullSink::start(shared.clone(), rate, channels))),
+                rate,
+                channels,
+                running: true,
+            }
+        }
     }
 }
 
@@ -711,17 +820,23 @@ fn sync_stream(out: &mut Output, playing: bool) {
     if playing == out.running {
         return;
     }
-    let Some(stream) = out.stream.as_ref() else {
-        return;
-    };
-    let ok = if playing {
-        stream.play().map_err(|e| e.to_string())
-    } else {
-        stream.pause().map_err(|e| e.to_string())
-    };
-    match ok {
-        Ok(()) => out.running = playing,
-        Err(err) => eprintln!("zeo-player cpal: {err}"),
+    match out.sink.as_ref() {
+        Some(Sink::Cpal(stream)) => {
+            let ok = if playing {
+                stream.play().map_err(|e| e.to_string())
+            } else {
+                stream.pause().map_err(|e| e.to_string())
+            };
+            match ok {
+                Ok(()) => out.running = playing,
+                Err(err) => eprintln!("zeo-player cpal: {err}"),
+            }
+        }
+        Some(Sink::Null(null)) => {
+            null.running.store(playing, Ordering::Relaxed);
+            out.running = playing;
+        }
+        None => {}
     }
 }
 
@@ -789,12 +904,13 @@ fn handle_device(
     if !rebuild {
         return None;
     }
-    drop(out.stream.take());
+    drop(out.sink.take());
     let fallback = (out.rate, out.channels);
     *out = open_output(shared, tx, fallback);
-    if out.stream.is_some() {
-        // 重建出的流是 running 的；停着时立刻暂停，保持会话非活动。
-        sync_stream(out, shared.playing.load(Ordering::Relaxed));
+    // 新消费方（真流或空输出）都是 running 态；停着时立刻同步——真流保持
+    // 会话非活动，空输出停取省 CPU。
+    sync_stream(out, shared.playing.load(Ordering::Relaxed));
+    if out.real() {
         restore_after_rebuild(shared, out, loaded);
         None
     } else {
@@ -826,24 +942,31 @@ fn run(
     let mut media_tick = Instant::now();
     // 上一轮等待时收到的命令（等待用 recv_timeout，有命令立即醒）。
     let mut waiting: Option<EngineCmd> = None;
-    // 设备断开后的重开时刻（`Some` 期间每秒试一次）。
-    let mut retry_at: Option<Instant> = None;
+    // 设备断开后的重开时刻（`Some` 期间每秒试一次）。开局就没设备
+    // （空输出兜底）也排上：设备插回后无事件也照接。
+    let mut retry_at: Option<Instant> =
+        (!out.real()).then(|| Instant::now() + Duration::from_secs(1));
 
     loop {
-        // 0. 设备重试：设备回来了就重建输出、按原位置恢复。
+        // 0. 设备重试：空输出期间每秒探一次真设备；回来了就换流、按原位置
+        //    恢复。探测不动空输出本身——没探到时消费不中断。
         if let Some(at) = retry_at
             && Instant::now() >= at
         {
-            let fallback = (out.rate, out.channels);
-            out = open_output(&shared, &tx, fallback);
-            retry_at = if out.stream.is_some() {
-                sync_stream(&mut out, shared.playing.load(Ordering::Relaxed));
-                restore_after_rebuild(&shared, &out, &mut loaded);
-                None
-            } else {
-                Some(Instant::now() + Duration::from_secs(1))
-            };
-            target = target_for(&out, shared.ring.capacity());
+            match probe_stream(&shared, &tx) {
+                Some((stream, rate, channels)) => {
+                    drop(out.sink.take());
+                    out.sink = Some(Sink::Cpal(stream));
+                    out.rate = rate;
+                    out.channels = channels;
+                    out.running = true;
+                    sync_stream(&mut out, shared.playing.load(Ordering::Relaxed));
+                    restore_after_rebuild(&shared, &out, &mut loaded);
+                    retry_at = None;
+                    target = target_for(&out, shared.ring.capacity());
+                }
+                None => retry_at = Some(Instant::now() + Duration::from_secs(1)),
+            }
         }
         // 1. 命令
         while let Some(cmd) = waiting.take().or_else(|| rx.try_recv().ok()) {
@@ -940,7 +1063,7 @@ fn run(
             // 无缝换曲边界：本曲尾巴播到，`next` 转正（输出停摆时立即
             // 转正——反正也播不出位置偏差）。
             if l.boundary.is_some()
-                && (out.stream.is_none()
+                && (out.sink.is_none()
                     || shared.played.load(Ordering::Relaxed) >= l.boundary.unwrap_or(0))
             {
                 complete_switch(l, &shared, &media);
@@ -962,7 +1085,7 @@ fn run(
                 }
                 track_done = playing
                     && (len == 0
-                        || out.stream.is_none()
+                        || out.sink.is_none()
                         || drain.since.elapsed() > Duration::from_secs(1));
             }
             // 播放统计：越过阈值的那一刻记一次（不等播完——中途退出也不丢
@@ -2164,7 +2287,7 @@ mod tests {
     #[test]
     fn device_target_never_exceeds_capacity() {
         let out = Output {
-            stream: None,
+            sink: None,
             rate: 192_000,
             channels: 8,
             running: false,

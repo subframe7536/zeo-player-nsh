@@ -53,6 +53,7 @@ ZeoPlayer is a local-first desktop music player written as a pure-Rust NSH (Nati
   ```
   标题栏 logo 直接嵌 `icon.svg`（`ui::components::icons::logo_svg`）。换图标改 `icon.svg` 并重渲染两张 PNG。
 - 引擎停着时把 cpal 输出流也停下（`audio.rs` 的 `sync_stream` 让 `Output.running` 跟随 `playing`）：省空闲 CPU，且让 Windows 音频会话如实呈非活动态。改动输出流生命周期（`open_output`、重建、重试）时保持这个跟随——重建出的流若在暂停态要立即 `pause()`。
+- 没有可用输出设备时 `Output.sink` 落 `Sink::Null` 空输出兜底（`NullSink` 线程按设备节拍从环形缓冲取数，`output_callback` 照常走——位置、播放统计与无缝换曲边界全部按真实时间推进；无声卡机器与 CI 上播放通路仍可用，只是不出声）。`retry_at` 每秒 `probe_stream` 探真设备，探到后 `restore_after_rebuild` 按原位置接流出声。`pause_on_device_change` / `Lost` 事件的暂停语义不受影响——暂停时 `sync_stream` 把空输出的取数也停下。
 - 曲间无缝：本曲解码到尾时引擎立刻 `prefetch_next`（打开下一首的解码器 / 重采样 / 元数据快照），记下「当前已播帧数 + 缓冲余量」为 `boundary`，接着把下一首的样本推进同一环形缓冲；`played` 数到边界时 `complete_switch` 把 `next` 转正（`played`/`listened` 原子减去边界续成新曲位置）。seek / 停止 / 队列变更 / 循环模式变更一律 `reset_buffers` 丢预取（位置或顺序变了边界就不算）。预取失败退回 `drain` 排空再 `load_track` 的老路，错误 UX 不变。输出回调另有一条 `starved` 欠载沿软化（~2ms 淡入 / 淡出），缓冲断档时不再出硬零沿爆音。
 - EQ（`engine/eq.rs`）：RBJ peaking biquad ×10，`configure` 不直接换系数——系数朝目标 ~5ms 线性渐变、滤波器状态不清零，拖推子 / 换预设不爆音；`headroom_db` 按各段合成幅频响应峰值折算进前级，纯提升配置不再无谓削波；输入侧做非规格化数冲刷。回调侧靠 `eq_gen` 代次发现配置变更，`try_lock` 读配置（拿不到就下一块再读），实时路径不阻塞。
 - 托盘左键（`window.rs`）：`Click{Left,Up}` 直接推 `TrayAction::Toggle` → `store::toggle()`（记 `intent` + 发引擎命令），单击即时 toggle——不做双击判别，快速双击 = 两次 toggle（净状态不变，Windows 的 `DblClk` 事件忽略）。显示窗口走菜单「显示 Zeo Player」。应用内播放键 / 托盘字形 / 行图标的 `playing` 读侧统一走 `store::shown_playing()`：`intent` 优先、回落引擎轮询态；`intent` 存**截止时刻**（`INTENT_TTL_MS` 往返余量，没兑现就回落——比如没有可播曲目）；快速连点按意图取反。

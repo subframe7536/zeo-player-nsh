@@ -1557,20 +1557,41 @@ fn home_recent_shelf_scrolls_horizontally() {
     app.scroll("id:home-recent-shelf", px(300.0))
         .expect("卡条应能横向滚动");
     // 翻页钮一次滚近一屏：右翻后左翻解禁，回到起点再禁用。
-    app.press("label:往后翻").unwrap();
-    app.wait_until(
-        "右翻后「往前翻」应解禁",
-        Duration::from_secs(5),
-        |s| s.enabled("label:往前翻") == Ok(true),
-    )
-    .unwrap();
-    app.press("label:往前翻").unwrap();
-    app.wait_until(
-        "回翻后「往前翻」应禁用",
-        Duration::from_secs(5),
-        |s| s.enabled("label:往前翻") == Ok(false),
-    )
-    .unwrap();
+    // 并行用例会经共享曲库 / 播放记录触发本节重建——按压若落在重建间隙
+    // 的已卸载节点上就丢了（或按下时按钮暂时不存在）：按到解禁为止。
+    let mut paged = false;
+    for _ in 0..10 {
+        let _ = app.press("label:往后翻");
+        if app
+            .wait_until(
+                "右翻后「往前翻」应解禁",
+                Duration::from_secs(2),
+                |s| s.enabled("label:往前翻") == Ok(true),
+            )
+            .is_ok()
+        {
+            paged = true;
+            break;
+        }
+    }
+    assert!(paged, "右翻后「往前翻」应解禁: {:?}", texts(&app));
+    // 回翻同样可能被重建间隙吃掉按压，照上法重试。
+    let mut back = false;
+    for _ in 0..10 {
+        let _ = app.press("label:往前翻");
+        if app
+            .wait_until(
+                "回翻后「往前翻」应禁用",
+                Duration::from_secs(2),
+                |s| s.enabled("label:往前翻") == Ok(false),
+            )
+            .is_ok()
+        {
+            back = true;
+            break;
+        }
+    }
+    assert!(back, "回翻后「往前翻」应禁用: {:?}", texts(&app));
     // 拉宽到全放下 → 翻页钮消失。
     app.set_viewport(size(px(2200.0), px(900.0))).unwrap();
     app.wait_until("放宽后翻页钮应收起", Duration::from_secs(5), |s| {

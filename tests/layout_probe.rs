@@ -50,6 +50,10 @@ fn isolate() -> bool {
 
 fn start(width: f32, height: f32) -> Headless {
     isolate();
+    // 侧栏视图是全局持久化状态：同进程跑过的用例可能把它留在
+    // 「文件夹」/「标签」——每个实例起前统一收回歌单，别继承上一个的残局。
+    zeo_player::config::library_store()
+        .set_sidebar_section(zeo_player::config::SidebarSection::Playlists);
     let theme = nsh_base::Theme::from_json(include_str!("../theme.json")).expect("theme.json");
     let mut config = EngineConfig::new(Root::of::<App>().tokens(theme.into_tokens()));
     config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];

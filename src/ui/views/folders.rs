@@ -1241,9 +1241,12 @@ pub fn Folders() -> impl IntoElement {
     let selected_paths = signal(BTreeSet::<String>::new());
     let anchor_path = signal(None::<String>);
 
-    // 切换文件夹时清空过滤条件并收起筛选，清空选择状态
+    // 切换文件夹时清空过滤条件并收起筛选，清空选择状态。只在所在文件夹
+    // 换身份时复位：同一文件夹的内容刷新（重扫、树里别的节点增删、并行
+    // 用例动共享语料）不收筛选、不清选择。
+    let here_path = computed(move || here.with(|p| p.path.clone()));
     effect(move || {
-        let _ = here.get();
+        let _ = here_path.get();
         filter_conditions.set(vec![Condition::default()]);
         match_all.set(true);
         filter_open.set(false);
@@ -1521,11 +1524,9 @@ pub fn Folders() -> impl IntoElement {
                                 return;
                             };
                             let p = t.path.clone();
-                            let toggle = if cfg!(target_os = "macos") {
-                                e.modifiers.cmd || e.modifiers.ctrl
-                            } else {
-                                e.modifiers.ctrl
-                            };
+                            // macOS 按 Cmd、其余按 Ctrl，两个都认（无头测试
+                            // 的 `mod` 按 environment.os 映射，跟编译平台无关）。
+                            let toggle = e.modifiers.cmd || e.modifiers.ctrl;
                             let range = e.modifiers.shift;
 
                             if range {

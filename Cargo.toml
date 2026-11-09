@@ -62,3 +62,15 @@ dispatch2 = "0.3"
 [dev-dependencies]
 nsh-engine = "0.4.0"
 nsh-testing = { version = "0.4.0", default-features = false }
+
+# 测试构建（cargo test / nsh test 走 test profile，继承 dev）：无头 UI 测试
+# 的时间大头在依赖代码（引擎提交、布局、图像 / 标签解码）——依赖编 O2
+# 明显省时；本 crate 只到 O1，迭代重编代价小。行号级调试信息砍掉变量
+# 数据：PDB 小、MSVC 链接与 Windows 杀软扫描都快一截。
+# release profile 在 .cargo/config.toml（含 opt-s / lto）。
+[profile.test]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.test.package."*"]
+opt-level = 2
