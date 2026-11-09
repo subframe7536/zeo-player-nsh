@@ -441,6 +441,32 @@ pub fn install() -> Store {
         }
     });
 
+    // 「记住窗口大小和位置」：placement 走 NSH——启动后第一次拿到窗口状态
+    // 时恢复上次存的（`set_placement` 会按现在的显示器校正）；之后平台
+    // 每次上报的位置变化写回配置。`state` 在焦点变化等不动位置的时候也
+    // 重报，与已存值比对去重（`window_placement` 是非信号的直读，本效果
+    // 只订阅窗口状态 memo）。
+    let win = nsh_core::element::desktop::main_window();
+    let restored = stored(false);
+    effect(move || {
+        let Some(state) = win.state() else {
+            return;
+        };
+        if !restored.replace(true) {
+            if crate::window::remembered()
+                && let Some(saved) = library_store().window_placement()
+            {
+                win.set_placement(saved);
+            }
+            return;
+        }
+        if crate::window::remembered()
+            && library_store().window_placement() != Some(state.placement)
+        {
+            library_store().set_window_placement(state.placement);
+        }
+    });
+
     // 托盘图标与菜单跟着当前曲目与播放状态（memo 拦掉进度刷新：订阅整个
     // playback 信号会让 effect 每 100ms 都跑一次 format! + 通道 +
     // SetMenuItemInfoW；平台侧 apply 还有一层按 TrayState 的重复过滤）。

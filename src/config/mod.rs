@@ -350,22 +350,11 @@ pub struct LibraryConfig {
     /// 重新打开时恢复上次的窗口大小与位置。
     #[serde(default = "default_true")]
     pub remember_frame: bool,
-    /// 上次窗口的常规位置与大小（Windows 的 `SetWindowPlacement` 用；
-    /// macOS 走系统自己的 frame 自动保存，不写字段）。
+    /// 上次窗口的常规位置与大小（NSH 的 `WindowPlacement`：模式 + 常规
+    /// 边界，点；恢复时经 `WindowRef::set_placement` 按现有显示器校正）。
+    /// 旧版的 `window_frame` 字段读取时忽略。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub window_frame: Option<SavedFrame>,
-}
-
-/// 持久化的窗口位置（屏幕像素）。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SavedFrame {
-    pub x: i32,
-    pub y: i32,
-    pub w: i32,
-    pub h: i32,
-    /// 关闭时是最大化的。
-    #[serde(default)]
-    pub maximized: bool,
+    pub window_placement: Option<nsh_core::desktop::WindowPlacement>,
 }
 
 fn default_fade_ms() -> u32 {
@@ -423,7 +412,7 @@ impl Default for LibraryConfig {
             replaygain: crate::engine::audio::ReplayGainConfig::default(),
             eq: crate::engine::eq::EqConfig::default(),
             remember_frame: true,
-            window_frame: None,
+            window_placement: None,
         }
     }
 }
@@ -859,27 +848,25 @@ impl LibraryStore {
         self.update_config(|c| {
             c.remember_frame = on;
             if !on {
-                c.window_frame = None;
+                c.window_placement = None;
             }
         });
         crate::window::set_remember_frame(on);
     }
 
     /// 上次的窗口位置（`remember_frame` 开着时才有意义）。
-    #[cfg(target_os = "windows")]
-    pub fn window_frame(&self) -> Option<SavedFrame> {
-        self.config().window_frame
+    pub fn window_placement(&self) -> Option<nsh_core::desktop::WindowPlacement> {
+        self.config().window_placement
     }
 
-    /// 记录当前窗口位置（Windows 的 `WM_EXITSIZEMOVE` / 退出时调用）。
-    #[cfg(target_os = "windows")]
-    pub fn set_window_frame(&self, frame: SavedFrame) {
+    /// 记录当前窗口位置（界面侧的窗口状态效果在上报变化时调用）。
+    pub fn set_window_placement(&self, placement: nsh_core::desktop::WindowPlacement) {
         let mut guard = self.config.lock().unwrap();
         if !guard.remember_frame {
             return;
         }
         let mut config = (**guard).clone();
-        config.window_frame = Some(frame);
+        config.window_placement = Some(placement);
         self.save_config(&config);
         *guard = Arc::new(config);
     }

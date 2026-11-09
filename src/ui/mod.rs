@@ -12,8 +12,8 @@ mod views;
 use std::rc::Rc;
 
 use nsh_core::ContextMenuEvent;
-use nsh_core::desktop::TitleBarStyle;
-use nsh_core::element::desktop::set_title_bar;
+use nsh_core::desktop::{TitleBarOptions, TitleBarStyle, WindowAttributes};
+use nsh_core::element::desktop::{current_window, main_window};
 use nsh_core::prelude::*;
 
 use theme::*;
@@ -43,7 +43,25 @@ pub fn App() -> impl IntoElement {
     // 幂等，防不走 `native()` 的挂载路径。
     crate::single_instance::enforce();
     let s = store::install();
-    set_title_bar(TitleBarStyle::Hidden, Some(px(TITLE_BAR)));
+    let mut title_bar = TitleBarOptions::default();
+    title_bar.style = TitleBarStyle::Hidden;
+    title_bar.height = Some(px(TITLE_BAR));
+    let mut attributes = WindowAttributes::default();
+    attributes.title_bar = Some(title_bar);
+    attributes.min_size = Some(Some(size(
+        px(crate::window::MIN_WIDTH),
+        px(crate::window::MIN_HEIGHT),
+    )));
+    // 点关闭不直接关窗：先到 `close_requested`（询问 / 最小化到托盘时窗口
+    // 留着），真要退出经 `desktop::quit`（与 Cmd+Q / 退出菜单同一条收尾
+    // 路径，不再回到这里）。
+    attributes.close_on_press = Some(false);
+    current_window().set(attributes);
+    main_window().on_close_press(|_| {
+        if crate::window::close_requested() {
+            nsh_core::element::desktop::quit();
+        }
+    });
     #[cfg(target_os = "windows")]
     frame::caption::install();
     on_key("space", |_| store::toggle());

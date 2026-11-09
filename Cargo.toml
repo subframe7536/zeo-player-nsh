@@ -7,10 +7,11 @@ publish = false
 [workspace]
 
 [dependencies]
-# NSH：与 nsh CLI 同版本（nsh --version），dev-dependencies 里的 nsh-engine / nsh-testing 一起改。
+# NSH：跟 nightly 频道（nsh update nightly），rev 与 `nsh --version` 括号里的提交一致，
+# dev-dependencies 里的 nsh-engine / nsh-testing 一起改。nightly 不发 crates.io，走 git。
 # 见 https://nsh.dev/docs/installation
-nsh-core = { version = "0.4.0", features = ["svg"] }
-nsh-base = "0.4.0"
+nsh-core = { git = "https://github.com/longbridge/nsh", rev = "36b91689c1e7c38379179a56381de7ddab16c6a5", features = ["svg"] }
+nsh-base = { git = "https://github.com/longbridge/nsh", rev = "36b91689c1e7c38379179a56381de7ddab16c6a5" }
 
 # 音频：解码、输出、重采样、系统媒体会话。
 symphonia = { version = "0.6", features = ["mp3", "flac", "wav", "aac", "alac", "isomp4", "ogg", "vorbis", "aiff"] }
@@ -51,7 +52,7 @@ tray-icon = "0.26"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 windows = { version = "0.62", features = ["Foundation", "Media", "Storage", "Storage_Streams", "Win32_Foundation", "Win32_System_WinRT"] }
 
-# macOS：替换窗口代理的 windowShouldClose:，在主线程上调度。
+# macOS：窗口显示 / 隐藏、Dock 重开与单实例通知的代理挂钩、托盘，在主线程上调度。
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSRunningApplication", "NSWindow", "NSResponder"] }
@@ -60,8 +61,8 @@ dispatch2 = "0.3"
 
 # 界面测试（tests/ui.rs）：无头引擎运行根组件，不带 QuickJS。
 [dev-dependencies]
-nsh-engine = "0.4.0"
-nsh-testing = { version = "0.4.0", default-features = false }
+nsh-engine = { git = "https://github.com/longbridge/nsh", rev = "36b91689c1e7c38379179a56381de7ddab16c6a5" }
+nsh-testing = { git = "https://github.com/longbridge/nsh", rev = "36b91689c1e7c38379179a56381de7ddab16c6a5", default-features = false }
 
 # 测试构建（cargo test / nsh test 走 test profile，继承 dev）：无头 UI 测试
 # 的时间大头在依赖代码（引擎提交、布局、图像 / 标签解码）——依赖编 O2

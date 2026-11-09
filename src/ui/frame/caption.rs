@@ -7,8 +7,8 @@
 //! Default：它不再画按钮，窗口外观不变，按钮由这里画。没有 Snap 布局
 //! （鼠标停在最大化按钮上弹出的贴靠面板），Win + Z 仍可用。
 
-use nsh_core::desktop::TitleBarStyle;
-use nsh_core::element::desktop::set_title_bar;
+use nsh_core::desktop::{TitleBarOptions, WindowAttributes};
+use nsh_core::element::desktop::current_window;
 use nsh_core::prelude::*;
 
 use super::super::components::icons::{Icon, icon_dyn};
@@ -26,11 +26,15 @@ struct Own(bool);
 /// 等窗口子类化完成，再切换标题栏样式、显示应用的按钮。
 pub fn install() {
     let own = global::<Own>();
+    // `current_window()` 要在渲染里取（找树的窗口），句柄带进任务里用。
+    let win = current_window();
     spawn(async move {
         // 窗口建好后约 200 ms 内子类化；之前仍是 NSH 自己画的按钮。
         for _ in 0..300 {
             if crate::window::caption_ready() {
-                set_title_bar(TitleBarStyle::Default, None);
+                let mut attributes = WindowAttributes::default();
+                attributes.title_bar = Some(TitleBarOptions::default());
+                win.set(attributes);
                 own.set(Own(true));
                 return;
             }

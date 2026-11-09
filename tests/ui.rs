@@ -441,8 +441,11 @@ fn lyrics_offset_global_saves() {
     }
     assert!(opened, "偏移弹层应打开");
     assert!(has(&app, "0s"), "每曲偏移不应受影响");
-    // 共享全局配置，用例结束前恢复 0。
+    // 共享全局配置，用例结束前恢复 0。等全屏淡出完再点侧栏（淡出中的
+    // 覆盖层仍画在「设置」上，新版 nsh-testing 会判遮挡）。
     app.press("label:收起").unwrap();
+    app.wait_for_gone("label:收起", Duration::from_secs(2))
+        .unwrap();
     app.press("设置").unwrap();
     app.press("id:settings-nav >> role:button[歌词]").unwrap();
     app.wait_for("label:全局歌词偏移").unwrap();
@@ -740,7 +743,10 @@ fn folders_page_shows_tree_and_files() {
 /// 文件夹页：列表支持单选与多选（Cmd/Ctrl+单击切换、Shift+单击范围选择）。
 #[test]
 fn folders_page_selection_and_multi_selection() {
-    let mut app = start(1200.0, 800.0);
+    // 也改共享的 playlists.json：与 playlists_manual_and_smart 互相覆盖
+    // （各自存整表），并行跑会丢另一方的写入——全程持锁串行。
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
@@ -1276,10 +1282,12 @@ fn queue_panel_opens_from_the_player_bar() {
 }
 
 /// 歌单：新建手动歌单、右键把曲目加进去、从歌单移除；新建智能歌单并看
-/// 实时匹配数；删除前确认。（歌单文件在共享的数据目录里，只在这一个用例里改。）
+/// 实时匹配数；删除前确认。（歌单文件在共享的数据目录里，folders 用例
+/// 也写它——持锁与它会合，避免整表保存互相覆盖。）
 #[test]
 fn playlists_manual_and_smart() {
-    let mut app = start(1200.0, 800.0);
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
     let corpus = isolate();
     assert!(has(&app, "歌单"), "{:?}", texts(&app));
 
@@ -1886,4 +1894,28 @@ fn metadata_narrow_window_layout() {
     app.press("label:取消选择").unwrap();
     app.wait_for_gone("label:标题", Duration::from_secs(2))
         .unwrap();
+}
+
+/// 点窗口的关闭按钮：平台把按压报给 `App()` 的 `on_close_press`（
+/// `close_on_press(false)` 下不直接关），走 `close_requested`——默认
+/// 「每次询问」弹出选择而窗口不动；选「最小化到托盘」后窗口隐藏
+/// （`s.hidden` 卸载 shell）而窗口对象与引擎都在。
+#[test]
+fn window_close_press_asks_then_hides_to_tray() {
+    let mut app = start(1440.0, 900.0);
+    let store = zeo_player::config::library_store();
+    store.set_close_action(zeo_player::config::CloseAction::Ask);
+    app.press_window_close("main").unwrap();
+    app.wait_for("关闭窗口").unwrap();
+    // 询问时窗口内容原样留着。
+    assert!(app.shows("首页"), "ask: window keeps its contents");
+    app.press("最小化到托盘").unwrap();
+    app.wait_for_gone("首页", Duration::from_secs(5)).unwrap();
+    // 已记住托盘：再点直接隐藏；窗口对象仍在——是拦截不是退出。
+    app.press_window_close("main").unwrap();
+    assert!(
+        app.window_state("main").unwrap().is_some(),
+        "tray close must keep the window alive"
+    );
+    store.set_close_action(zeo_player::config::CloseAction::Ask);
 }
