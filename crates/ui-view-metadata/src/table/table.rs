@@ -33,13 +33,13 @@ pub(crate) fn table(
                 c.resizable = Some(false);
                 c.fixed = *key == "file_name";
                 if *key == "file_name" {
-                    // sticky 固定文件名列：右边框颜色加深（border-foreground/25，
-                    // 显著深于普通网格线的 border-border/50），保证与滚动列分界清晰。
-                    // 普通省略已由 classes.cell 与 classes.header_cell 统一处理。
+                    // sticky 固定文件名列：列级右边框（与其余网格线同色的
+                    // border-input）。普通省略已由 classes.cell 与
+                    // classes.header_cell 统一处理。
                     c.header_class = Some(SharedString::from(
-                        "bg-card border-r border-foreground/25 font-medium",
+                        "bg-card border-r border-input font-medium",
                     ));
-                    c.cell_class = Some(SharedString::from("border-r border-foreground/25"));
+                    c.cell_class = Some(SharedString::from("border-r border-input"));
                 }
                 // 其余列保持 None，不设多余列级覆盖，消除拖拽改列宽时逐格的字串拼接与堆分配开销。
                 defs.push(c);
@@ -113,22 +113,19 @@ pub(crate) fn table(
     };
 
     let mut classes = DataTableClasses::default();
-    // sticky 表头：底边框颜色（border-b border-foreground/25）
-    classes.header = Some(SharedString::from("bg-card border-b border-foreground/25"));
+    // 全部网格线与工具栏输入框同色（border-input）：sticky 表头底线、
+    // 单元格列分隔、行体行分隔统一一个颜色。
+    classes.header = Some(SharedString::from("bg-card border-b border-input"));
     classes.header_content = Some(SharedString::from("h-full self-stretch"));
-    // 表头单元格：竖向分隔网格线（border-r border-border/50）
     classes.header_cell = Some(SharedString::from(
-        "text-muted-foreground font-medium border-r border-border/50",
+        "text-muted-foreground font-medium border-r border-input",
     ));
-    // 普通单元格：竖向分隔网格线（border-r border-border/50）
-    classes.cell = Some(SharedString::from("px-3 border-r border-border/50"));
+    classes.cell = Some(SharedString::from("px-3 border-r border-input"));
     // 不设 fixed_edge：上游在固定列后缘叠画两条 1pt 分隔（表体一条 +
-    // 固定区逐行各一条，view.rs `edge()`），与固定列单元格自身的
-    // border-r border-foreground/25 连叠后比表头底线明显深。固定列分隔
-    // 只留列级 cell_class / header_class 那条 border-r border-foreground/25，
-    // 与表头底线（border-foreground/25）同深。
-    // 行体：横向分隔网格线（border-b border-border/50）
-    classes.row = Some(SharedString::from("border-b border-border/50"));
+    // 固定区逐行各一条，view.rs `edge()`），会与固定列单元格自身的
+    // border-r 连叠变深。固定列分隔只留列级 cell_class / header_class
+    // 那条 border-r border-input。
+    classes.row = Some(SharedString::from("border-b border-input"));
     classes.row_hover = Some(SharedString::from("bg-accent/40"));
 
     let guide_line_x = signal(Option::<f32>::None);

@@ -1,20 +1,38 @@
 use super::*;
 
 /// 左栏顶部的搜索框（外观同主侧栏的搜索框；有词时出现清空按钮）。
-/// `trailing` 是挂在最右端的附加件（快捷键页用它放「按键搜索」）。
-pub(crate) fn search_box(query: Signal<String>, trailing: Option<AnyElement>) -> View {
+/// `trailing` 是挂在最右端的附加件（快捷键页用它放「按键搜索」）；
+/// `accent` 为真时整框变主色高亮（快捷键录制键盘输入的反馈）。
+pub(crate) fn search_box(
+    query: Signal<String>,
+    trailing: Option<AnyElement>,
+    accent: impl Fn() -> bool + Copy + 'static,
+) -> View {
     let empty = move || query.with(String::is_empty);
     view()
         .h(px(28.0))
         .flex_row()
         .items_center()
         .pl(px(10.0))
-        .pr(px(1.0))
+        .pr(px(4.0))
         .rounded(px(14.0))
         .border_1()
-        .border_color(border())
-        .bg(move || bg())
-        .child(icon(Icon::Search, 13.0, faint).flex_shrink_0())
+        .border_color(move || if accent() { primary() } else { border() })
+        .bg(move || {
+            if accent() {
+                primary().opacity(0.12)
+            } else {
+                bg()
+            }
+        })
+        .transition_colors()
+        .duration(150.0)
+        .child(
+            icon(Icon::Search, 13.0, move || {
+                if accent() { primary() } else { faint() }
+            })
+            .flex_shrink_0(),
+        )
         .child(
             input()
                 .flex_1()
@@ -155,7 +173,7 @@ pub(crate) fn nav_column(pane: Signal<Pane>, query: Signal<String>) -> View {
         .transition_colors()
         .duration(300.0)
         .test_id("settings-nav")
-        .child(view().p(px(10.0)).child(search_box(query, None)))
+        .child(view().p(px(10.0)).child(search_box(query, None, || false)))
         .child(
             scroll()
                 .flex_1()

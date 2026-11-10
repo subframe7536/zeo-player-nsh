@@ -287,7 +287,7 @@ pub fn page() -> View {
                                 .min_w(px(0.0))
                                 .rounded(px(12.0))
                                 .border_1()
-                                .border_color(border())
+                                .border_color(nsh_base::theme().input)
                                 .bg(nsh_base::theme().card)
                                 .shadow_xs()
                                 .overflow_hidden()

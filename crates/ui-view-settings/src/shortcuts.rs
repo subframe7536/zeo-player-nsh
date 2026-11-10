@@ -4,7 +4,6 @@
 //! 置顶，改掉任一方后原绑定自动恢复。
 
 use std::collections::BTreeSet;
-use std::time::Duration;
 
 use nsh_core::keymap::When;
 use nsh_core::prelude::*;
@@ -16,8 +15,11 @@ use zeo_ui_store::theme::*;
 use zeo_ui_store::{KeyAction, key_label_of, store};
 
 /// 「按键搜索」录制态的临时绑定：`When::Always` 让输入框聚焦时文本键
-/// 也被录制而不是输进框里；按下的组合键以平台标签（`⌘→` / `Ctrl+→`）
-/// 写回搜索框（一次只录一组键），Esc 取消、Backspace / Delete 清空。
+/// 也被录制而不是输进框里；按下的组合键以带引号的平台标签（`"⌘→"` /
+/// `"Ctrl+→"`）写回搜索框——引号让搜索走键位的等值匹配（一次只录
+/// 一组键），Esc 取消、Backspace / Delete 清空。平台保留键（macOS 的
+/// ⌘Q / ⌘H / ⌘M / ⌃⌘F，Windows 的 Ctrl+Q / Alt+F4 / F11）`on_key`
+/// 绑定即 panic，拦不到，见 upstream.md。
 fn record_search_keys(recording: Signal<bool>, query: Signal<String>) {
     let always = KeyOptions {
         when: When::Always,
@@ -25,7 +27,7 @@ fn record_search_keys(recording: Signal<bool>, query: Signal<String>) {
     };
     for key in zeo_ui_store::capture_candidates() {
         on_key_with(&key, always, move |k| {
-            query.set(key_label(k));
+            query.set(format!("\"{}\"", key_label(k)));
             recording.set(false);
         });
     }
@@ -163,9 +165,12 @@ fn action_row(
         .child(key_pill(action, capture, recording, conflicted))
 }
 
-/// 搜索匹配：标题含词（忽略大小写与分隔符）或键位命中——原始写法
-/// （`mod-right`）、平台标签（`⌘→` / `Ctrl+→`）与 `mod` 的常见叫法
-/// `cmd` / `ctrl` / `command` / `⌘` 都认。
+/// 搜索匹配：标题按子串模糊匹配（忽略大小写与分隔符）；键位走等值
+/// 语义——`"…"` 包住的词（录制回的写法）只与键位等值比较，裸词
+/// 除整组等值外还认尾键等值（`right` 命中 `mod-right` 的尾键，
+/// `⌘a` 却不会误中 `⌥⌘←`）。键位认原始写法（`mod-right`）、平台
+/// 标签（`⌘→` / `Ctrl+→`）与 `mod` 的常见叫法 `cmd` / `ctrl` /
+/// `command` / `⌘`。
 fn action_matches(action: KeyAction, q: &str) -> bool {
     let norm = |s: &str| {
         s.chars()
@@ -173,8 +178,16 @@ fn action_matches(action: KeyAction, q: &str) -> bool {
             .flat_map(char::to_lowercase)
             .collect::<String>()
     };
-    let q = norm(q.trim());
-    if q.is_empty() || norm(action.title()).contains(&q) {
+    let q = q.trim();
+    if q.is_empty() {
+        return true;
+    }
+    let exact = q.len() > 2 && q.starts_with('"') && q.ends_with('"');
+    let nq = norm(q.trim_matches('"'));
+    if nq.is_empty() {
+        return true;
+    }
+    if !exact && norm(action.title()).contains(&nq) {
         return true;
     }
     let key = zeo_ui_store::key_of(action);
@@ -185,7 +198,13 @@ fn action_matches(action: KeyAction, q: &str) -> bool {
     for alias in ["cmd", "ctrl", "command", "⌘"] {
         hay.push(key.replacen("mod", alias, 1));
     }
-    hay.iter().any(|h| norm(h).contains(&q))
+    hay.iter().any(|h| {
+        norm(h) == nq
+            || (!exact
+                && h.rsplit(|c: char| matches!(c, '+' | '-' | ' '))
+                    .next()
+                    .is_some_and(|tail| !tail.is_empty() && norm(tail) == nq))
+    })
 }
 
 fn group_block(
@@ -251,47 +270,28 @@ pub(crate) fn shortcuts_section() -> View {
                 .any(|a| m.get(a).is_some_and(|k| k != a.default_key()))
         })
     };
-    // 二次确认：第一下进 3 秒确认态（红色「确认还原？」），再点执行；
-    // 超时或执行后退回。`stamp` 令牌让过期的定时器不取消新一轮确认。
-    let confirming = signal(false);
-    let stamp = signal(0u32);
+    // 还原前弹系统确认框（同删除歌单的确认路径），确认才清覆盖表。
     let reset = view()
         .opacity(move || if dirty() { 1.0f32 } else { 0.4f32 })
-        .child(dynamic(move || {
-            if confirming.get() {
-                text_button(
-                    Variant::Destructive,
-                    Size::Sm,
-                    None,
-                    "确认还原？",
-                    move || {
-                        stamp.update(|g| *g += 1);
-                        confirming.set(false);
+        .child(text_button(
+            Variant::Outline,
+            Size::Sm,
+            None,
+            "还原默认",
+            move || {
+                let answer = nsh_base::alert_dialog()
+                    .title("还原默认快捷键？")
+                    .description("所有自定义键位都会被清除，恢复为默认绑定。")
+                    .cancel("cancel", "取消")
+                    .destructive("reset", "还原")
+                    .show();
+                spawn(async move {
+                    if answer.await.map(|r| r.action) == Ok(Some("reset".into())) {
                         zeo_ui_store::reset_keybinds();
-                    },
-                )
-                .into_element()
-            } else {
-                text_button(
-                    Variant::Outline,
-                    Size::Sm,
-                    None,
-                    "还原默认",
-                    move || {
-                        confirming.set(true);
-                        let g = stamp.get() + 1;
-                        stamp.set(g);
-                        spawn(async move {
-                            timer(Duration::from_secs(3)).await;
-                            if stamp.get() == g {
-                                confirming.set(false);
-                            }
-                        });
-                    },
-                )
-                .into_element()
-            }
-        }));
+                    }
+                });
+            },
+        ));
     // 顶部一行：搜索框吃剩余空间（标题与键位都能搜），「还原默认」居右。
     // 框尾的键盘图标是「按键搜索」：点它进录制态（图标变主色），按下的
     // 组合键自动填回搜索框；再点一下、Esc 或开始改绑都会退出录制。
@@ -312,7 +312,7 @@ pub(crate) fn shortcuts_section() -> View {
         .items_center()
         .gap(px(8.0))
         .child(
-            search_box(query, Some(record.into_element()))
+            search_box(query, Some(record.into_element()), move || recording.get())
                 .flex_1()
                 .min_w(px(0.0)),
         )
@@ -352,15 +352,12 @@ pub(crate) fn shortcuts_section() -> View {
         .w_full()
         .gap(px(16.0))
         .child(
-            view()
-                .gap(px(8.0))
-                .child(head)
-                .child(
-                    text("macOS 上 ⌘ 为 Command、⌥ 为 Option；Windows 上对应为 Ctrl / Alt。文本框聚焦时，会输入文本的键位不触发快捷键。")
-                        .text_size(px(12.0))
-                        .line_height(px(12.0))
-                        .text_color(muted_fg()),
-                ),
+            view().gap(px(8.0)).child(head).child(
+                text("⌘ / ⌥ 对应 Windows 的 Ctrl / Alt；输入框内打字不触发快捷键。")
+                    .text_size(px(12.0))
+                    .line_height(px(12.0))
+                    .text_color(faint()),
+            ),
         )
         .child(list)
         .child(recorder)

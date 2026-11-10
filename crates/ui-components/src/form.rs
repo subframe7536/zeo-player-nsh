@@ -20,8 +20,12 @@ pub const RADIUS_LG: f32 = 10.0;
 /// 封面染色，透明或半透明的底会把染色带进输入框。`small` 为 `h-8`
 /// （放在一行条件里）。
 ///
-/// 返回的是样式壳（View），内部的裸 `input()` 交给 `build` 定制
-/// （`value` / `on_change` / `placeholder` / 无障碍标签都挂它上面）。
+/// 返回的是样式壳外面的 group 包装（View），内部的裸 `input()` 交给
+/// `build` 定制（`value` / `on_change` / `placeholder` / 无障碍标签
+/// 都挂它上面）。壳 `flex_1` 在列方向的包装里填满、自身只保
+/// `min_h`（`h_full` 对 auto 高的父级解析成 auto、填不进 min_h 撑出
+/// 的空间）：调用方链在包装上的 `h` / `min_h` / `max_h`（多行歌词框
+/// 的 220、自适应上限）因此真正落到壳与输入框上。
 /// 文字缩进走壳的 `pl`：input 自身的横向 padding 在失焦时被平台忽略
 /// （`InputContent` 未到前按整框画，见 upstream.md），壳包一层才两个
 /// 状态一致。焦点环经 `group-focus-within` 给壳。
@@ -30,11 +34,12 @@ pub fn input_field(small: bool, build: impl FnOnce(Input) -> Input) -> View {
     let (input_c, ring) = (t.input, t.ring);
     view().group().child(
         view()
-            .h(px(if small { 32.0 } else { 36.0 }))
+            .w_full()
+            .flex_1()
+            .min_h(px(if small { 32.0 } else { 36.0 }))
             .flex_row()
             .items_center()
-            .pl(px(12.0))
-            .pr(px(4.0))
+            .px(px(8.0))
             .rounded(px(RADIUS_MD))
             .border_1()
             .border_color(input_c)

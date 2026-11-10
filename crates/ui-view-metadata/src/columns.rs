@@ -69,7 +69,7 @@ pub(crate) fn column_selector(visible_cols: Signal<BTreeSet<String>>) -> AnyElem
         .px(px(10.0))
         .rounded(px(RADIUS_MD))
         .border_1()
-        .border_color(border())
+        .border_color(nsh_base::theme().input)
         .cursor_pointer()
         .window_drag(false)
         .bg(move || {
