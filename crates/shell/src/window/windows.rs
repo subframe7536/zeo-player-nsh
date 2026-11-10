@@ -10,24 +10,22 @@ use windows_sys::Win32::Graphics::Dwm::{
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use windows_sys::Win32::System::Memory::{GetProcessHeap, HeapCompact};
 use windows_sys::Win32::System::Threading::{
-    AttachThreadInput, GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId,
-    SetProcessWorkingSetSize, TerminateProcess,
+    GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId, SetProcessWorkingSetSize,
+    TerminateProcess,
 };
 use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, CallNextHookEx, CallWindowProcW, DefWindowProcW, DispatchMessageW,
-    EnumWindows, GW_OWNER, GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect,
-    GetForegroundWindow, GetMessageW, GetWindow, GetWindowLongPtrW, GetWindowThreadProcessId,
-    HTTOP, HTTOPLEFT, HTTOPRIGHT, IsIconic, IsWindowVisible, IsZoomed, KBDLLHOOKSTRUCT, MSG,
-    NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW, PostMessageW, PostThreadMessageW, SC_MAXIMIZE,
-    SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME, SW_HIDE, SW_RESTORE, SW_SHOW,
-    SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW, ShowWindowAsync, TranslateMessage,
-    UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_ACTIVATE, WM_CLOSE, WM_DESTROY, WM_KEYDOWN,
-    WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW, WM_SYSCOMMAND, WM_SYSKEYDOWN,
-    WNDPROC, WS_CAPTION, WS_THICKFRAME,
+    CallNextHookEx, CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GW_OWNER,
+    GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect, GetMessageW, GetWindow,
+    GetWindowLongPtrW, GetWindowThreadProcessId, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsZoomed,
+    KBDLLHOOKSTRUCT, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW, PostMessageW,
+    PostThreadMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME,
+    SetWindowLongPtrW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL,
+    WM_ACTIVATE, WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST,
+    WM_SHOWWINDOW, WM_SYSCOMMAND, WM_SYSKEYDOWN, WNDPROC, WS_CAPTION, WS_THICKFRAME,
 };
 
 use crate::tray::TrayState;
@@ -382,11 +380,6 @@ pub fn start() {
         })
         .ok();
 }
-
-/// 显示并提到最前。Windows 只允许前台进程调用 `SetForegroundWindow`
-/// 抢前台（否则只在任务栏闪烁）：托盘菜单的点击已经结束，所以暂时把
-/// 本线程的输入挂到当前前台窗口的线程上，再提前台。窗口由 nsh-ui 线程
-/// 处理显示命令，等它显示出来（最多约 0.5 秒）再提。
 
 pub fn update(state: TrayState) {
     if let Some(tx) = TRAY_TX.get() {
