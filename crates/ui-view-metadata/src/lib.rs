@@ -145,14 +145,13 @@ pub fn page() -> View {
                         .px(move || px(pad_x()))
                         .pb(px(12.0))
                         .child(
-                            input_field(true, |i| {
-                                i.label("筛选")
-                                    .placeholder("筛选文件名、标题、艺术家、专辑")
-                                    .default_value(untracked(|| filter.get()))
-                                    .window_drag(false)
-                                    .on_change(move |t: &str| filter.set(t.to_owned()))
-                            })
-                            .w(move || px(filter_w())),
+                            input_field(true)
+                                .w(move || px(filter_w()))
+                                .label("筛选")
+                                .placeholder("筛选文件名、标题、艺术家、专辑")
+                                .default_value(untracked(|| filter.get()))
+                                .window_drag(false)
+                                .on_change(move |t: &str| filter.set(t.to_owned())),
                         )
                         .child(column_selector(visible_cols))
                         .child(view().flex_1().min_w(px(0.0)).window_drag(true))

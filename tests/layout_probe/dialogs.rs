@@ -74,12 +74,7 @@ fn edit_dialog_layout_probe() {
             .unwrap_or_else(|| panic!("找不到 {label}"))
     };
     const WHITE: u32 = 0xFFFF_FFFF;
-    // 输入框的边框 / 底色在样式壳上（`form::input_field` 的壳包裸
-    // input，见 upstream.md「input 失焦 padding」）：从 label 节点
-    // 取父壳的样式。
-    let input_id = tab_of(&p, "标题");
-    let shell_id = p.parents.get(&input_id).expect("输入框应有父壳");
-    let (input_bg, ..) = p.styles.get(shell_id).copied().expect("输入框壳应有样式");
+    let (input_bg, ..) = style_of("标题");
     assert_eq!(input_bg, WHITE, "输入框底色应为 card 白（不随封面染色）");
     let list_id = *p.parents.get(&tab_of(&p, "基础")).expect("tab 没有父节点");
     let indicator_id = p

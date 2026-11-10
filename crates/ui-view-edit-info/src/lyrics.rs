@@ -48,7 +48,7 @@ pub(crate) fn lyrics_pane(draft: Signal<TagDraft>) -> View {
 
 /// 歌词多行输入：`.lrc` 目标写 `lrc_text` 草稿，内嵌写 `values[Lyrics]`；
 /// 目标切换时重建（各自草稿互不串）。
-pub(crate) fn lyrics_area(draft: Signal<TagDraft>, file: bool) -> View {
+pub(crate) fn lyrics_area(draft: Signal<TagDraft>, file: bool) -> Input {
     let initial = untracked(|| {
         draft.with(|d| {
             if file {
@@ -58,22 +58,21 @@ pub(crate) fn lyrics_area(draft: Signal<TagDraft>, file: bool) -> View {
             }
         })
     });
-    input_field(false, |i| {
-        i.label("歌词")
-            .multiline(true)
-            .py(px(10.0))
-            .default_value(initial)
-            .placeholder("粘贴歌词文本（支持 LRC 时间轴）")
-            .readonly(move || draft.with(|d| d.saving))
-            .on_change(move |t: &str| {
-                draft.update(|d| {
-                    if file {
-                        d.lrc_text = t.to_owned();
-                    } else {
-                        d.values.insert(TagField::Lyrics, t.to_owned());
-                    }
-                })
+    input_field(false)
+        .label("歌词")
+        .multiline(true)
+        .h(px(220.0))
+        .py(px(10.0))
+        .default_value(initial)
+        .placeholder("粘贴歌词文本（支持 LRC 时间轴）")
+        .readonly(move || draft.with(|d| d.saving))
+        .on_change(move |t: &str| {
+            draft.update(|d| {
+                if file {
+                    d.lrc_text = t.to_owned();
+                } else {
+                    d.values.insert(TagField::Lyrics, t.to_owned());
+                }
             })
-    })
-    .h(px(220.0))
+        })
 }

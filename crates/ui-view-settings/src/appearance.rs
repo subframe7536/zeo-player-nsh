@@ -204,25 +204,24 @@ pub(crate) fn accent_section() -> View {
                                 .shadow_xs(),
                         )
                         .child(
-                            input_field(true, |i| {
-                                i.value(move || hex_draft.get())
-                                    .placeholder("#2563EB")
-                                    .label("自定义颜色代码")
-                                    .on_change(move |t: &str| {
-                                        hex_draft.set(t.to_owned());
-                                        let clean = t.trim().trim_start_matches('#');
-                                        if clean.len() == 6 {
-                                            if let Ok(rgb) = u32::from_str_radix(clean, 16) {
-                                                last_custom.set(rgb);
-                                                set_theme_color(ThemeColor::Custom(rgb));
-                                            }
+                            input_field(true)
+                                .w(px(96.0))
+                                .value(move || hex_draft.get())
+                                .placeholder("#2563EB")
+                                .label("自定义颜色代码")
+                                .on_change(move |t: &str| {
+                                    hex_draft.set(t.to_owned());
+                                    let clean = t.trim().trim_start_matches('#');
+                                    if clean.len() == 6 {
+                                        if let Ok(rgb) = u32::from_str_radix(clean, 16) {
+                                            last_custom.set(rgb);
+                                            set_theme_color(ThemeColor::Custom(rgb));
                                         }
-                                    })
-                                    .on_blur(move || {
-                                        hex_draft.set(format!("#{:06X}", active_rgb()));
-                                    })
-                            })
-                            .w(px(96.0)),
+                                    }
+                                })
+                                .on_blur(move || {
+                                    hex_draft.set(format!("#{:06X}", active_rgb()));
+                                }),
                         ),
                 ),
         )

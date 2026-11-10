@@ -34,25 +34,24 @@ pub(crate) fn name_dialog(
     let content = dialog_content(425.0)
         .child(dialog_header(heading, None))
         .child(
-            input_field(false, |i| {
-                i.label("名称")
-                    .auto_focus(true)
-                    .default_value(untracked(|| draft.get()))
-                    .placeholder("名称")
-                    .on_change(move |t: &str| {
-                        draft.set(t.to_owned());
-                        err.set(String::new());
-                    })
-                    .on_submit({
-                        let submit = submit.clone();
-                        move |_: &str| submit()
-                    })
-                    .on_blur({
-                        let submit = submit.clone();
-                        move || submit()
-                    })
-            })
-            .w_full(),
+            input_field(false)
+                .w_full()
+                .label("名称")
+                .auto_focus(true)
+                .default_value(untracked(|| draft.get()))
+                .placeholder("名称")
+                .on_change(move |t: &str| {
+                    draft.set(t.to_owned());
+                    err.set(String::new());
+                })
+                .on_submit({
+                    let submit = submit.clone();
+                    move |_: &str| submit()
+                })
+                .on_blur({
+                    let submit = submit.clone();
+                    move || submit()
+                }),
         )
         .child(
             text(move || err.get())

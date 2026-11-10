@@ -1,9 +1,8 @@
 //! 表单与弹窗的 shadcn/ui 外观：Input、Select 触发器、Dialog 内容、Tabs
-//! 分段。行为来自 nsh-core 的 `input` 与 nsh-base 的 `tabs` / `tab` /
+//! 分段。行为来自 nsh-base 的 `Input` 与 `tabs` / `tab` /
 //! `dialog`；尺寸、间距、圆角同 shadcn，颜色取自主题（浅色 / 深色）。
 
-use nsh_base::{TabElement, TabsElement, tab, tabs};
-use nsh_core::element::{Input, input};
+use nsh_base::{Input, TabElement, TabsElement, input, tab, tabs};
 use nsh_core::prelude::*;
 
 use super::button::RADIUS_MD;
@@ -19,46 +18,24 @@ pub const RADIUS_LG: f32 = 10.0;
 /// 而不是 shadcn 的 `bg-transparent` / `dark:bg-input/30`：面板底色会随
 /// 封面染色，透明或半透明的底会把染色带进输入框。`small` 为 `h-8`
 /// （放在一行条件里）。
-///
-/// 返回的是样式壳外面的 group 包装（View），内部的裸 `input()` 交给
-/// `build` 定制（`value` / `on_change` / `placeholder` / 无障碍标签
-/// 都挂它上面）。壳 `flex_1` 在列方向的包装里填满、自身只保
-/// `min_h`（`h_full` 对 auto 高的父级解析成 auto、填不进 min_h 撑出
-/// 的空间）：调用方链在包装上的 `h` / `min_h` / `max_h`（多行歌词框
-/// 的 220、自适应上限）因此真正落到壳与输入框上。
-/// 文字缩进走壳的 `pl`：input 自身的横向 padding 在失焦时被平台忽略
-/// （`InputContent` 未到前按整框画，见 upstream.md），壳包一层才两个
-/// 状态一致。焦点环经 `group-focus-within` 给壳。
-pub fn input_field(small: bool, build: impl FnOnce(Input) -> Input) -> View {
+pub fn input_field(small: bool) -> Input {
     let t = nsh_base::theme();
     let (input_c, ring) = (t.input, t.ring);
-    view().group().child(
-        view()
-            .w_full()
-            .flex_1()
-            .min_h(px(if small { 32.0 } else { 36.0 }))
-            .flex_row()
-            .items_center()
-            .px(px(8.0))
-            .rounded(px(RADIUS_MD))
-            .border_1()
-            .border_color(input_c)
-            .shadow_xs()
-            .bg(t.card)
-            .group_focus_within(move |st| {
-                st.border_color(ring)
-                    .ring(px(3.0))
-                    .ring_color(ring.opacity(0.5))
-            })
-            .child(build(
-                input()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .h_full()
-                    .text_size(px(14.0))
-                    .text_color(fg()),
-            )),
-    )
+    input()
+        .h(px(if small { 32.0 } else { 36.0 }))
+        .px(px(8.0))
+        .rounded(px(RADIUS_MD))
+        .border_1()
+        .border_color(input_c)
+        .shadow_xs()
+        .text_size(px(14.0))
+        .text_color(fg())
+        .bg(t.card)
+        .focus(move |st| {
+            st.border_color(ring)
+                .ring(px(3.0))
+                .ring_color(ring.opacity(0.5))
+        })
 }
 
 /// shadcn SelectTrigger（`size="sm"`）：`h-8 rounded-md border border-input

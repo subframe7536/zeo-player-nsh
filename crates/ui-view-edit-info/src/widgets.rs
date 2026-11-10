@@ -27,18 +27,17 @@ pub(crate) fn field_row(
             .with(|d| d.values.get(&field).cloned())
             .unwrap_or_default()
     });
-    let input = input_field(false, |i| {
-        i.label(label)
-            .default_value(initial)
-            .auto_focus(auto_focus)
-            .readonly(move || draft.with(|d| d.saving))
-            .on_change(move |t: &str| {
-                draft.update(|d| {
-                    d.values.insert(field, t.to_owned());
-                })
+    let input = input_field(false)
+        .flex_1()
+        .label(label)
+        .default_value(initial)
+        .auto_focus(auto_focus)
+        .readonly(move || draft.with(|d| d.saving))
+        .on_change(move |t: &str| {
+            draft.update(|d| {
+                d.values.insert(field, t.to_owned());
             })
-    })
-    .flex_1();
+        });
     view()
         .flex_row()
         .items_center()
@@ -59,23 +58,22 @@ pub(crate) fn number_input(
     field: TagField,
     draft: Signal<TagDraft>,
     width: f32,
-) -> View {
+) -> Input {
     let initial = untracked(|| {
         draft
             .with(|d| d.values.get(&field).cloned())
             .unwrap_or_default()
     });
-    input_field(false, |i| {
-        i.label(label)
-            .default_value(initial)
-            .readonly(move || draft.with(|d| d.saving))
-            .on_change(move |t: &str| {
-                draft.update(|d| {
-                    d.values.insert(field, t.to_owned());
-                })
+    input_field(false)
+        .w(px(width))
+        .label(label)
+        .default_value(initial)
+        .readonly(move || draft.with(|d| d.saving))
+        .on_change(move |t: &str| {
+            draft.update(|d| {
+                d.values.insert(field, t.to_owned());
             })
-    })
-    .w(px(width))
+        })
 }
 
 /// 年份、音轨号 / 总数（`n/m` 拆成两格）。
