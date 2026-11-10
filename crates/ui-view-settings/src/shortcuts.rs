@@ -1,10 +1,12 @@
 //! 设置 →「快捷键」：全部动作的可自定义键位（覆盖存 `library.json`
 //! 的 `keybinds`，改后立即生效）。点键位胶囊进入捕获态，按下的下一个
-//! 组合键即新绑定；重复的键位顶掉原动作的绑定（它变「未绑定」）。
+//! 组合键即新绑定；撞上已有键位时不顶绑——同键双方都不能触发、红字
+//! 置顶，改掉任一方后原绑定自动恢复。
+
+use std::collections::BTreeSet;
 
 use nsh_core::prelude::*;
 
-use super::setting_section;
 use zeo_ui_components::button::{Size, Variant, text_button};
 use zeo_ui_store::theme::*;
 use zeo_ui_store::{KeyAction, key_label_of, store};
@@ -15,7 +17,7 @@ fn capture_keys(capture: Signal<Option<KeyAction>>) {
     for key in zeo_ui_store::capture_candidates() {
         on_key(&key, move |k| {
             if let Some(action) = capture.get_untracked() {
-                zeo_ui_store::assign_keybind(action, k.to_owned());
+                zeo_ui_store::set_keybind(action, Some(k.to_owned()));
             }
             capture.set(None);
         });
@@ -32,8 +34,8 @@ fn capture_keys(capture: Signal<Option<KeyAction>>) {
 }
 
 /// 一个动作的键位胶囊：常态显示当前键位（未绑定为「未绑定」）；捕获中
-/// 变「按下新快捷键…」。
-fn key_pill(action: KeyAction, capture: Signal<Option<KeyAction>>) -> AnyElement {
+/// 变「按下新快捷键…」；冲突中红框红字。
+fn key_pill(action: KeyAction, capture: Signal<Option<KeyAction>>, conflicted: bool) -> AnyElement {
     let capturing = move || capture.get() == Some(action);
     let label = move || {
         if capturing() {
@@ -52,9 +54,19 @@ fn key_pill(action: KeyAction, capture: Signal<Option<KeyAction>>) -> AnyElement
         .min_w(px(64.0))
         .h(px(26.0))
         .px(px(10.0))
+        .items_center()
+        .justify_center()
         .rounded(px(6.0))
         .border_1()
-        .border_color(move || if capturing() { primary() } else { border() })
+        .border_color(move || {
+            if capturing() {
+                primary()
+            } else if conflicted {
+                like_red()
+            } else {
+                border()
+            }
+        })
         .bg(move || {
             if capturing() {
                 primary().opacity(0.12)
@@ -83,6 +95,8 @@ fn key_pill(action: KeyAction, capture: Signal<Option<KeyAction>>) -> AnyElement
                 .text_color(move || {
                     if capturing() {
                         primary()
+                    } else if conflicted {
+                        like_red()
                     } else if unbound() {
                         faint()
                     } else {
@@ -93,7 +107,7 @@ fn key_pill(action: KeyAction, capture: Signal<Option<KeyAction>>) -> AnyElement
         .into_element()
 }
 
-fn action_row(action: KeyAction, capture: Signal<Option<KeyAction>>) -> View {
+fn action_row(action: KeyAction, capture: Signal<Option<KeyAction>>, conflicted: bool) -> View {
     view()
         .flex_row()
         .items_center()
@@ -106,28 +120,34 @@ fn action_row(action: KeyAction, capture: Signal<Option<KeyAction>>) -> View {
                 .number_of_lines(1)
                 .text_size(px(13.0))
                 .line_height(px(13.0))
-                .text_color(fg()),
+                .text_color(if conflicted { like_red() } else { fg() }),
         )
-        .child(key_pill(action, capture))
+        .child(key_pill(action, capture, conflicted))
 }
 
-fn group_block(name: &'static str, capture: Signal<Option<KeyAction>>) -> View {
-    view()
-        .gap(px(2.0))
-        .child(
-            text(name)
-                .text_size(px(11.0))
-                .line_height(px(11.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(faint())
-                .pb(px(4.0)),
-        )
-        .children(
-            KeyAction::ALL
-                .iter()
-                .filter(|a| a.group() == name)
-                .map(|&a| action_row(a, capture)),
-        )
+fn group_block(
+    name: &'static str,
+    set: &BTreeSet<KeyAction>,
+    capture: Signal<Option<KeyAction>>,
+) -> Option<View> {
+    let rows: Vec<KeyAction> = KeyAction::ALL
+        .iter()
+        .copied()
+        .filter(|a| a.group() == name && !set.contains(a))
+        .collect();
+    (!rows.is_empty()).then(|| {
+        view()
+            .gap(px(2.0))
+            .child(
+                text(name)
+                    .text_size(px(11.0))
+                    .line_height(px(11.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(faint())
+                    .pb(px(4.0)),
+            )
+            .children(rows.iter().map(|&a| action_row(a, capture, false)))
+    })
 }
 
 pub(crate) fn shortcuts_section() -> View {
@@ -156,25 +176,31 @@ pub(crate) fn shortcuts_section() -> View {
         zeo_ui_store::reset_keybinds,
     );
     let reset = view()
+        .flex_row()
+        .justify_end()
         .opacity(move || if dirty() { 1.0f32 } else { 0.4f32 })
         .child(reset);
-    setting_section(
-        "快捷键",
-        "点击键位胶囊后按下新的组合键即可换绑，改后立即生效；重复键位会顶掉原动作的绑定。捕获中按 Backspace 或 Delete 清除绑定、Esc 取消。",
-        Some(reset.into_element()),
-    )
-    .child(
+    // 冲突行顶置 + 各分组（冲突中的动作从原分组拿掉）：`conflicted_
+    // actions` 读 `s.keybinds`，dynamic 订阅它，键位一变即按新归属重排。
+    let list = dynamic(move || {
+        let set = zeo_ui_store::conflicted_actions();
         view()
             .gap(px(16.0))
-            .child(group_block("播放", capture))
-            .child(group_block("界面", capture))
-            .child(group_block("窗口", capture))
-            .child(group_block("全屏播放中", capture)),
-    )
-    .child(
-        text("macOS 上 ⌘ 为 Command、⌥ 为 Option；Windows 上对应为 Ctrl / Alt。文本框聚焦时，会输入文本的键位不触发快捷键。")
-            .text_size(px(12.0))
-            .text_color(muted_fg()),
-    )
-    .child(recorder)
+            .child((!set.is_empty()).then(|| {
+                view()
+                    .gap(px(2.0))
+                    .children(set.iter().map(|&a| action_row(a, capture, true)))
+            }))
+            .children(
+                ["播放", "界面", "窗口", "全屏播放中"]
+                    .iter()
+                    .filter_map(|&g| group_block(g, &set, capture)),
+            )
+    });
+    view()
+        .w_full()
+        .gap(px(16.0))
+        .child(reset)
+        .child(list)
+        .child(recorder)
 }

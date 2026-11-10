@@ -52,16 +52,22 @@ pub fn set_keybind(action: KeyAction, key: Option<String>) {
     refresh_keybinds();
 }
 
-/// 把 `key` 绑给 `action`：已占着这个键的其他动作先标成「未绑定」
-/// （写空串覆盖，不能回默认——默认可能还是这个键，会再撞上）。
-pub fn assign_keybind(action: KeyAction, key: String) {
-    for (a, k) in keybinds_map() {
-        if a != action && k == key {
-            library_store().set_keybind(a.id(), Some(""));
+/// 生效表里握着同一个键（非空）的动作集合：≥2 即冲突。冲突双方键盘
+/// 触发全部取消（`bind_key` 不注册）、设置页红字置顶；改掉任一方后
+/// 剩余动作的绑定自动恢复——冲突只是状态，不动配置。
+pub fn conflicted_actions() -> std::collections::BTreeSet<KeyAction> {
+    store().keybinds.with(|map| {
+        let mut counts = BTreeMap::<&str, usize>::new();
+        for k in map.values() {
+            if !k.is_empty() {
+                *counts.entry(k.as_str()).or_default() += 1;
+            }
         }
-    }
-    library_store().set_keybind(action.id(), Some(key.as_str()));
-    refresh_keybinds();
+        map.iter()
+            .filter(|(_, k)| !k.is_empty() && counts[k.as_str()] > 1)
+            .map(|(a, _)| *a)
+            .collect()
+    })
 }
 
 /// 全部键位回默认（清空覆盖）。
@@ -72,10 +78,11 @@ pub fn reset_keybinds() {
 
 /// 在当前 owner 上按生效键位绑 `action`：`run` 在按键时执行。
 /// 放在读 `s.keybinds` 的 `dynamic` 里调用——读即订阅，换绑自动重绑。
-/// 键位为空（用户解绑）时不绑。
+/// 键位为空（用户解绑）或与其他动作同键（冲突）时不绑——冲突中双方
+/// 都不能触发，改掉任一方后剩余方自动恢复。
 pub fn bind_key(action: KeyAction, run: impl Fn() + 'static) {
     let key = key_of(action);
-    if key.is_empty() {
+    if key.is_empty() || conflicted_actions().contains(&action) {
         return;
     }
     if action.hold() {
