@@ -8,6 +8,7 @@ pub(crate) fn pane_glyph(pane: Pane) -> Icon {
         Pane::Lyrics => Icon::Note,
         Pane::Covers => Icon::Disc,
         Pane::Window => Icon::Monitor,
+        Pane::Shortcuts => Icon::Keyboard,
         Pane::Other => Icon::More,
         Pane::Appearance => Icon::Sun,
         Pane::About => Icon::Info,
@@ -77,6 +78,12 @@ pub(crate) const SECTIONS: &[Section] = &[
         title: "ReplayGain",
         keys: "replaygain 回放增益 音量 标准化 响度 专辑 曲目 预放大 削波 峰值",
         build: playback::replaygain_section,
+    },
+    Section {
+        pane: Pane::Shortcuts,
+        title: "快捷键",
+        keys: "快捷键 自定义 按键 键位 绑定 重新映射 改键 播放 切歌 音量 页面 keyboard shortcut hotkey",
+        build: shortcuts::shortcuts_section,
     },
     Section {
         pane: Pane::Playback,

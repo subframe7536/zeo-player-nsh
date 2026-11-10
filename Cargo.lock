@@ -6737,6 +6737,13 @@ name = "zeo-icons"
 version = "0.1.0"
 
 [[package]]
+name = "zeo-keybinds"
+version = "0.1.0"
+dependencies = [
+ "nsh-core",
+]
+
+[[package]]
 name = "zeo-library"
 version = "0.1.0"
 dependencies = [
@@ -6882,6 +6889,7 @@ dependencies = [
  "serde_json",
  "zeo-db",
  "zeo-engine",
+ "zeo-keybinds",
  "zeo-library",
  "zeo-metadata",
  "zeo-playlists",

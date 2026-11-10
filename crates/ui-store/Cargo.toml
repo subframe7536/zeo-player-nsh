@@ -13,6 +13,7 @@ dirs.workspace = true
 font-enumeration = "0.9"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
 zeo-types.workspace = true
+zeo-keybinds.workspace = true
 zeo-db.workspace = true
 zeo-metadata.workspace = true
 zeo-library.workspace = true

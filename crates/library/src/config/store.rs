@@ -271,4 +271,27 @@ impl LibraryStore {
         self.update_config(|c| c.watch = on);
         crate::provider::local::watcher::sync();
     }
+
+    /// 快捷键覆盖表（动作 id → 按键文本；只含与默认不同的条目）。
+    pub fn keybinds(&self) -> std::collections::BTreeMap<String, String> {
+        self.config().keybinds.clone()
+    }
+
+    /// 改一个动作的键位：`Some(key)` 覆盖默认（空串 = 明确解绑），
+    /// `None` 撤掉覆盖回默认。
+    pub fn set_keybind(&self, action: &str, key: Option<&str>) {
+        self.update_config(|c| match key {
+            Some(key) => {
+                c.keybinds.insert(action.to_owned(), key.to_owned());
+            }
+            None => {
+                c.keybinds.remove(action);
+            }
+        });
+    }
+
+    /// 清空全部快捷键覆盖（回默认键位）。
+    pub fn reset_keybinds(&self) {
+        self.update_config(|c| c.keybinds.clear());
+    }
 }

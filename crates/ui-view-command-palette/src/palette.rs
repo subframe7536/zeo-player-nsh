@@ -24,39 +24,61 @@ pub(crate) fn palette_content(close: impl Fn() + Copy + 'static) -> CommandEleme
             let q_lower = q_trimmed.to_lowercase();
             let mut list: Vec<CommandItem> = Vec::new();
 
-            // 1. 页面导航
+            // 1. 页面导航（键位标签读 `s.keybinds`，换绑即更新）。
             let nav_defs = [
-                ("nav:home", "首页", &["home", "shouye"][..]),
+                (
+                    "nav:home",
+                    "首页",
+                    &["home", "shouye"][..],
+                    KeyAction::NavHome,
+                ),
                 (
                     "nav:library",
                     "音乐库",
                     &["library", "music", "yinyueku", "gequ", "歌曲"][..],
+                    KeyAction::NavLibrary,
                 ),
                 (
                     "nav:artists",
                     "艺术家",
                     &["artist", "singer", "yishujia", "geshou", "歌手"][..],
+                    KeyAction::NavArtists,
                 ),
-                ("nav:albums", "专辑", &["album", "zhuanji"][..]),
+                (
+                    "nav:albums",
+                    "专辑",
+                    &["album", "zhuanji"][..],
+                    KeyAction::NavAlbums,
+                ),
                 (
                     "nav:metadata",
                     "元数据",
                     &["metadata", "tag", "yuanshuju", "biaoqian", "标签"][..],
+                    KeyAction::NavMetadata,
                 ),
                 (
                     "nav:folders",
                     "文件夹",
                     &["folder", "wenjianjia", "mulu", "目录"][..],
+                    KeyAction::NavFolders,
                 ),
-                ("nav:genres", "标签 / 流派", &["tag", "genre", "liupai"][..]),
+                (
+                    "nav:genres",
+                    "标签 / 流派",
+                    &["tag", "genre", "liupai"][..],
+                    KeyAction::NavGenres,
+                ),
             ];
-            for (id, label, kws) in nav_defs {
+            for (id, label, kws, action) in nav_defs {
                 if matches_keyword(&q_lower, label, kws) {
-                    list.push(
-                        CommandItem::new(id, label)
-                            .group("页面")
-                            .keywords(kws.iter().copied()),
-                    );
+                    let mut it = CommandItem::new(id, label)
+                        .group("页面")
+                        .keywords(kws.iter().copied());
+                    let key = store::key_of(action);
+                    if !key.is_empty() {
+                        it = it.shortcut(key);
+                    }
+                    list.push(it);
                 }
             }
 
@@ -67,7 +89,7 @@ pub(crate) fn palette_content(close: impl Fn() + Copy + 'static) -> CommandEleme
                     "action:settings",
                     "偏好设置",
                     &["settings", "shezhi", "preferences", "config"][..],
-                    Some("mod+,"),
+                    Some(KeyAction::SettingsOpen),
                 ),
                 (
                     "action:play_pause",
@@ -77,14 +99,43 @@ pub(crate) fn palette_content(close: impl Fn() + Copy + 'static) -> CommandEleme
                         "开始播放"
                     },
                     &["play", "pause", "bofang", "zanting"][..],
-                    Some("space"),
+                    Some(KeyAction::Toggle),
                 ),
-                ("action:next", "下一首", &["next", "xiayishou"][..], None),
+                (
+                    "action:next",
+                    "下一首",
+                    &["next", "xiayishou"][..],
+                    Some(KeyAction::Next),
+                ),
                 (
                     "action:prev",
                     "上一首",
                     &["prev", "previous", "shangyishou"][..],
-                    None,
+                    Some(KeyAction::Prev),
+                ),
+                (
+                    "action:like",
+                    "喜欢当前曲目",
+                    &["like", "favorite", "xihuan", "shoucang", "喜欢"][..],
+                    Some(KeyAction::Like),
+                ),
+                (
+                    "action:loop",
+                    "切换循环模式",
+                    &["loop", "repeat", "shuffle", "xunhuan", "suiji"][..],
+                    Some(KeyAction::LoopMode),
+                ),
+                (
+                    "action:mute",
+                    "静音 / 取消静音",
+                    &["mute", "volume", "jingyin", "yinliang"][..],
+                    Some(KeyAction::Mute),
+                ),
+                (
+                    "action:fullscreen",
+                    "全屏播放",
+                    &["fullscreen", "nowplaying", "quanpin", "bofangye"][..],
+                    Some(KeyAction::FullScreen),
                 ),
                 (
                     "action:scan",
@@ -93,13 +144,13 @@ pub(crate) fn palette_content(close: impl Fn() + Copy + 'static) -> CommandEleme
                     None,
                 ),
             ];
-            for (id, label, kws, shortcut) in action_defs {
+            for (id, label, kws, action) in action_defs {
                 if matches_keyword(&q_lower, label, kws) {
                     let mut it = CommandItem::new(id, label)
                         .group("操作")
                         .keywords(kws.iter().copied());
-                    if let Some(sc) = shortcut {
-                        it = it.shortcut(sc);
+                    if let Some(key) = action.map(store::key_of).filter(|k| !k.is_empty()) {
+                        it = it.shortcut(key);
                     }
                     list.push(it);
                 }
@@ -208,6 +259,12 @@ pub(crate) fn palette_content(close: impl Fn() + Copy + 'static) -> CommandEleme
                     "play_pause" => store::toggle(),
                     "next" => store::player().next(),
                     "prev" => store::player().previous(),
+                    "like" => store::toggle_like_current(),
+                    "loop" => store::cycle_loop_mode(),
+                    "mute" => store::toggle_mute(),
+                    "fullscreen" => {
+                        s.full_screen.set(true);
+                    }
                     "scan" => store::scan(),
                     _ => {}
                 }

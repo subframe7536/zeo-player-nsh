@@ -138,6 +138,10 @@ pub struct Store {
     pub editor: Signal<Option<Draft>>,
     /// 设置弹窗打开中。
     pub settings: Signal<bool>,
+    /// 期望的全屏播放状态：`App` 的本地信号才是真正挂载状态，外部
+    /// （快捷键、命令面板）改这里，由根组件的对账 effect 调 open/close
+    /// （动画与歌词 Reveal 记数只在那里做，直接写挂载信号拿不到）。
+    pub full_screen: Signal<bool>,
     /// 「删除文件」的确认弹窗（`Some` 时打开）。
     pub delete_ask: Signal<Option<DeleteAsk>>,
     /// 「编辑元数据」弹窗打开的曲目路径（`Some` 时打开）。
@@ -170,6 +174,9 @@ pub struct Store {
     /// 桌面上右键按下不产生 PressOutside（平台只发 ContextMenu 事件），
     /// 已开的菜单不会被平台关掉，由它互斥。
     pub menu_open: Signal<Option<u64>>,
+    /// 生效的快捷键表（`KeyAction` → 键位；空串 = 未绑定）：绑定挂在读
+    /// 它的 `dynamic` 里，换绑时换 owner 重绑。
+    pub keybinds: Signal<Same<Keybinds>>,
 }
 
 pub use zeo_types::config::SidebarSection;

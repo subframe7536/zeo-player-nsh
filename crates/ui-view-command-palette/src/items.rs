@@ -121,6 +121,10 @@ pub(crate) fn command_item_view(entry: &CommandEntry) -> View {
             "action:play_pause" => Icon::Play,
             "action:next" => Icon::NextLine,
             "action:prev" => Icon::PrevLine,
+            "action:like" => Icon::Heart,
+            "action:loop" => Icon::Repeat,
+            "action:mute" => Icon::Volume,
+            "action:fullscreen" => Icon::Expand,
             "action:scan" => Icon::Refresh,
             _ => Icon::Search,
         };

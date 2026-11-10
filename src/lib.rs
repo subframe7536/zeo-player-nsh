@@ -57,11 +57,6 @@ pub fn App() -> impl IntoElement {
     });
     #[cfg(target_os = "windows")]
     zeo_ui_frame::caption::install();
-    on_key("space", |_| zeo_ui_store::toggle());
-    on_key("mod+k", |_| {
-        let s = zeo_ui_store::store();
-        s.search_open.update(|open| *open = !*open);
-    });
 
     let full_open = signal(false);
     // 正在收起（淡出动画中）；收起途中再打开会取消它。
@@ -74,6 +69,7 @@ pub fn App() -> impl IntoElement {
             }
             full_closing.set(false);
             full_open.set(true);
+            s.full_screen.set(true);
             global::<zeo_ui_now_playing::Reveal>().update(|r| r.0 = r.0.wrapping_add(1));
             if untracked(reduce_motion) {
                 fade.set(1.0);
@@ -92,6 +88,7 @@ pub fn App() -> impl IntoElement {
                 fade.set(0.0);
                 full_closing.set(false);
                 full_open.set(false);
+                s.full_screen.set(false);
                 return;
             }
             let end = fade.timing(
@@ -104,10 +101,17 @@ pub fn App() -> impl IntoElement {
                 if end.await && full_closing.get_untracked() {
                     full_closing.set(false);
                     full_open.set(false);
+                    s.full_screen.set(false);
                 }
             });
         }) as Rc<dyn Fn()>
     };
+    // 外部（快捷键 / 命令面板）写的是 store 的期望状态，这里对账成真实
+    // 开合；open / close 里同步回写它，信号按值通知，不会有回声。
+    {
+        let (open, close) = (open.clone(), close.clone());
+        effect(move || if s.full_screen.get() { open() } else { close() });
+    }
     let _ = s;
     #[cfg(any(debug_assertions, test))]
     bench(open.clone());
@@ -187,11 +191,32 @@ pub fn App() -> impl IntoElement {
         .child(when(
             move || s.close_prompt.get() && !s.hidden.get(),
             close_prompt,
-        ));
+        ))
+        .child(keys());
     // Windows 的窗口按钮在最上层（盖过全屏播放与弹窗，和系统按钮一样）。
     #[cfg(target_os = "windows")]
     let root = root.child(zeo_ui_frame::caption::buttons(move || full_open.get()));
     root
+}
+
+/// 全局快捷键：动作与键位在 `zeo_ui_store::keybinds`（默认见
+/// `KeyAction::default_key`，可在「设置 → 快捷键」改）。绑在读
+/// `s.keybinds` 的 `dynamic` 里——换绑写信号、dynamic 换 owner，旧绑定
+/// 连 owner 销毁、按新键位重绑。全屏播放页的键在 `ui-now-playing`。
+///
+/// `mod`：macOS 是 ⌘，Windows 是 Ctrl。文本框聚焦时编辑键（裸字符、
+/// 箭头、空格）按 `When::Auto` 自动放行不触发——所以默认键位里裸方向
+/// 键只出现在全屏页，全局只绑 `mod` 组合；裸字母也不默认绑，select /
+/// listbox 的键入定位要用（用户仍可自绑，是自己的选择）。
+fn keys() -> AnyElement {
+    dynamic(move || {
+        for &action in zeo_ui_store::KeyAction::ALL {
+            if !action.in_full_player() {
+                zeo_ui_store::bind_key(action, move || zeo_ui_store::run_keybind(action));
+            }
+        }
+        view()
+    })
 }
 
 fn page(nav: Signal<Nav>) -> AnyElement {

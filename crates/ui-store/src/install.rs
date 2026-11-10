@@ -94,6 +94,7 @@ pub fn install() -> Store {
         editor: signal(None),
         search_open: signal(false),
         settings: signal(false),
+        full_screen: signal(false),
         delete_ask: signal(None),
         edit_info: signal(None),
         accent: signal(None),
@@ -108,6 +109,7 @@ pub fn install() -> Store {
         folder_op: signal(None),
         update: signal(UpdateState::Idle),
         menu_open: signal(None),
+        keybinds: signal(Same(Arc::new(keybinds_map()))),
     };
     STORE.with(|cell| cell.set(Some(s)));
     let (tx, posted) = mpsc::channel::<Box<dyn FnOnce() + Send>>();

@@ -95,6 +95,10 @@ pub struct LibraryConfig {
     /// 旧版的 `window_frame` 字段读取时忽略。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_placement: Option<nsh_core::desktop::WindowPlacement>,
+    /// 快捷键覆盖：动作 id → 按键文本（`nsh/keymap` 写法，如 `"mod+right"`）；
+    /// 只有与默认不同的条目才落盘，空串表示用户明确解绑（不回默认值）。
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub keybinds: std::collections::BTreeMap<String, String>,
 }
 
 fn default_fade_ms() -> u32 {
@@ -153,6 +157,7 @@ impl Default for LibraryConfig {
             eq: crate::audio::EqConfig::default(),
             remember_frame: true,
             window_placement: None,
+            keybinds: std::collections::BTreeMap::new(),
         }
     }
 }

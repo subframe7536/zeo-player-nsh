@@ -10,7 +10,7 @@ pub(crate) use zeo_ui_components::icons::{Icon, icon};
 
 pub(crate) use zeo_ui_store::theme::{self, *};
 
-pub(crate) use zeo_ui_store::{self as store, Nav};
+pub(crate) use zeo_ui_store::{self as store, KeyAction, Nav};
 
 mod items;
 mod palette;

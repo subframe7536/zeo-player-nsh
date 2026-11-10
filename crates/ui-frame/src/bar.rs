@@ -140,7 +140,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 },
                 zeo_ui_store::cycle_loop_mode,
             ),
-            "循环模式",
+            move || zeo_ui_store::key_tip("循环模式", zeo_ui_store::KeyAction::LoopMode),
         ))
         .child(tipped(
             icon_button(
@@ -150,12 +150,12 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 fg,
                 || player().previous(),
             ),
-            "上一首",
+            move || zeo_ui_store::key_tip("上一首", zeo_ui_store::KeyAction::Prev),
         ))
         .child(play)
         .child(tipped(
             icon_button(|| Icon::NextLine, 15.0, "下一首", fg, || player().next()),
-            "下一首",
+            move || zeo_ui_store::key_tip("下一首", zeo_ui_store::KeyAction::Next),
         ))
         .child(tipped(
             icon_button(
@@ -171,7 +171,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 like_red,
                 zeo_ui_store::toggle_like_current,
             ),
-            "喜欢",
+            move || zeo_ui_store::key_tip("喜欢", zeo_ui_store::KeyAction::Like),
         ));
 
     let duration = move || s.playback.with(|p| p.duration);
@@ -282,7 +282,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 muted_fg,
                 move || on_expand(),
             ),
-            "全屏播放",
+            move || zeo_ui_store::key_tip("全屏播放", zeo_ui_store::KeyAction::FullScreen),
         ));
 
     let bar_view = view()
@@ -305,7 +305,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
     // Windows 上不加背景模糊：nsh-platform-windows 0.3.0 的局部重绘只清空并
     // 重画变化的区域，背景模糊却会采样区域外上一帧的像素（已经盖着播放条
     // 自己的半透明底色），于是进度、时间、按钮悬停等每次局部重绘都在条上
-    // 留下一块更亮的矩形。见 README「待上游」。
+    // 留下一块更亮的矩形。见 upstream.md。
     #[cfg(not(target_os = "windows"))]
     let bar_view = bar_view.backdrop_blur(px(24.0));
     bar_view.child(now).child(center).child(right)

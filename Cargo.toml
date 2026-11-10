@@ -24,6 +24,7 @@ dunce = "1"
 ureq = "3.1"
 
 zeo-types = { path = "crates/types" }
+zeo-keybinds = { path = "crates/keybinds" }
 zeo-db = { path = "crates/db" }
 zeo-metadata = { path = "crates/metadata" }
 zeo-library = { path = "crates/library" }

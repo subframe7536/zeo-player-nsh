@@ -60,6 +60,7 @@ pub enum Icon {
     Check,
     /// 关于页的「i」圆标。
     Info,
+    Keyboard,
     /// Windows 窗口按钮（`ui::caption`）：字形占 24 格里的 4.5–19.5，按
     /// 16 pt 显示时为 10 pt 见方、线宽 1 pt，与系统按钮一致。
     #[cfg(target_os = "windows")]
@@ -123,6 +124,10 @@ impl Icon {
             Icon::ChevronLeft => r#"<path d="m15 18-6-6 6-6"/>"#,
             // x
             Icon::Close => r#"<path d="M18 6 6 18"/><path d="m6 6 12 12"/>"#,
+            // keyboard
+            Icon::Keyboard => {
+                r#"<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01"/><path d="M10 10h.01"/><path d="M14 10h.01"/><path d="M18 10h.01"/><path d="M6 14h.01"/><path d="M18 14h.01"/><path d="M10 14h4"/>"#
+            }
             // maximize-2
             Icon::Expand => {
                 r#"<path d="M15 3h6v6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/><path d="M9 21H3v-6"/>"#

@@ -17,8 +17,8 @@ use self::column::left_column;
 use self::lyrics::{LYRICS_BOTTOM, lyrics_column, lyrics_shown};
 use zeo_ui_components::button::{on_dark, tipped};
 use zeo_ui_components::icons::{Icon, icon};
+use zeo_ui_store::store;
 use zeo_ui_store::theme::*;
-use zeo_ui_store::{player, set_volume, store};
 
 /// 每次打开全屏播放加一：已有的歌词据此回到高亮行（见 `lyrics` 的滚屏）。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -36,17 +36,24 @@ const SHEET_SLIDE: f32 = 56.0;
 /// 全屏播放页。`fade` 为 0→1 的开合进度（同时驱动透明度与上下滑动）；
 /// `on_close` 收起。
 pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
-    let s = store();
-
     let close = on_close.clone();
-    on_key("escape", move |_| close());
-    on_key("left", |_| player().seek_by(-5.0));
-    on_key("right", |_| player().seek_by(5.0));
-    on_key("up", move |_| {
-        set_volume(s.playback.with_untracked(|p| p.volume) + 0.05)
-    });
-    on_key("down", move |_| {
-        set_volume(s.playback.with_untracked(|p| p.volume) - 0.05)
+    // 键位可自定义（「设置 → 快捷键」的「全屏播放中」组）：dynamic 读
+    // `s.keybinds`，换绑时换 owner 重绑。`FullClose` 用本页的 close，
+    // 其余动作走共用的 `run_keybind`。
+    let key_layer = dynamic(move || {
+        for &action in zeo_ui_store::KeyAction::ALL {
+            if action.in_full_player() {
+                let close = close.clone();
+                zeo_ui_store::bind_key(action, move || {
+                    if action == zeo_ui_store::KeyAction::FullClose {
+                        close()
+                    } else {
+                        zeo_ui_store::run_keybind(action)
+                    }
+                });
+            }
+        }
+        view()
     });
 
     let swap = Swap::install();
@@ -59,7 +66,7 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
     //
     // 模糊分平台挂两处：macOS 后端不画容器 view 的 `filter: blur()`，
     // 只在 image 元素上烘 `blur_radius`；Windows 反过来——`blur_radius`
-    // 的位图效果路径画不出铺满（见 AGENTS.md 待上游），而容器 view 的
+    // 的位图效果路径画不出铺满（见 upstream.md），而容器 view 的
     // 滤镜会走离屏合成（decor::draw_layered），能画。
     let layer = |path: Signal<Option<SharedString>>, alpha: &AnimatedValue| {
         view()
@@ -153,6 +160,7 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
                 .window_drag(true),
         )
         .child(close_button)
+        .child(key_layer)
 }
 
 // --- 切歌过渡 -----------------------------------------------------------------

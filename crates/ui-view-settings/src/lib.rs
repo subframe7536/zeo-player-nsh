@@ -20,6 +20,7 @@ mod library;
 mod lyrics;
 mod other;
 mod playback;
+mod shortcuts;
 mod window;
 
 use nsh_core::element::input;

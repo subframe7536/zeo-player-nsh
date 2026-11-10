@@ -160,7 +160,7 @@ pub fn page() -> View {
                             let selected = selected.clone();
                             let anchor = anchor.clone();
                             // 「全选」不放表头格：上游自定义表头对滚动区列
-                            // 不落渲染内容（待上游），工具栏的 nsh_base
+                            // 不落渲染内容（见 upstream.md），工具栏的 nsh_base
                             // 复选框在真机 / headless 都稳。
                             let mark = checkbox(
                                 {

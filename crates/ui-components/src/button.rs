@@ -168,7 +168,7 @@ pub fn text_button(
 /// 外观同 shadcn TooltipContent：`rounded-md bg-foreground px-3 py-1.5
 /// text-xs text-background`。nsh-base 0.3.0 的组件元素没有 `.tooltip`，
 /// 所以挂在外面包一层的 view 上。
-pub fn tipped(content: impl IntoElement, tip: impl Into<SharedString>) -> View {
+pub fn tipped(content: impl IntoElement, tip: impl IntoReactive<SharedString>) -> View {
     let t = nsh_base::theme();
     let (back, front) = (t.foreground, t.background);
     view().flex_shrink_0().child(content).tooltip(
@@ -179,7 +179,7 @@ pub fn tipped(content: impl IntoElement, tip: impl Into<SharedString>) -> View {
             .rounded(px(RADIUS_MD))
             .bg(back)
             .child(
-                text(tip.into())
+                text(tip)
                     .text_size(px(12.0))
                     .line_height(px(12.0))
                     .text_color(front),
