@@ -1,7 +1,8 @@
 use super::*;
 
 /// 左栏顶部的搜索框（外观同主侧栏的搜索框；有词时出现清空按钮）。
-pub(crate) fn search_box(query: Signal<String>) -> View {
+/// `trailing` 是挂在最右端的附加件（快捷键页用它放「按键搜索」）。
+pub(crate) fn search_box(query: Signal<String>, trailing: Option<AnyElement>) -> View {
     let empty = move || query.with(String::is_empty);
     view()
         .h(px(28.0))
@@ -40,6 +41,7 @@ pub(crate) fn search_box(query: Signal<String>) -> View {
                 .flex_shrink_0()
             },
         ))
+        .child(trailing)
 }
 
 /// 左栏分类行（外观同主侧栏的导航行）。
@@ -153,7 +155,7 @@ pub(crate) fn nav_column(pane: Signal<Pane>, query: Signal<String>) -> View {
         .transition_colors()
         .duration(300.0)
         .test_id("settings-nav")
-        .child(view().p(px(10.0)).child(search_box(query)))
+        .child(view().p(px(10.0)).child(search_box(query, None)))
         .child(
             scroll()
                 .flex_1()
