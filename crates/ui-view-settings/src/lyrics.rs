@@ -90,14 +90,15 @@ pub(crate) fn lyrics_offset_section() -> View {
             ),
         }
     };
-    let field = input_field(true)
-        .w(px(88.0))
-        .label("全局歌词偏移")
-        .keyboard_type(KeyboardType::Number)
-        .value(move || draft.get())
-        .on_change(move |t: &str| draft.set(t.to_owned()))
-        .on_submit(move |_: &str| commit())
-        .on_blur(move || commit());
+    let field = input_field(true, |i| {
+        i.label("全局歌词偏移")
+            .keyboard_type(KeyboardType::Number)
+            .value(move || draft.get())
+            .on_change(move |t: &str| draft.set(t.to_owned()))
+            .on_submit(move |_: &str| commit())
+            .on_blur(move || commit())
+    })
+    .w(px(88.0));
     setting_section(
         "全局歌词偏移",
         "对所有曲目生效：蓝牙耳机等固定延迟用它补偿。正值提前显示，负值延后；与全屏歌词区里每首曲目的偏移相加生效。",

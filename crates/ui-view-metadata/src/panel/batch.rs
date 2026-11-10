@@ -102,12 +102,13 @@ pub(crate) fn batch_panel(
                 .gap(px(8.0))
                 .child(label_cell("音轨编号"))
                 .child(
-                    input_field(true)
-                        .w(px(56.0))
-                        .label("编号起始")
-                        .value(move || draft.with(|d| d.num_start.clone()))
-                        .readonly(busy)
-                        .on_change(move |t: &str| draft.update(|d| d.num_start = t.to_owned())),
+                    input_field(true, |i| {
+                        i.label("编号起始")
+                            .value(move || draft.with(|d| d.num_start.clone()))
+                            .readonly(busy)
+                            .on_change(move |t: &str| draft.update(|d| d.num_start = t.to_owned()))
+                    })
+                    .w(px(56.0)),
                 )
                 .child(checkbox(
                     move || draft.with(|d| d.num_total),
@@ -428,17 +429,18 @@ pub(crate) fn tri_row(
             112.0,
         ))
         .child(
-            input_field(true)
-                .flex_1()
-                .min_w(px(0.0))
-                .label(label)
-                .placeholder(placeholder)
-                .default_value(initial)
-                .readonly(move || mode() != Tri::Set || draft.with(|d| d.applying))
-                .on_change(move |t: &str| {
-                    draft.update(|d| {
-                        d.values.insert(field, t.to_owned());
+            input_field(true, |i| {
+                i.label(label)
+                    .placeholder(placeholder)
+                    .default_value(initial)
+                    .readonly(move || mode() != Tri::Set || draft.with(|d| d.applying))
+                    .on_change(move |t: &str| {
+                        draft.update(|d| {
+                            d.values.insert(field, t.to_owned());
+                        })
                     })
-                }),
+            })
+            .flex_1()
+            .min_w(px(0.0)),
         )
 }

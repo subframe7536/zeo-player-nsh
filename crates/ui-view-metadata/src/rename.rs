@@ -116,12 +116,13 @@ pub fn dialog(
             view()
                 .gap(px(6.0))
                 .child(
-                    input_field(false)
-                        .flex_1()
-                        .label("模板")
-                        .default_value("{track:02d} - {title}")
-                        .placeholder("{track:02d} - {title}")
-                        .on_change(move |t: &str| input.set(t.to_owned())),
+                    input_field(false, |i| {
+                        i.label("模板")
+                            .default_value("{track:02d} - {title}")
+                            .placeholder("{track:02d} - {title}")
+                            .on_change(move |t: &str| input.set(t.to_owned()))
+                    })
+                    .flex_1(),
                 )
                 .child(
                     text("可用占位符：{title} {artist} {album} {album_artist} {genre} {year} {track} {track_total} {disc} {disc_total} {composer} {conductor} {lyricist} {publisher} {filename}；补零 {track:02d}")

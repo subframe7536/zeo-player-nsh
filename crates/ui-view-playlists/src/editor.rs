@@ -20,14 +20,16 @@ pub fn editor_dialog() -> AnyElement {
         (true, false) => "重命名歌单",
         (true, true) => "编辑智能歌单",
     });
-    let name_input = input_field(false)
-        .w_full()
-        .label("歌单名称")
-        .auto_focus(true)
-        .default_value(untracked(|| draft.with(|d| d.name.clone())))
-        .placeholder("歌单名称")
-        .on_change(move |t: &str| draft.update(|d| d.name = t.to_owned()))
-        .on_submit(move |_: &str| save());
+    let name_input = input_field(false, |i| {
+        i.label("歌单名称")
+            .auto_focus(true)
+            .default_value(untracked(|| draft.with(|d| d.name.clone())))
+            .placeholder("歌单名称")
+            .on_change(move |t: &str| draft.update(|d| d.name = t.to_owned()))
+            .on_submit(move |_: &str| save())
+            .on_blur(move || save())
+    })
+    .w_full();
     let description = if smart {
         Some("按条件从曲库自动聚合，曲库变化时跟着更新。")
     } else {
@@ -149,18 +151,19 @@ pub(crate) fn rule_editor(draft: Signal<Draft>) -> View {
             .collect(),
         170.0,
     );
-    let limit = input_field(true)
-        .w(px(80.0))
-        .label("数量上限")
-        .keyboard_type(KeyboardType::Number)
-        .default_value(untracked(|| {
-            rule(&|r| r.limit.map(|n| n.to_string()).unwrap_or_default())
-        }))
-        .placeholder("不限")
-        .on_change(move |t: &str| {
-            let limit = t.trim().parse::<usize>().ok().filter(|n| *n > 0);
-            change(Box::new(move |r| r.limit = limit));
-        });
+    let limit = input_field(true, |i| {
+        i.label("数量上限")
+            .keyboard_type(KeyboardType::Number)
+            .default_value(untracked(|| {
+                rule(&|r| r.limit.map(|n| n.to_string()).unwrap_or_default())
+            }))
+            .placeholder("不限")
+            .on_change(move |t: &str| {
+                let limit = t.trim().parse::<usize>().ok().filter(|n| *n > 0);
+                change(Box::new(move |r| r.limit = limit));
+            })
+    })
+    .w(px(80.0));
     let footer = view()
         .flex_row()
         .items_center()
@@ -266,17 +269,18 @@ pub fn condition_editor(
             FieldType::Number => "数值",
             FieldType::Date => "天数",
         };
-        input_field(true)
-            .flex_1()
-            .min_w(px(80.0))
-            .label("值")
-            .value(move || get().value)
-            .placeholder(placeholder)
-            .on_change(move |t: &str| {
-                let t = t.to_owned();
-                change(Box::new(move |c| c.value = t));
-            })
-            .into_element()
+        input_field(true, |i| {
+            i.label("值")
+                .value(move || get().value)
+                .placeholder(placeholder)
+                .on_change(move |t: &str| {
+                    let t = t.to_owned();
+                    change(Box::new(move |c| c.value = t));
+                })
+        })
+        .flex_1()
+        .min_w(px(80.0))
+        .into_element()
     });
     let unit = move || {
         let c = get();

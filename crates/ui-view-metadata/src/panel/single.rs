@@ -223,33 +223,40 @@ pub(crate) fn single_header(
                 // 或 ✓ 提交；输入即时 `plan_name` 预检（分隔符硬规则 /
                 // 撞名先报，✓ 随之禁用）。
                 let mut parts: Vec<AnyElement> = vec![
-                    input_field(true)
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .h(px(24.0))
-                        .py(px(0.0))
-                        .text_size(px(12.0))
-                        .label("文件名")
-                        .auto_focus(true)
-                        .default_value(rename_state.name_input.get_untracked())
-                        .readonly(move || rename_state.busy.get())
-                        .on_change({
-                            let path = path.clone();
-                            move |t: &str| {
-                                rename_state.name_input.set(t.to_owned());
-                                rename_state
-                                    .err
-                                    .set(match &rename::plan_name(&path, t).status {
-                                        Status::Ok | Status::Unchanged => None,
-                                        Status::Invalid(m) | Status::Conflict(m) => Some(m.clone()),
-                                    });
-                            }
-                        })
-                        .on_submit({
-                            let commit = commit.clone();
-                            move |_: &str| commit()
-                        })
-                        .into_element(),
+                    input_field(true, |i| {
+                        i.py(px(0.0))
+                            .text_size(px(12.0))
+                            .label("文件名")
+                            .auto_focus(true)
+                            .default_value(rename_state.name_input.get_untracked())
+                            .readonly(move || rename_state.busy.get())
+                            .on_change({
+                                let path = path.clone();
+                                move |t: &str| {
+                                    rename_state.name_input.set(t.to_owned());
+                                    rename_state.err.set(
+                                        match &rename::plan_name(&path, t).status {
+                                            Status::Ok | Status::Unchanged => None,
+                                            Status::Invalid(m) | Status::Conflict(m) => {
+                                                Some(m.clone())
+                                            }
+                                        },
+                                    );
+                                }
+                            })
+                            .on_submit({
+                                let commit = commit.clone();
+                                move |_: &str| commit()
+                            })
+                            .on_blur({
+                                let commit = commit.clone();
+                                move || commit()
+                            })
+                    })
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .h(px(24.0))
+                    .into_element(),
                 ];
                 if let Some(e) = &ext {
                     parts.push(

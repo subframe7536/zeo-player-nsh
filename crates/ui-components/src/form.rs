@@ -19,24 +19,41 @@ pub const RADIUS_LG: f32 = 10.0;
 /// 而不是 shadcn 的 `bg-transparent` / `dark:bg-input/30`：面板底色会随
 /// 封面染色，透明或半透明的底会把染色带进输入框。`small` 为 `h-8`
 /// （放在一行条件里）。
-pub fn input_field(small: bool) -> Input {
+///
+/// 返回的是样式壳（View），内部的裸 `input()` 交给 `build` 定制
+/// （`value` / `on_change` / `placeholder` / 无障碍标签都挂它上面）。
+/// 文字缩进走壳的 `pl`：input 自身的横向 padding 在失焦时被平台忽略
+/// （`InputContent` 未到前按整框画，见 upstream.md），壳包一层才两个
+/// 状态一致。焦点环经 `group-focus-within` 给壳。
+pub fn input_field(small: bool, build: impl FnOnce(Input) -> Input) -> View {
     let t = nsh_base::theme();
     let (input_c, ring) = (t.input, t.ring);
-    input()
-        .h(px(if small { 32.0 } else { 36.0 }))
-        .px(px(12.0))
-        .rounded(px(RADIUS_MD))
-        .border_1()
-        .border_color(input_c)
-        .shadow_xs()
-        .text_size(px(14.0))
-        .text_color(fg())
-        .bg(t.card)
-        .focus(move |st| {
-            st.border_color(ring)
-                .ring(px(3.0))
-                .ring_color(ring.opacity(0.5))
-        })
+    view().group().child(
+        view()
+            .h(px(if small { 32.0 } else { 36.0 }))
+            .flex_row()
+            .items_center()
+            .pl(px(12.0))
+            .pr(px(4.0))
+            .rounded(px(RADIUS_MD))
+            .border_1()
+            .border_color(input_c)
+            .shadow_xs()
+            .bg(t.card)
+            .group_focus_within(move |st| {
+                st.border_color(ring)
+                    .ring(px(3.0))
+                    .ring_color(ring.opacity(0.5))
+            })
+            .child(build(
+                input()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .h_full()
+                    .text_size(px(14.0))
+                    .text_color(fg()),
+            )),
+    )
 }
 
 /// shadcn SelectTrigger（`size="sm"`）：`h-8 rounded-md border border-input

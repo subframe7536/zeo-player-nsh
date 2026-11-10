@@ -51,14 +51,15 @@ fn int_row(
         }
         Err(_) => draft.set(format!("{}", get())),
     };
-    let field = input_field(true)
-        .w(px(88.0))
-        .label(label)
-        .keyboard_type(KeyboardType::Number)
-        .value(move || draft.get())
-        .on_change(move |t: &str| draft.set(t.to_owned()))
-        .on_submit(move |_: &str| commit())
-        .on_blur(move || commit());
+    let field = input_field(true, |i| {
+        i.label(label)
+            .keyboard_type(KeyboardType::Number)
+            .value(move || draft.get())
+            .on_change(move |t: &str| draft.set(t.to_owned()))
+            .on_submit(move |_: &str| commit())
+            .on_blur(move || commit())
+    })
+    .w(px(88.0));
     view()
         .flex_row()
         .flex_wrap()
@@ -158,14 +159,15 @@ fn db_row(
         }
         Err(_) => draft.set(format!("{}", get())),
     };
-    let field = input_field(true)
-        .w(px(88.0))
-        .label(label)
-        .keyboard_type(KeyboardType::Number)
-        .value(move || draft.get())
-        .on_change(move |t: &str| draft.set(t.to_owned()))
-        .on_submit(move |_: &str| commit())
-        .on_blur(move || commit());
+    let field = input_field(true, |i| {
+        i.label(label)
+            .keyboard_type(KeyboardType::Number)
+            .value(move || draft.get())
+            .on_change(move |t: &str| draft.set(t.to_owned()))
+            .on_submit(move |_: &str| commit())
+            .on_blur(move || commit())
+    })
+    .w(px(88.0));
     view()
         .flex_row()
         .flex_wrap()

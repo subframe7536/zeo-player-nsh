@@ -212,17 +212,37 @@ pub fn show() {
     hidden.remove(&0);
     drop(hidden);
     notify();
-    let window = nsh_core::element::desktop::main_window();
-    window.show();
-    window.focus();
+    #[cfg(target_os = "windows")]
+    {
+        // 隐藏后走 NSH 的 WindowRequest::Show 会卡死（`UpdateWindow`
+        // 同步重画链）；直接 ShowWindowAsync。还没拿到 HWND 时回退。
+        if hwnd().is_some() {
+            platform::show();
+        } else {
+            let window = nsh_core::element::desktop::main_window();
+            window.show();
+            window.focus();
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let window = nsh_core::element::desktop::main_window();
+        window.show();
+        window.focus();
+    }
 }
 
 /// 退出应用（结束播放）：与 Cmd+Q / 退出菜单同一条收尾路径
-/// （NSH `desktop::quit` 不再回到关闭拦截）。
+/// （NSH `desktop::quit` 不再回到关闭拦截）。Windows 上直接结束进程：
+/// `desktop::quit` 的 batch → `WM_NSH_CLOSE` → `PostQuitMessage` 链在
+/// 隐藏后也会卡死，而进程退出本就走 `exit_now` 这条硬收尾（窗口销毁
+/// 时同一个函数）。
 pub fn quit() {
     QUITTING.store(true, Ordering::Relaxed);
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     nsh_core::element::desktop::quit();
+    #[cfg(target_os = "windows")]
+    platform::exit_now();
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     std::process::exit(0);
 }

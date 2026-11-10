@@ -20,12 +20,13 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GW_OWNER,
     GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect, GetMessageW, GetWindow,
-    GetWindowLongPtrW, GetWindowThreadProcessId, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsZoomed,
+    GetWindowLongPtrW, GetWindowThreadProcessId, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsIconic, IsZoomed,
     KBDLLHOOKSTRUCT, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW, PostMessageW,
     PostThreadMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME,
-    SetWindowLongPtrW, SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL,
-    WM_ACTIVATE, WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST,
-    WM_SHOWWINDOW, WM_SYSCOMMAND, WM_SYSKEYDOWN, WNDPROC, WS_CAPTION, WS_THICKFRAME,
+    SW_RESTORE, SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW,
+    ShowWindowAsync, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_ACTIVATE, WM_CLOSE,
+    WM_DESTROY, WM_KEYDOWN, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW,
+    WM_SYSCOMMAND, WM_SYSKEYDOWN, WNDPROC, WS_CAPTION, WS_THICKFRAME,
 };
 
 use crate::tray::TrayState;
@@ -271,6 +272,26 @@ pub fn close() {
     }
 }
 
+/// 显示并激活主窗口（托盘「显示」）：直接 `ShowWindowAsync` +
+/// `SetForegroundWindow`，不走 NSH 的 `WindowRequest::Show`——那条链是
+/// 引擎 batch → `WM_NSH_WAKE` → `surface.drain` → `shell::request` →
+/// `window::show` → `UpdateWindow` 同步重画，隐藏后再走它会整串卡死。
+/// `ShowWindowAsync` 只把显示事件投进窗口队列，调用线程永不阻塞；
+/// `WM_SHOWWINDOW` 经子类过程报 `shown_by_system`，界面照旧重挂。
+pub(crate) fn show() {
+    let Some(h) = hwnd() else {
+        return;
+    };
+    // SAFETY: 普通调用；`ShowWindowAsync` 可跨线程且不等待目标线程。
+    unsafe {
+        let _ = ShowWindowAsync(h, SW_SHOW);
+        if IsIconic(h) != 0 {
+            let _ = ShowWindowAsync(h, SW_RESTORE);
+        }
+        let _ = SetForegroundWindow(h);
+    }
+}
+
 /// 主窗口已销毁：移除托盘图标后直接结束进程。
 ///
 /// NSH 0.3.0 在 UI 线程退出时由线程局部析构释放 D3D / D2D 设备。Windows
@@ -278,7 +299,7 @@ pub fn close() {
 /// 释放设备时要等自己的工作线程退出，而那个线程退出又要加载器锁，进程
 /// 就停在那里：窗口没了，进程不退。这里不走那条路径。应用数据都在改动时
 /// 写盘，退出时没有要收尾的东西。
-fn exit_now() {
+pub(crate) fn exit_now() {
     if let Some(tx) = TRAY_TX.get() {
         let (done_tx, done_rx) = channel();
         if tx.lock().unwrap().send(TrayMsg::Remove(done_tx)).is_ok() {

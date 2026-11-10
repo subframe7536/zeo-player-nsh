@@ -121,12 +121,14 @@ fn separators_section(
         .items_center()
         .gap(px(8.0))
         .child(
-            zeo_ui_components::form::input_field(true)
-                .w(px(160.0))
-                .value(move || draft.get())
-                .placeholder("其它分隔符，如 ・")
-                .on_change(move |text: &str| draft.set(text.to_owned()))
-                .on_submit(move |_: &str| add_custom()),
+            zeo_ui_components::form::input_field(true, |i| {
+                i.value(move || draft.get())
+                    .placeholder("其它分隔符，如 ・")
+                    .on_change(move |text: &str| draft.set(text.to_owned()))
+                    .on_submit(move |_: &str| add_custom())
+                    .on_blur(move || add_custom())
+            })
+            .w(px(160.0)),
         )
         .child(outline_button(Icon::Plus, "添加", add_custom))
         .child(view().flex_1())

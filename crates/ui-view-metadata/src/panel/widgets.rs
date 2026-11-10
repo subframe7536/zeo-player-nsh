@@ -83,19 +83,20 @@ pub(crate) fn field_row(
                     })
                     .unwrap_or_default()
             });
-            input_field(true)
-                .flex_1()
-                .min_w(px(0.0))
-                .label(label)
-                .default_value(initial)
-                .readonly(move || draft.with(|d| d.saving))
-                .on_change(move |t: &str| {
-                    draft.update(|d| {
-                        d.values.insert(field, t.to_owned());
-                        d.saved = false;
+            input_field(true, |i| {
+                i.label(label)
+                    .default_value(initial)
+                    .readonly(move || draft.with(|d| d.saving))
+                    .on_change(move |t: &str| {
+                        draft.update(|d| {
+                            d.values.insert(field, t.to_owned());
+                            d.saved = false;
+                        })
                     })
-                })
-                .into_element()
+            })
+            .flex_1()
+            .min_w(px(0.0))
+            .into_element()
         }))
 }
 
