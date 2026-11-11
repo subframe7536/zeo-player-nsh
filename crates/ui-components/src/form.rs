@@ -2,7 +2,9 @@
 //! 分段。行为来自 nsh-base 的 `Input` 与 `tabs` / `tab` /
 //! `dialog`；尺寸、间距、圆角同 shadcn，颜色取自主题（浅色 / 深色）。
 
-use nsh_base::{Input, TabElement, TabsElement, input, tab, tabs};
+use nsh_base::{
+    Input, SwitchElement, TabElement, TabsElement, input, switch as base_switch, tab, tabs,
+};
 use nsh_core::prelude::*;
 
 use super::button::RADIUS_MD;
@@ -35,6 +37,41 @@ pub fn input_field(small: bool) -> Input {
             st.border_color(ring)
                 .ring(px(3.0))
                 .ring_color(ring.opacity(0.5))
+        })
+}
+
+/// shadcn Switch：`w-[42px] h-[24px]` 轨道（`rounded-full bg-muted border border-border`，
+/// 开启时 `bg-primary border-primary`），`size-[18px]` 白色滑块（`rounded-full shadow-sm`，
+/// 开启时向右平移 18 pt）。
+pub fn switch(
+    checked: impl Fn() -> bool + 'static,
+    label: impl Into<SharedString>,
+    on_change: impl Fn(bool) + 'static,
+) -> SwitchElement {
+    base_switch()
+        .checked(checked)
+        .accessibility_label(label.into())
+        .on_change(move |next: &bool| on_change(*next))
+        .track_style(|st| {
+            st.w(px(42.0))
+                .h(px(24.0))
+                .p(px(2.0))
+                .rounded_full()
+                .bg(muted())
+                .border_1()
+                .border_color(border())
+                .transition_colors()
+                .duration(150.0)
+                .checked(|st| st.bg(primary()).border_color(primary()))
+        })
+        .thumb_style(|st| {
+            st.size(px(18.0))
+                .rounded_full()
+                .bg(AdaptiveColor::rgb(0xffffff, 0xffffff))
+                .shadow_sm()
+                .transition_transform()
+                .duration(150.0)
+                .checked(|st| st.translate_x(px(18.0)))
         })
 }
 

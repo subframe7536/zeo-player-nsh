@@ -22,27 +22,7 @@ pub fn checkbox(
 ) -> CheckboxElement {
     let checked = Rc::new(checked);
     let indeterminate = Rc::new(indeterminate);
-    // 半选 / 已选都画主色底。
-    let on = {
-        let (checked, indeterminate) = (checked.clone(), indeterminate.clone());
-        move || checked() || indeterminate()
-    };
-    let on_b = on.clone();
-    let mark = {
-        let (checked, indeterminate) = (checked.clone(), indeterminate.clone());
-        view()
-            .items_center()
-            .justify_center()
-            .child(dynamic(move || {
-                if indeterminate() {
-                    icon(Icon::Minus, 10.0, primary_fg).into_element()
-                } else if checked() {
-                    icon(Icon::Check, 10.0, primary_fg).into_element()
-                } else {
-                    view().into_element()
-                }
-            }))
-    };
+    let (chk, ind) = (checked.clone(), indeterminate.clone());
     base_checkbox()
         .checked(move || checked())
         .indeterminate(move || indeterminate())
@@ -50,25 +30,28 @@ pub fn checkbox(
         .hit_slop(EdgeInsets::all(px(6.0)))
         .items_center()
         .justify_center()
-        .indicator(
-            view()
-                .size(px(16.0))
+        .indicator_style(|s| {
+            s.size(px(16.0))
                 .rounded(px(4.0))
                 .border_1()
-                .border_color(move || if on() { primary() } else { border() })
-                .bg(move || {
-                    if on_b() {
-                        primary()
-                    } else {
-                        AdaptiveColor::TRANSPARENT
-                    }
-                })
+                .border_color(border())
+                .bg(AdaptiveColor::TRANSPARENT)
                 .shadow_xs()
                 .items_center()
                 .justify_center()
                 .transition_colors()
                 .duration(150.0)
-                .child(mark),
-        )
+                .checked(|s| s.bg(primary()).border_color(primary()))
+                .indeterminate(|s| s.bg(primary()).border_color(primary()))
+        })
+        .indicator(dynamic(move || {
+            if ind() {
+                icon(Icon::Minus, 10.0, primary_fg).into_element()
+            } else if chk() {
+                icon(Icon::Check, 10.0, primary_fg).into_element()
+            } else {
+                view().into_element()
+            }
+        }))
         .on_change(move |next: &bool| on_change(*next))
 }

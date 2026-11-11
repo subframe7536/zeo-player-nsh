@@ -49,31 +49,7 @@ pub(crate) fn pref_row(
     checked: impl Fn() -> bool + 'static,
     set: fn(bool),
 ) -> View {
-    let toggle = nsh_base::switch()
-        .checked(checked)
-        .accessibility_label(title)
-        .on_change(move |next: &bool| set(*next))
-        .track_style(|st| {
-            st.w(px(42.0))
-                .h(px(24.0))
-                .p(px(2.0))
-                .rounded_full()
-                .bg(muted())
-                .border_1()
-                .border_color(border())
-                .transition_colors()
-                .duration(150.0)
-                .checked(|st| st.bg(move || primary()).border_color(move || primary()))
-        })
-        .thumb_style(|st| {
-            st.size(px(18.0))
-                .rounded_full()
-                .bg(AdaptiveColor::rgb(0xffffff, 0xffffff))
-                .shadow_sm()
-                .transition_transform()
-                .duration(150.0)
-                .checked(|st| st.translate_x(px(18.0)))
-        });
+    let toggle = zeo_ui_components::form::switch(checked, title, set);
     view()
         .flex_row()
         .flex_wrap()

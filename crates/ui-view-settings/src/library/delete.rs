@@ -39,31 +39,9 @@ pub(crate) fn watch_row() -> View {
             text
         })
     };
-    let toggle = nsh_base::switch()
-        .checked(on)
-        .accessibility_label("监视文件夹变化")
-        .on_change(move |next: &bool| zeo_ui_store::set_watch(*next))
-        .track_style(|st| {
-            st.w(px(42.0))
-                .h(px(24.0))
-                .p(px(2.0))
-                .rounded_full()
-                .bg(muted())
-                .border_1()
-                .border_color(border())
-                .transition_colors()
-                .duration(150.0)
-                .checked(|st| st.bg(move || primary()).border_color(move || primary()))
-        })
-        .thumb_style(|st| {
-            st.size(px(18.0))
-                .rounded_full()
-                .bg(AdaptiveColor::rgb(0xffffff, 0xffffff))
-                .shadow_sm()
-                .transition_transform()
-                .duration(150.0)
-                .checked(|st| st.translate_x(px(18.0)))
-        });
+    let toggle = form::switch(on, "监视文件夹变化", move |next| {
+        zeo_ui_store::set_watch(next)
+    });
     view()
         .flex_row()
         .flex_wrap()

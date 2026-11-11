@@ -101,14 +101,9 @@ pub fn card(
         .p(px(12.0))
         .rounded(px(RADIUS_LG))
         .border_1()
-        .border_color(move || if on() { primary() } else { border })
-        .bg(move || {
-            if on() {
-                primary().opacity(0.05)
-            } else {
-                AdaptiveColor::TRANSPARENT
-            }
-        })
+        .border_color(border)
+        .bg(AdaptiveColor::TRANSPARENT)
+        .checked_style(|st| st.border_color(primary()).bg(primary().opacity(0.05)))
         .hover(|st| st.bg(hover()))
         .transition_colors()
         .duration(150.0)
