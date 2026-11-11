@@ -134,6 +134,8 @@ fn home_counts_a_play() {
     assert!(has(&app, "测试歌曲"), "{:?}", texts(&app));
 
     // 「热门艺术家」深链：点歌手圆钮直接落进「歌手」详情（复用 Artists）。
+    // 首页长页面下滚一段，避开底部浮动播放条。
+    let _ = app.scroll("text:热门艺术家", px(200.0));
     app.press("role:button[测试歌手 A; 测试歌手 B]").unwrap();
     app.wait_for("label:返回").unwrap();
     // 回网格并把选中复位，别留给后面的侧栏用例。

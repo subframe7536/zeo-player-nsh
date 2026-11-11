@@ -31,7 +31,7 @@ pub(crate) fn table(
                 c.align = *align;
                 c.sortable = false;
                 c.resizable = Some(false);
-                c.fixed = *key == "file_name";
+                c.fixed = (*key == "file_name").into();
                 if *key == "file_name" {
                     // sticky 固定文件名列：列级右边框（与其余网格线同色的
                     // border-input）。普通省略已由 classes.cell 与
