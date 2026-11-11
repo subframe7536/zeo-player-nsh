@@ -124,7 +124,7 @@ pub fn save_draft(draft: Draft) -> u64 {
     store().editor.set(None);
     if draft.id.is_none() {
         store().search.set(String::new());
-        global::<crate::Nav>().set(crate::Nav::Playlist(id));
+        navigate(crate::Nav::Playlist(id));
     }
     id
 }
@@ -143,9 +143,8 @@ pub fn delete_playlist(id: u64) {
         return;
     }
     change_playlists(|lists| lists.retain(|p| p.id != id));
-    let nav = global::<crate::Nav>();
-    if nav.get_untracked() == crate::Nav::Playlist(id) {
-        nav.set(crate::Nav::Home);
+    if global::<crate::Nav>().get_untracked() == crate::Nav::Playlist(id) {
+        navigate(crate::Nav::Home);
     }
 }
 

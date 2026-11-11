@@ -81,6 +81,16 @@ impl Pane {
     }
 }
 
+/// 切到 `target`；已在该页就不写——`global` 信号每次写都通知（上游
+/// `global` 的语义），等值写也会让页面 `dynamic` 整页重建，侧栏连点
+/// 同一项 / 重复按同一快捷键不该整页闪一下。
+pub fn navigate(target: Nav) {
+    let nav = global::<Nav>();
+    if nav.get_untracked() != target {
+        nav.set(target);
+    }
+}
+
 /// 打开设置弹窗并选中 `pane`（侧栏「设置」只置 `Store::settings`，保留
 /// 上次的选择；空曲库的「添加文件夹…」要落在曲库分类所以走这里）。
 pub fn open_settings(pane: Pane) {

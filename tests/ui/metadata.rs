@@ -25,13 +25,13 @@ fn folder_parent_collapses_even_when_child_is_selected() {
     app.press(&collapse_btn).unwrap();
     // 收起后：树中的 sub 行消失，按钮变成「展开 ...」
     app.wait_for(&expand_btn).unwrap();
-    app.wait_for_gone("role:button[sub]", Duration::from_secs(2))
+    app.wait_for_gone("role:link[sub]", Duration::from_secs(2))
         .unwrap();
 
     // 再次点击展开按钮：sub 重新在树中出现
     app.press(&expand_btn).unwrap();
     app.wait_for(&collapse_btn).unwrap();
-    app.wait_for("role:button[sub]").unwrap();
+    app.wait_for("role:link[sub]").unwrap();
 }
 
 /// 「元数据」页：侧栏进入见到曲目表；表头「全选」复选框勾出批量

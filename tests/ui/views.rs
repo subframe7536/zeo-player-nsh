@@ -331,7 +331,7 @@ fn playlists_manual_and_smart() {
         app.press("role:menuitem[测试歌单]").unwrap();
         app.press("label:切换视图").unwrap();
         app.press("role:option[歌单]").unwrap();
-        app.press("role:button[测试歌单]").unwrap();
+        app.press("role:link[测试歌单]").unwrap();
         app.wait_for("label:测试歌曲").unwrap();
         assert!(!has(&app, "歌单是空的"));
         // 从歌单移除。

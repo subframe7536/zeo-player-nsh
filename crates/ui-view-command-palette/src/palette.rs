@@ -239,15 +239,14 @@ pub(crate) fn palette_content(close: impl Fn() + Copy + 'static) -> CommandEleme
             let s = store::store();
             let id_str = id.as_ref();
             if let Some(target) = id_str.strip_prefix("nav:") {
-                let nav = global::<Nav>();
                 match target {
-                    "home" => nav.set(Nav::Home),
-                    "library" => nav.set(Nav::Library),
-                    "artists" => nav.set(Nav::Artists),
-                    "albums" => nav.set(Nav::Albums),
-                    "metadata" => nav.set(Nav::Metadata),
-                    "folders" => nav.set(Nav::Folders),
-                    "genres" => nav.set(Nav::Genres),
+                    "home" => store::navigate(Nav::Home),
+                    "library" => store::navigate(Nav::Library),
+                    "artists" => store::navigate(Nav::Artists),
+                    "albums" => store::navigate(Nav::Albums),
+                    "metadata" => store::navigate(Nav::Metadata),
+                    "folders" => store::navigate(Nav::Folders),
+                    "genres" => store::navigate(Nav::Genres),
                     _ => {}
                 }
                 close();

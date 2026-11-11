@@ -7,9 +7,11 @@ pub(crate) fn tag_sidebar_row(
     selected: impl Fn() -> bool + Clone + 'static,
     on_press: impl Fn() + 'static,
 ) -> AnyElement {
+    let sel_bg = selected.clone();
+    let sel_state = selected.clone();
     let sel_icon = selected.clone();
     let sel_text = selected.clone();
-    nsh_base::button()
+    view()
         .w_full()
         .h(px(34.0))
         .flex_row()
@@ -19,11 +21,21 @@ pub(crate) fn tag_sidebar_row(
         .gap(px(10.0))
         .rounded(px(8.0))
         .overflow_hidden()
-        .accessibility_label(label.clone())
-        .selected(selected)
-        .selected_style(|st| st.bg(move || primary().opacity(0.12)))
+        .cursor(Cursor::Pointer)
+        .role(AccessibilityRole::Link)
+        .label(label.clone())
+        .accessibility_state(move || AccessibilityState {
+            selected: sel_state(),
+            ..AccessibilityState::default()
+        })
+        .bg(move || {
+            if sel_bg() {
+                primary().opacity(0.12)
+            } else {
+                AdaptiveColor::TRANSPARENT
+            }
+        })
         .hover(|st| st.bg(move || primary().opacity(0.08)))
-        .active(|st| st.opacity(0.7))
         .on_press(move |_: &()| on_press())
         .child(
             view()
@@ -108,7 +120,7 @@ pub fn tags_sidebar_list() -> impl IntoElement {
                             };
                             tag_sidebar_row(title, count, active, move || {
                                 s.genre_sel.set(Some(key.clone()));
-                                nav.set(zeo_ui_store::Nav::Genres);
+                                zeo_ui_store::navigate(zeo_ui_store::Nav::Genres);
                             })
                         })
                         .collect()

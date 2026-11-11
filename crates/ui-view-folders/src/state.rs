@@ -21,10 +21,7 @@ pub(crate) fn create_folder_ui() -> FolderUi {
             e.insert(path.to_owned());
             expand_ancestors(e, path, SEP);
         });
-        let nav = global::<zeo_ui_store::Nav>();
-        if nav.get_untracked() != zeo_ui_store::Nav::Folders {
-            nav.set(zeo_ui_store::Nav::Folders);
-        }
+        zeo_ui_store::navigate(zeo_ui_store::Nav::Folders);
     });
     let toggle: Rc<dyn Fn(&str, bool)> = Rc::new(move |path: &str, open: bool| {
         s.folder_expanded.update(|e| {

@@ -56,7 +56,7 @@ fn track_row_double_click_like_and_menu() {
 fn home_is_default_and_shows_stats() {
     let mut app = start(1200.0, 800.0);
     assert!(
-        app.screen().selected("role:button[首页]").unwrap_or(false),
+        app.screen().selected("role:link[首页]").unwrap_or(false),
         "默认应停在首页: {:?}",
         texts(&app)
     );
@@ -128,7 +128,7 @@ fn home_counts_a_play() {
     zeo_player::engine::Player::global().pause();
 
     // 回首页：统计重读后「最近播放」卡在，「热门艺术家」同时在。
-    app.press("role:button[首页]").unwrap();
+    app.press("role:link[首页]").unwrap();
     app.wait_for("最近播放").unwrap();
     assert!(has(&app, "热门艺术家"), "{:?}", texts(&app));
     assert!(has(&app, "测试歌曲"), "{:?}", texts(&app));

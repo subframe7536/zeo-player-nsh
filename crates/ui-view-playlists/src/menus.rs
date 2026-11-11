@@ -90,7 +90,7 @@ pub(crate) fn sidebar_row(p: &Playlist) -> AnyElement {
             move || {
                 store().search.set(String::new());
                 store().search_open.set(false);
-                nav.set(Nav::Playlist(id));
+                store::navigate(Nav::Playlist(id));
             },
         ));
     // 「我喜欢」不能改名或删除：没有右键菜单。

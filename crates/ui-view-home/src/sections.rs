@@ -16,7 +16,6 @@ pub(crate) fn hot_artists(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
             return view().into_element();
         }
         let tracks = s.tracks.get();
-        let nav = global::<Nav>();
         let sel = s.artist_sel;
         let shelf = Shelf::new("home-artists-shelf", names.len());
         let strip = shelf.strip(|mut strip| {
@@ -43,7 +42,7 @@ pub(crate) fn hot_artists(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
                         .on_press(move |_: &()| {
                             // 深链进「歌手」详情：选好后切导航，Artists 直接开详情。
                             sel.set(Some(art_name.get()));
-                            nav.set(Nav::Artists);
+                            zeo_ui_store::navigate(Nav::Artists);
                         })
                         .child(when(covers_on, move || {
                             avatar(

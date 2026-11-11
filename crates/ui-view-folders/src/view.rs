@@ -193,7 +193,8 @@ pub(crate) fn tree_cell(
         .gap(px(6.0))
         .rounded(px(8.0))
         .overflow_hidden()
-        .role(AccessibilityRole::Button)
+        .cursor(Cursor::Pointer)
+        .role(AccessibilityRole::Link)
         .label(move || SharedString::from(name()))
         .accessibility_state(move || AccessibilityState {
             selected: selected(),
@@ -209,7 +210,6 @@ pub(crate) fn tree_cell(
             }
         })
         .hover(|st| st.bg(move || primary().opacity(0.08)))
-        .active(|st| st.opacity(0.7))
         .on_press(move |_: &()| {
             if let Some(r) = row.get_untracked() {
                 select(&r.path);

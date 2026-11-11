@@ -6,14 +6,14 @@ use zeo_ui_store::theme::*;
 use crate::icons::{Icon, icon};
 
 /// 侧栏里的一行：图标 + 文字。`label` 用 `SharedString`：导航是静态串，
-/// 歌单是名字。
+/// 歌单是名字。不是按钮——只指示当前路由：无按下反馈，连点同项不跳变。
 pub fn nav_row(
     glyph: Icon,
     label: SharedString,
     selected: impl Fn() -> bool + Copy + 'static,
     on_press: impl Fn() + 'static,
-) -> nsh_base::ButtonElement {
-    nsh_base::button()
+) -> View {
+    view()
         .w_full()
         .h(px(34.0))
         .flex_row()
@@ -25,11 +25,21 @@ pub fn nav_row(
         .gap(px(10.0))
         .rounded(px(8.0))
         .overflow_hidden()
-        .accessibility_label(label.clone())
-        .selected(selected)
-        .selected_style(|st| st.bg(move || primary().opacity(0.12)))
+        .cursor(Cursor::Pointer)
+        .role(AccessibilityRole::Link)
+        .label(label.clone())
+        .accessibility_state(move || AccessibilityState {
+            selected: selected(),
+            ..AccessibilityState::default()
+        })
+        .bg(move || {
+            if selected() {
+                primary().opacity(0.12)
+            } else {
+                AdaptiveColor::TRANSPARENT
+            }
+        })
         .hover(|st| st.bg(move || primary().opacity(0.08)))
-        .active(|st| st.opacity(0.7))
         .on_press(move |_: &()| on_press())
         .child(
             view()

@@ -127,7 +127,7 @@ fn body() -> View {
                         move || nav.get() == target,
                         move || {
                             s.search_open.set(false);
-                            nav.set(target);
+                            store::navigate(target);
                         },
                     )
                     .into_element()
@@ -212,23 +212,17 @@ fn sidebar_lower_section() -> View {
             let nav = global::<Nav>();
             if matches!(nav.get_untracked(), Nav::Folders | Nav::Genres) {
                 if let Some(first) = s.playlists.with(|p| p.first().map(|pl| pl.id)) {
-                    nav.set(Nav::Playlist(first));
+                    store::navigate(Nav::Playlist(first));
                 }
             }
         }),
         zeo_ui_components::form::SelectOption::new("标签", move || {
             store::set_sidebar_section(store::SidebarSection::Tags);
-            let nav = global::<Nav>();
-            if nav.get_untracked() != Nav::Genres {
-                nav.set(Nav::Genres);
-            }
+            store::navigate(Nav::Genres);
         }),
         zeo_ui_components::form::SelectOption::new("文件夹", move || {
             store::set_sidebar_section(store::SidebarSection::Folders);
-            let nav = global::<Nav>();
-            if nav.get_untracked() != Nav::Folders {
-                nav.set(Nav::Folders);
-            }
+            store::navigate(Nav::Folders);
         }),
     ];
 

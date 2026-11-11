@@ -116,13 +116,13 @@ pub fn run_keybind(action: KeyAction) {
         KeyAction::PaletteOpen => s.search_open.set(true),
         KeyAction::SettingsOpen => s.settings.set(true),
         KeyAction::FullScreen => s.full_screen.update(|on| *on = !*on),
-        KeyAction::NavHome => global::<Nav>().set(Nav::Home),
-        KeyAction::NavLibrary => global::<Nav>().set(Nav::Library),
-        KeyAction::NavArtists => global::<Nav>().set(Nav::Artists),
-        KeyAction::NavAlbums => global::<Nav>().set(Nav::Albums),
-        KeyAction::NavMetadata => global::<Nav>().set(Nav::Metadata),
-        KeyAction::NavFolders => global::<Nav>().set(Nav::Folders),
-        KeyAction::NavGenres => global::<Nav>().set(Nav::Genres),
+        KeyAction::NavHome => navigate(Nav::Home),
+        KeyAction::NavLibrary => navigate(Nav::Library),
+        KeyAction::NavArtists => navigate(Nav::Artists),
+        KeyAction::NavAlbums => navigate(Nav::Albums),
+        KeyAction::NavMetadata => navigate(Nav::Metadata),
+        KeyAction::NavFolders => navigate(Nav::Folders),
+        KeyAction::NavGenres => navigate(Nav::Genres),
         // 先关最上层的面板（命令面板、设置）；都没有才与点窗口关闭按钮走
         // 同一条路径：按「关闭窗口」设置最小化到托盘 / 询问 / 退出。
         KeyAction::CloseWindow => {
