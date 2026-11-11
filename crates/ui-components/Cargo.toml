@@ -1,0 +1,12 @@
+[package]
+name = "zeo-ui-components"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nsh-core.workspace = true
+nsh-base.workspace = true
+zeo-types.workspace = true
+zeo-icons.workspace = true
+zeo-ui-store.workspace = true

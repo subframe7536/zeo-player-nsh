@@ -1,0 +1,10 @@
+[package]
+name = "zeo-updater"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nsh-updater.workspace = true
+ureq.workspace = true
+serde_json.workspace = true

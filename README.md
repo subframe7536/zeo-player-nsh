@@ -27,9 +27,11 @@
 
 ### 3. 现代交互与沉浸视觉
 - **全屏沉浸伴播**：动态提取当前封面主色调并向界面底色轻调（切歌 300ms 平滑过渡），提供波形拖拽进度条、行级歌词同步、悬停行时间戳与单曲 ±30 秒独立歌词偏移微调（持久化记忆）。
-- **全局快捷命令面板（Command Palette）**：支持 `⌘K`（macOS）或 `Ctrl+K`（Windows）一键呼出，全键盘模糊搜索曲目、直达设置与触发控制。
+- **全局快捷命令面板（Command Palette）**：支持 `⌘K` / `⌘F`（macOS）或 `Ctrl+K` / `Ctrl+F`（Windows）一键呼出，全键盘模糊搜索曲目、直达设置与触发控制。
+- **全键盘自定义快捷键**：播放控制、页面切换、音量与窗口动作全部可在设置 →「快捷键」中搜索、录制与重绑；键位冲突时同键双方不触发并红字置顶提示，可一键还原默认。
 - **原生系统托盘与锁屏控制**：macOS 菜单栏实时曲名与黑白图标，Windows SMTC 系统媒体通知与缩略图注入，双击托盘快速唤起，单击即时播放/暂停。
 - **单实例与状态恢复**：双端系统级单实例互斥，重新启动自动恢复曲目、播放位置、音量与窗口几何布局。
+- **应用内自更新**：设置 →「关于」一键检查更新，新版本从 GitHub Releases 下载并校验 SHA-256 后原地替换，重启即生效。
 
 ---
 
@@ -47,41 +49,39 @@
 
 ### 1. 开发环境要求
 - **Rust**：最新稳定版（Rust 2024 edition），通过 [rustup.rs](https://rustup.rs) 安装。
-- **NSH CLI**：Native Shell 命令行工具，要求版本与 `Cargo.toml` 中 `nsh-core` 保持一致（目前为 `0.4.0`）：
+- **NSH CLI**：Native Shell 命令行工具，跟踪 nightly 频道、版本与 `Cargo.toml` 中 `nsh-core` 锁定的 rev 保持一致（目前为 `0.4.0` nightly；`sh scripts/update-nsh.sh` 可一键同步升级）：
   ```sh
   cargo install nsh-cli
+  nsh update nightly
   ```
 
 ### 2. 工程目录结构
 ```text
 zeo-player/
-├── Cargo.toml            # 依赖声明 (nsh-core, symphonia, lofty, cpal, rusqlite 等)
+├── Cargo.toml            # 工作区与依赖声明 (nsh-*, symphonia, lofty, cpal, rusqlite 等)
+├── nsh.json              # NSH 应用清单（窗口 / 图标 / 自更新渠道）
 ├── AGENTS.md             # 架构核心契约与开发详细约定手册 (深入贡献必读)
 ├── resources/            # 图标与图形源文件 (icon.svg, icon.png, icon-windows.png)
 ├── website/              # 官方介绍 Landing Page (HTML5 / CSS3 / ES6 / Assets)
-├── src/
-│   ├── main.rs / lib.rs  # 应用入口与 NSH 组件注册
-│   ├── engine/           # 音频核心子系统
-│   │   ├── audio.rs      # CPAL 输出流、环形缓冲、曲间无缝预取切换
-│   │   ├── codec.rs      # Symphonia 多格式音频解码与重采样
-│   │   ├── eq.rs         # 10 段 RBJ Biquad 滤波器与 5ms 线性插值平滑算法
-│   │   └── media.rs      # 系统级媒体会话 (macOS NowPlaying / Windows SMTC)
-│   ├── metadata/         # 标签与文件治理子系统
-│   │   ├── write.rs      # 24 字段标签原子安全写回 (临时文件替换，续播不中断)
-│   │   ├── rename.rs     # 模板批量重命名引擎、冲突预检与侧车同步
-│   │   ├── covers.rs     # 封面按需升级 (96px→400px) 与有界 LRU 缓存
-│   │   ├── lyrics.rs     # LRC 歌词解析与单曲/全局偏移叠加
-│   │   └── waveform.rs   # 音频波形峰值计算与缓存
-│   ├── ui/               # NSH 响应式组件与界面渲染
-│   │   ├── store.rs      # 全局 Signal 状态与命令中枢
-│   │   ├── views/        # 页面路由 (首页、曲库、元数据大表、文件夹、智能歌单等)
-│   │   ├── components/   # 原生组件库 (Slider, Select, Combobox, Table 等)
-│   │   ├── frame/        # 窗口框架 (侧栏、标题栏、浮动播放条、队列抽屉)
-│   │   └── now_playing/  # 全屏播放器与波形歌词伴播
-│   ├── db.rs             # 内嵌 SQLite 与曲库倒排索引驱动
-│   ├── playlists.rs      # 手动歌单与智能歌单条件解析器
-│   ├── single_instance.rs# macOS flock 与 Windows Mutex 单实例互斥
-│   └── window.rs         # 窗口生命周期、托盘图标与全局快捷键
+├── src/                  # 根 crate zeo-player：NSH 组件注册、App 根组件与端到端测试
+└── crates/               # Cargo 工作区，zeo-* 领域 crate 自下而上分层依赖
+    ├── types/            # 纯数据模型：配置 / 元数据 / 音频规格 / 偏好镜像
+    ├── db/               # 内嵌 SQLite 持久层与播放统计
+    ├── metadata/         # 标签读写 / 封面缓存 / 歌词 / 波形 / 模板批量重命名引擎
+    ├── library/          # 曲库索引与文件监听（macOS FSEvents / Windows 通知）
+    ├── playlists/        # 手动歌单与智能歌单条件解析
+    ├── engine/           # 音频核心：CPAL 输出、Symphonia 解码、10 段 EQ、媒体会话
+    ├── icons/            # 内置图标库
+    ├── keybinds/         # 快捷键动作与键位计算
+    ├── shell/            # 窗口生命周期、单实例互斥、系统托盘、访达定位
+    ├── updater/          # 自更新：清单校验 / 下载 / 原地替换
+    ├── ui-store/         # 全局 Signal 状态与命令中枢
+    ├── ui-components/    # 原生组件库 (Slider, Select, Combobox, Table 等)
+    ├── ui-views-base/    # 跨页共享件与曲目右键菜单
+    ├── ui-view-*/        # 页面路由 crate：首页 / 浏览 / 文件夹 / 歌单 / 元数据 / 编辑信息 / 设置 / 命令面板
+    ├── ui-views/         # 各视图的门面聚合
+    ├── ui-now-playing/   # 全屏播放器与波形歌词伴播
+    └── ui-frame/         # 窗口框架 (侧栏、标题栏、浮动播放条、队列抽屉)
 ```
 
 ### 3. 开发、调试与测试常用命令

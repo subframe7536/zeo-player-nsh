@@ -5,60 +5,81 @@ edition = "2024"
 publish = false
 
 [workspace]
+members = ["crates/*"]
+
+# 各 crate 共用的依赖版本：nsh-* 跟 nightly 频道（nsh update nightly），rev 与
+# `nsh --version` 括号里的提交一致，dev-dependencies 里的 nsh-engine / nsh-testing
+# 一起改。nightly 不发 crates.io，走 git。`sh scripts/update-nsh.sh` 一键对齐。
+[workspace.dependencies]
+nsh-core = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702", features = ["svg"] }
+nsh-base = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702" }
+nsh-engine = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702" }
+nsh-testing = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702", default-features = false }
+nsh-updater = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "7"
+dunce = "1"
+ureq = "3.1"
+
+zeo-types = { path = "crates/types" }
+zeo-keybinds = { path = "crates/keybinds" }
+zeo-db = { path = "crates/db" }
+zeo-metadata = { path = "crates/metadata" }
+zeo-library = { path = "crates/library" }
+zeo-playlists = { path = "crates/playlists" }
+zeo-engine = { path = "crates/engine" }
+zeo-icons = { path = "crates/icons" }
+zeo-shell = { path = "crates/shell" }
+zeo-updater = { path = "crates/updater" }
+zeo-ui-store = { path = "crates/ui-store" }
+zeo-ui-components = { path = "crates/ui-components" }
+zeo-ui-views = { path = "crates/ui-views" }
+zeo-ui-views-base = { path = "crates/ui-views-base" }
+zeo-ui-view-home = { path = "crates/ui-view-home" }
+zeo-ui-view-browse = { path = "crates/ui-view-browse" }
+zeo-ui-view-folders = { path = "crates/ui-view-folders" }
+zeo-ui-view-playlists = { path = "crates/ui-view-playlists" }
+zeo-ui-view-metadata = { path = "crates/ui-view-metadata" }
+zeo-ui-view-edit-info = { path = "crates/ui-view-edit-info" }
+zeo-ui-view-settings = { path = "crates/ui-view-settings" }
+zeo-ui-view-command-palette = { path = "crates/ui-view-command-palette" }
+zeo-ui-now-playing = { path = "crates/ui-now-playing" }
+zeo-ui-frame = { path = "crates/ui-frame" }
 
 [dependencies]
-# NSH：与 nsh CLI 同版本（nsh --version），dev-dependencies 里的 nsh-engine / nsh-testing 一起改。
-# 见 https://nsh.dev/docs/installation
-nsh-core = { version = "0.4.0", features = ["svg"] }
-nsh-base = "0.4.0"
+nsh-core.workspace = true
+zeo-shell.workspace = true
+zeo-ui-store.workspace = true
+zeo-ui-components.workspace = true
+zeo-ui-views.workspace = true
+zeo-ui-now-playing.workspace = true
+zeo-ui-frame.workspace = true
+# 根 crate 平铺重导出的领域 crate（测试与外部用 `zeo_player::config` 等路径）。
+zeo-types.workspace = true
+zeo-db.workspace = true
+zeo-metadata.workspace = true
+zeo-library.workspace = true
+zeo-playlists.workspace = true
+zeo-engine.workspace = true
 
-# 音频：解码、输出、重采样、系统媒体会话。
-symphonia = { version = "0.6", features = ["mp3", "flac", "wav", "aac", "alac", "isomp4", "ogg", "vorbis", "aiff"] }
-cpal = { version = "0.18", features = ["realtime"] }
-rubato = "5"
-playwire = "2"
-
-# 曲库：标签、封面缩略图 / 主色调（color-thief 中位切分）、扫描与文件夹监视。
-lofty = "0.25"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
-color-thief = "0.2.2"
-walkdir = "2"
-notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
-dunce = "1"
-# 「删除文件」移到回收站（macOS Finder / Windows 回收站；Linux 走 freedesktop）。
-trash = "5"
-
-# 持久化：数据 / 缓存目录与 JSON；曲目元数据与播放状态存 SQLite（bundled：自带 SQLite，不依赖系统库）。
-dirs = "7"
-serde = { version = "1", features = ["derive"] }
-# 窗口事件唤醒界面（`window::changed`）；NSH 已依赖 tokio，只加 sync。
-tokio = { version = "1", default-features = false, features = ["sync"] }
-serde_json = "1"
-rusqlite = { version = "0.41", features = ["bundled"] }
-
-# 已安装字体列表（macOS CoreText、Windows DirectWrite、Linux fontconfig）。
-font-enumeration = "0.9"
-
-# 系统文件夹选择器（NSOpenPanel / IFileDialog）；托盘图标与菜单。
-[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
-rfd = { version = "0.17", default-features = false }
-tray-icon = "0.26"
-
-# Windows：子类化窗口拦截 WM_CLOSE、接管标题栏的非客户区（应用自己画窗口按钮）、关窗后结束进程、托盘时收缩工作集、音频线程优先级。
-# windows crate（playwire 同款 0.62）：SMTC 缩略图改用 StorageFile 直投——
-# playwire 只认 CreateFromUri，而 file: 不在 WinRT 的 scheme 白名单里。
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_Memory", "Win32_System_ProcessStatus", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
-windows = { version = "0.62", features = ["Foundation", "Media", "Storage", "Storage_Streams", "Win32_Foundation", "Win32_System_WinRT"] }
-
-# macOS：替换窗口代理的 windowShouldClose:，在主线程上调度。
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSRunningApplication", "NSWindow", "NSResponder"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "NSBundle", "NSDictionary", "NSDistributedNotificationCenter", "objc2-core-foundation"] }
-dispatch2 = "0.3"
-
-# 界面测试（tests/ui.rs）：无头引擎运行根组件，不带 QuickJS。
 [dev-dependencies]
-nsh-engine = "0.4.0"
-nsh-testing = { version = "0.4.0", default-features = false }
+# 界面测试（tests/ui.rs）：无头引擎运行根组件，不带 QuickJS。
+nsh-engine.workspace = true
+nsh-testing.workspace = true
+nsh-base.workspace = true
+serde_json.workspace = true
+dunce.workspace = true
+
+# 测试构建（cargo test / nsh test 走 test profile，继承 dev）：无头 UI 测试
+# 的时间大头在依赖代码（引擎提交、布局、图像 / 标签解码）——依赖编 O2
+# 明显省时；本 crate 只到 O1，迭代重编代价小。行号级调试信息砍掉变量
+# 数据：PDB 小、MSVC 链接与 Windows 杀软扫描都快一截。
+# release profile 在 .cargo/config.toml（含 opt-s / lto）。
+[profile.test]
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.test.package."*"]
+opt-level = 2

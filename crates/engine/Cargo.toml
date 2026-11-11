@@ -1,0 +1,22 @@
+[package]
+name = "zeo-engine"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# 解码经 zeo_metadata::codec（symphonia）；这里管输出、重采样、系统媒体会话。
+cpal = { version = "0.18", features = ["realtime"] }
+rubato = "5"
+playwire = "2"
+serde.workspace = true
+zeo-types.workspace = true
+zeo-db.workspace = true
+zeo-metadata.workspace = true
+zeo-library.workspace = true
+
+# Windows：音频线程优先级（Threading）；SMTC 缩略图用 StorageFile 直投
+# （playwire 只认 CreateFromUri，file: 不在 WinRT 的 scheme 白名单里）。
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Threading"] }
+windows = { version = "0.62", features = ["Foundation", "Media", "Storage", "Storage_Streams", "Win32_Foundation", "Win32_System_WinRT"] }

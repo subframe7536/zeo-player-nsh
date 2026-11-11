@@ -1,0 +1,26 @@
+[package]
+name = "zeo-ui-store"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nsh-core.workspace = true
+nsh-base.workspace = true
+serde_json.workspace = true
+dirs.workspace = true
+# 已安装字体列表（macOS CoreText、Windows DirectWrite、Linux fontconfig）。
+font-enumeration = "0.9"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp", "gif"] }
+zeo-types.workspace = true
+zeo-keybinds.workspace = true
+zeo-db.workspace = true
+zeo-metadata.workspace = true
+zeo-library.workspace = true
+zeo-playlists.workspace = true
+zeo-engine.workspace = true
+zeo-shell.workspace = true
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+rfd = { version = "0.17", default-features = false }
+zeo-updater.workspace = true

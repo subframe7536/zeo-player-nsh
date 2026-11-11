@@ -1,0 +1,28 @@
+[package]
+name = "zeo-ui-view-metadata"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nsh-core.workspace = true
+nsh-base.workspace = true
+zeo-ui-views-base.workspace = true
+zeo-ui-store.workspace = true
+zeo-ui-components.workspace = true
+zeo-types.workspace = true
+zeo-metadata.workspace = true
+zeo-library.workspace = true
+zeo-playlists.workspace = true
+zeo-ui-view-folders.workspace = true
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+rfd = { version = "0.17", default-features = false }
+zeo-db.workspace = true
+zeo-engine.workspace = true
+
+# 面板测试挂载 UI set 用根 crate 的 `zeo_player::registry()`（dev 回环允许）。
+[dev-dependencies]
+zeo-player = { path = "../.." }
+nsh-engine.workspace = true
+nsh-testing.workspace = true

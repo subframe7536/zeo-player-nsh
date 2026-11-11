@@ -1,0 +1,19 @@
+[package]
+name = "zeo-ui-views"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nsh-core.workspace = true
+zeo-ui-views-base.workspace = true
+zeo-ui-store.workspace = true
+zeo-ui-components.workspace = true
+zeo-ui-view-home.workspace = true
+zeo-ui-view-browse.workspace = true
+zeo-ui-view-folders.workspace = true
+zeo-ui-view-playlists.workspace = true
+zeo-ui-view-metadata.workspace = true
+zeo-ui-view-edit-info.workspace = true
+zeo-ui-view-settings.workspace = true
+zeo-ui-view-command-palette.workspace = true
