@@ -3,881 +3,224 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Zeo Player - 本地曲库的精密中枢 | 纯 Rust 原生桌面音频工作台</title>
-  <meta name="description" content="Zeo Player 是基于 Rust 与 NSH 原生架构构建的桌面音乐播放与管理工具，专为严苛音乐收藏者打造。提供 24 字段全维元数据治理大表、规则化批量重命名、双向目录监控与发烧级无缝播放。">
+  <title>Zeo Player — 本地优先的音乐播放器</title>
+  <meta name="description" content="Zeo Player 是一个纯 Rust 写的本地音乐播放器，开源免费，支持 macOS 和 Windows。">
   <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
   <link rel="stylesheet" href="styles.css">
 </head>
-<body class="dark-theme">
-  <!-- 背景微点阵与科技流光 -->
+<body>
   <div class="tech-grid-bg"></div>
   <div class="glow-orb orb-primary"></div>
   <div class="glow-orb orb-secondary"></div>
 
-  <!-- 顶部导航栏 -->
-  <header class="navbar" id="navbar">
+  <header class="navbar">
     <div class="nav-container">
       <a href="#" class="brand-group">
-        <img src="assets/icon.svg" alt="Zeo Player Logo" class="brand-logo" width="32" height="32">
-        <div class="brand-text">
-          <span class="brand-name">Zeo Player</span>
-          <span class="brand-badge">Native Shell v0.4.0</span>
-        </div>
+        <img src="assets/icon.svg" alt="Zeo Player" class="brand-logo" width="32" height="32">
+        <span class="brand-name">Zeo Player</span>
       </a>
 
       <nav class="nav-links">
-        <a href="#management" class="nav-item active-nav">曲库治理 <span class="hot-badge">PRO</span></a>
-        <a href="#interactive" class="nav-item">在线体验</a>
-        <a href="#playback" class="nav-item">发烧音频</a>
-        <a href="#architecture" class="nav-item">原生架构</a>
-        <a href="#comparison" class="nav-item">对比评估</a>
-        <a href="#download" class="nav-item">获取下载</a>
+        <a href="#features" class="nav-item">功能</a>
+        <a href="#screenshots" class="nav-item">截图</a>
+        <a href="#download" class="nav-item">下载</a>
       </nav>
 
       <div class="nav-actions">
-        <button class="cmd-trigger-btn" id="cmdTriggerBtn" title="唤出全局命令面板 (⌘K / Ctrl+K)">
-          <svg class="cmd-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0 3-3 3 3 0 0 0 3-3-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
-          </svg>
-          <span class="cmd-text">搜索 / 命令</span>
-          <kbd class="cmd-kbd">⌘K</kbd>
-        </button>
-
         <a href="https://github.com/subf/zeo-player" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-icon" title="GitHub 仓库">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
             <path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/>
           </svg>
         </a>
-
-        <a href="#download" class="btn btn-primary btn-sm">
-          <span>下载客户端</span>
-          <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06z"/></svg>
-        </a>
+        <a href="#download" class="btn btn-primary btn-sm">下载</a>
       </div>
     </div>
   </header>
 
-  <!-- 英雄区 (Hero Section) -->
   <section class="hero-section">
     <div class="section-container hero-container">
       <div class="hero-status-pill">
         <span class="status-indicator"></span>
-        <span class="status-label">纯 Rust 原生构建 • 零 Electron 臃肿 • macOS & Windows</span>
+        <span>开源免费 · 纯 Rust 原生应用 · macOS / Windows</span>
       </div>
 
-      <h1 class="hero-title">
-        本地曲库的<span class="gradient-text">精密中枢</span>
-      </h1>
-      <p class="hero-tagline">The Native Audio Workstation for Local Libraries</p>
+      <h1 class="hero-title">本地优先的<span class="gradient-text">音乐播放器</span></h1>
 
       <p class="hero-description">
-        专为严苛音乐收藏者打造。以系统底层原生性能毫秒解析十万级曲目，融合 <strong>24 字段全量元数据治理大表</strong>、<strong>双向文件树监视</strong> 与 <strong>发烧级无爆音回放引擎</strong>。拒绝网页套壳，还原本质的轻快与掌控力。
+        纯 Rust 写的原生应用，没有内嵌浏览器，也不用登录账号。
+        曲库管理有 24 个字段的元数据大表和模板批量改名；播放有无缝接续、10 段均衡器和逐行歌词。
       </p>
 
       <div class="hero-actions">
         <a href="#download" class="btn btn-primary btn-lg">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          <span>获取下载 (macOS / Win)</span>
+          <span>下载</span>
         </a>
-        <a href="#management" class="btn btn-secondary btn-lg">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
-          <span>探索治理大表</span>
-        </a>
-        <a href="#interactive" class="btn btn-outline btn-lg">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
-          <span>在线调音与重命名</span>
+        <a href="https://github.com/subf/zeo-player" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-lg">
+          <span>GitHub 仓库</span>
         </a>
       </div>
 
-      <!-- 核心硬核指标条 -->
-      <div class="metrics-grid">
-        <div class="metric-card">
-          <div class="metric-value">~35 <span class="metric-unit">MB</span></div>
-          <div class="metric-label">常驻运行内存</div>
-          <div class="metric-desc">纯 AppKit / Direct2D 原生绘制</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-value">100,000<span class="metric-unit">+</span></div>
-          <div class="metric-label">曲目 120 FPS 虚拟滚动</div>
-          <div class="metric-desc">视口仅物化 120 行，零掉帧</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-value">24 <span class="metric-unit">Fields</span></div>
-          <div class="metric-label">全维度元数据矩阵</div>
-          <div class="metric-desc">涵盖作词、指挥、ReplayGain 等</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-value">0.0 <span class="metric-unit">ms</span></div>
-          <div class="metric-label">曲间无缝预取切换</div>
-          <div class="metric-desc">解码样本边界连续对接，无停顿</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-value">10 <span class="metric-unit">Bands</span></div>
-          <div class="metric-label">RBJ 双极高精度均衡器</div>
-          <div class="metric-desc">5ms 线性参数渐变，拖动无爆音</div>
-        </div>
-      </div>
-
-      <!-- 主工作台界面视窗模拟 -->
       <div class="workbench-window-frame">
-        <div class="window-titlebar">
-          <div class="window-controls">
-            <span class="control-dot close"></span>
-            <span class="control-dot min"></span>
-            <span class="control-dot zoom"></span>
-          </div>
-          <div class="window-title">
-            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
-            Zeo Player — 元数据工作台与曲库管理矩阵
-          </div>
-          <div class="window-badge">
-            <span class="mono-text">SQLITE 0.4ms</span>
-          </div>
-        </div>
-
-        <div class="window-body-viewport">
-          <img src="assets/metadata-view.png" alt="Zeo Player 元数据治理大表工作台" class="workbench-img">
-          
-          <!-- 工作台交互热点透镜 -->
-          <div class="workbench-lens lens-table" data-lens="table">
-            <div class="lens-ping"></div>
-            <div class="lens-tooltip">
-              <span class="lens-title">24 列虚拟化元数据大表</span>
-              <span class="lens-detail">固定文件名首列、自由显隐列、动态拖拽导轨列宽与三态即时排序</span>
-            </div>
-          </div>
-
-          <div class="workbench-lens lens-inspector" data-lens="inspector">
-            <div class="lens-ping"></div>
-            <div class="lens-tooltip">
-              <span class="lens-title">浮动单曲/批量参数检查器</span>
-              <span class="lens-detail">编码参数一键复制、主干原子重命名、同名 .lrc 与封面图片侧车自动同步</span>
-            </div>
-          </div>
-
-          <div class="workbench-lens lens-toolbar" data-lens="toolbar">
-            <div class="lens-ping"></div>
-            <div class="lens-tooltip">
-              <span class="lens-title">智能筛选与批量排式工具</span>
-              <span class="lens-detail">音轨自增连续编号、英文大小写格式化与模板重命名沙箱预检</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="window-statusbar">
-          <div class="status-left">
-            <span class="status-tag live">WATCHER ACTIVE</span>
-            <span class="status-text">曲库已就绪: 4,820 首音频文件 • 24 字段无缺失</span>
-          </div>
-          <div class="status-right">
-            <span class="status-chip">FLAC 96kHz / 24-bit</span>
-            <span class="status-chip">GAPLESS ON</span>
-            <span class="status-chip">REPLAYGAIN -4.8dB</span>
-          </div>
-        </div>
+        <img src="assets/img-home.webp" alt="Zeo Player 首页" class="workbench-img">
       </div>
     </div>
   </section>
 
-  <!-- 核心支柱：全维曲库治理工作台 (Core Feature Pillar) -->
-  <section class="section-container" id="management">
+  <section class="section-container" id="features">
     <div class="section-header">
-      <div class="section-eyebrow">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
-        LIBRARY GOVERNANCE
-      </div>
-      <h2 class="section-title">告别失控与杂乱，掌控每一段音频资产</h2>
-      <p class="section-subtitle">
-        真正的本地播放器不仅要播得动听，更要管得条理分明。Zeo Player 将专业工作台级的数据处理矩阵引入本地音乐库。
-      </p>
+      <div class="section-eyebrow">FEATURES</div>
+      <h2 class="section-title">主要功能</h2>
     </div>
 
-    <div class="bento-grid">
-      <!-- Bento 1: 元数据治理矩阵 (大卡片) -->
-      <div class="bento-card bento-span-2">
-        <div class="card-glow-edge"></div>
-        <div class="bento-header">
-          <div class="bento-icon-box">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3zM3 9h18M9 21V9M15 21V9"/></svg>
-          </div>
-          <div>
-            <div class="bento-tag">24 字段专业大表</div>
-            <h3 class="bento-title">全维度标签表格，从艺术家到 ReplayGain</h3>
-          </div>
-        </div>
-        <p class="bento-description">
-          打破普通播放器仅显示歌名歌手的局限。提供全库曲目元数据大表，集成指挥、作词、发行商、版权、注释、精确评分与响度增益。首列粘滞固定文件名，横向平滑滚动支持自定义分组显隐列，按需隐藏或全览。
-        </p>
-
-        <div class="field-tags-showcase">
-          <span class="field-pill active">文件名 (固定)</span>
-          <span class="field-pill">标题</span>
-          <span class="field-pill">艺术家</span>
-          <span class="field-pill">专辑</span>
-          <span class="field-pill">专辑艺术家</span>
-          <span class="field-pill">音轨 #</span>
-          <span class="field-pill">碟号</span>
-          <span class="field-pill">年份</span>
-          <span class="field-pill">流派</span>
-          <span class="field-pill highlight">指挥 Conductor</span>
-          <span class="field-pill highlight">作词 Lyricist</span>
-          <span class="field-pill highlight">发行商 Publisher</span>
-          <span class="field-pill highlight">版权 Copyright</span>
-          <span class="field-pill">注释</span>
-          <span class="field-pill">评分</span>
-          <span class="field-pill tech">ReplayGain Track</span>
-          <span class="field-pill tech">ReplayGain Album</span>
-          <span class="field-pill tech">采样率</span>
-          <span class="field-pill tech">比特率</span>
-          <span class="field-pill tech">位深</span>
-          <span class="field-pill tech">文件大小</span>
-          <span class="field-pill">时长</span>
-          <span class="field-pill">修改时间</span>
-          <span class="field-pill">入库时间</span>
-        </div>
-
-        <div class="feature-bullets-grid">
-          <div class="bullet-item">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="#10b981"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"/></svg>
-            <span><strong>零掉帧虚拟化：</strong> 仅物化视口内 ~120 行 DOM，十万首曲库惯性滚动顺畅如初。</span>
-          </div>
-          <div class="bullet-item">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="#10b981"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"/></svg>
-            <span><strong>无感知原子落盘：</strong> 标签写入采用临时文件原子替换，正在播放的歌曲无感知无缝续播。</span>
-          </div>
-        </div>
+    <div class="features-grid">
+      <div class="feature-group">
+        <h3 class="feature-group-title">界面和系统</h3>
+        <ul class="feature-list">
+          <li>
+            <strong>全屏播放页</strong>
+            背景跟随封面主色、波形进度条，歌词偏移可按单曲微调
+          </li>
+          <li>
+            <strong>命令面板</strong>
+            <code>⌘K</code> / <code>Ctrl+K</code> 呼出，键盘搜索曲目、跳转设置
+          </li>
+          <li>
+            <strong>自定义快捷键</strong>
+            全部可重绑，冲突时给出提示
+          </li>
+          <li>
+            <strong>系统集成</strong>
+            菜单栏 / 系统托盘常驻，Windows 支持 SMTC 媒体通知
+          </li>
+          <li>
+            <strong>主题色跟随封面</strong>
+            根据封面自动切换主题色
+          </li>
+        </ul>
       </div>
 
-      <!-- Bento 2: 模板批量重命名引擎 -->
-      <div class="bento-card">
-        <div class="bento-header">
-          <div class="bento-icon-box">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </div>
-          <div>
-            <div class="bento-tag">安全重命名沙箱</div>
-            <h3 class="bento-title">模板批量重命名与侧车同步</h3>
-          </div>
-        </div>
-        <p class="bento-description">
-          使用 <code>{track:02d} - {artist} - {title}</code> 等占位符极速规范混乱的文件名。自动规避 Windows 保留字符与 255 字节上限，并在提交前进行碰撞预检。
-        </p>
-
-        <!-- 侧车联动示意图 -->
-        <div class="sidecar-sync-box">
-          <div class="sync-row primary-audio">
-            <span class="file-badge">FLAC</span>
-            <span class="file-name">01 - Daft Punk - Giorgio by Moroder.flac</span>
-            <span class="sync-tag">原位改名</span>
-          </div>
-          <div class="sync-link-line">
-            <span class="link-label">同名侧车自动跟随联动（绝不丢链）</span>
-          </div>
-          <div class="sync-row sidecar-file">
-            <span class="file-badge lrc">LRC</span>
-            <span class="file-name">01 - Daft Punk - Giorgio by Moroder.lrc</span>
-            <span class="sync-tag auto">同步重命名</span>
-          </div>
-          <div class="sync-row sidecar-file">
-            <span class="file-badge img">COVER</span>
-            <span class="file-name">01 - Daft Punk - Giorgio by Moroder.jpg</span>
-            <span class="sync-tag auto">同步重命名</span>
-          </div>
-        </div>
+      <div class="feature-group">
+        <h3 class="feature-group-title">曲库和标签</h3>
+        <ul class="feature-list">
+          <li>
+            <strong>元数据表格</strong>
+            24 个元数据字段，可批量修改，列可显隐、拖宽、排序，数万首曲目滚动流畅
+          </li>
+          <li>
+            <strong>批量重命名</strong>
+            按模板批量重命名，如 <code>{track:02d} - {artist} - {title}</code>；同名 <code>.lrc</code> 歌词与封面图自动联动改名，改名前检查冲突
+          </li>
+          <li>
+            <strong>文件夹自动同步</strong>
+            自动监听文件夹变动，外部增删、移动文件即时同步；文件移动后仍能识别，播放记录与歌单保留
+          </li>
+          <li>
+            <strong>智能歌单</strong>
+            按标题、艺术家、专辑、标签、采样率等条件组合筛选
+          </li>
+        </ul>
       </div>
 
-      <!-- Bento 3: 实时文件系统监视与目录树 -->
-      <div class="bento-card">
-        <div class="bento-header">
-          <div class="bento-icon-box">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M12 11v6M9 14h6"/></svg>
-          </div>
-          <div>
-            <div class="bento-tag">系统级文件监听</div>
-            <h3 class="bento-title">实时双向监视与目录树</h3>
-          </div>
-        </div>
-        <p class="bento-description">
-          底层挂载 macOS FSEvents 与 Windows 文件通知。外部移动、改名或增删文件，曲库秒级静默同步。独创 <code>(文件大小, mtime)</code> 指纹追踪，文件移位后仍完整保留累计播放时长、历史与歌单归属。
-        </p>
-        <div class="tech-metric-mini">
-          <div class="mini-tag"><span>无需全库重扫</span> • <span>指纹原位换路径</span></div>
-        </div>
-      </div>
-
-      <!-- Bento 4: 规则驱动智能动态歌单 -->
-      <div class="bento-card bento-span-2">
-        <div class="bento-header">
-          <div class="bento-icon-box">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-          </div>
-          <div>
-            <div class="bento-tag">动态规则引擎</div>
-            <h3 class="bento-title">跨维度智能歌单，音乐自动归类</h3>
-          </div>
-        </div>
-        <p class="bento-description">
-          支持「符合 全部 / 任一 条件」多级嵌套逻辑。横跨元数据字段（流派包含 Jazz、年份≥2020）、音频硬件参数（采样率≥96kHz、格式为 FLAC/DSD）、文件属性（文件大小>50MB）自由组合，曲库变更时实时重算。
-        </p>
-
-        <!-- 模拟智能规则面板 -->
-        <div class="rule-builder-preview">
-          <div class="rule-top-bar">
-            <span class="rule-mode-tag">匹配以下 全部 (AND) 条件:</span>
-            <span class="rule-count-tag">实时匹配 284 首曲目</span>
-          </div>
-          <div class="rule-row">
-            <span class="rule-chip">音频参数</span>
-            <span class="rule-chip">采样率 (Sample Rate)</span>
-            <span class="rule-chip-op">大于等于</span>
-            <span class="rule-chip-val">96,000 Hz (Hi-Res)</span>
-          </div>
-          <div class="rule-row">
-            <span class="rule-chip">元数据</span>
-            <span class="rule-chip">流派 (Genre)</span>
-            <span class="rule-chip-op">包含</span>
-            <span class="rule-chip-val">Electronic / Soundtrack</span>
-          </div>
-          <div class="rule-row">
-            <span class="rule-chip">播放统计</span>
-            <span class="rule-chip">播放次数 (Play Count)</span>
-            <span class="rule-chip-op">大于</span>
-            <span class="rule-chip-val">10 次</span>
-          </div>
-        </div>
+      <div class="feature-group">
+        <h3 class="feature-group-title">播放</h3>
+        <ul class="feature-list">
+          <li>
+            <strong>10 段均衡器</strong>
+            31 Hz–16 kHz，拖动平滑无爆音，带防削波
+          </li>
+          <li>
+            <strong>淡入淡出</strong>
+            切换歌曲淡入淡出
+          </li>
+          <li>
+            <strong>随机播放</strong>
+            更优的播放队列随机算法
+          </li>
+          <li>
+            <strong>ReplayGain</strong>
+            音量标准化
+          </li>
+          <li>
+            <strong>自动暂停</strong>
+            拔出耳机或蓝牙断开时自动暂停
+          </li>
+        </ul>
       </div>
     </div>
   </section>
 
-  <!-- 交互式工作台体验区 (Interactive Sandbox) -->
-  <section class="section-container" id="interactive">
+  <section class="section-container" id="screenshots">
     <div class="section-header">
-      <div class="section-eyebrow">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
-        LIVE PLAYGROUND
-      </div>
-      <h2 class="section-title">亲自上手感受治理精度与调音算法</h2>
-      <p class="section-subtitle">
-        无需安装即可在此体验 Zeo Player 的元数据参数检查器、批量重命名计算器与 10 段高精度双极均衡器。
-      </p>
+      <div class="section-eyebrow">SCREENSHOTS</div>
+      <h2 class="section-title">界面截图</h2>
     </div>
 
-    <!-- 交互切换标签卡 -->
-    <div class="interactive-tabs">
-      <button class="tab-btn active" data-tab="inspector">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
-        <span>元数据与重命名模拟器</span>
-      </button>
-      <button class="tab-btn" data-tab="equalizer">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/></svg>
-        <span>10 段发烧级 RBJ 双极均衡器</span>
-      </button>
-    </div>
-
-    <!-- 交互区 A: 元数据检查器与重命名预览 -->
-    <div class="sandbox-panel active" id="panel-inspector">
-      <div class="sandbox-grid">
-        <!-- 左侧模拟曲目列表 -->
-        <div class="sandbox-card track-selector-card">
-          <div class="card-caption">
-            <span>选择本地曲目</span>
-            <span class="caption-hint">点击载入检查器</span>
-          </div>
-          <div class="track-list" id="trackListContainer">
-            <!-- 由 JS 渲染曲目条目 -->
-          </div>
-        </div>
-
-        <!-- 中间可编辑标签与音频参数 -->
-        <div class="sandbox-card track-form-card">
-          <div class="card-caption">
-            <span>高精度音频参数与标签检查器</span>
-            <span class="status-badge" id="sourceBadge">SIDECAR PREFERRED</span>
-          </div>
-
-          <div class="audio-specs-deck" id="audioSpecsDeck">
-            <!-- 动态填充音频规格 -->
-          </div>
-
-          <div class="form-grid">
-            <div class="form-group">
-              <label>曲目标题 (Title)</label>
-              <input type="text" class="tech-input" id="editTitle" value="">
-            </div>
-            <div class="form-group">
-              <label>艺术家 (Artist)</label>
-              <input type="text" class="tech-input" id="editArtist" value="">
-            </div>
-            <div class="form-group">
-              <label>所属专辑 (Album)</label>
-              <input type="text" class="tech-input" id="editAlbum" value="">
-            </div>
-            <div class="form-group">
-              <label>音轨号 / 年份</label>
-              <div class="dual-inputs">
-                <input type="text" class="tech-input" id="editTrack" value="" placeholder="Track #">
-                <input type="text" class="tech-input" id="editYear" value="" placeholder="Year">
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 右侧模板批量重命名预览 -->
-        <div class="sandbox-card renamer-card">
-          <div class="card-caption">
-            <span>模板重命名引擎 (Template Renamer)</span>
-            <span class="safe-badge">SANDBOX SAFE</span>
-          </div>
-
-          <div class="renamer-body">
-            <label class="input-label">重命名规则模板：</label>
-            <div class="template-input-wrapper">
-              <input type="text" class="tech-input mono-font" id="renamePattern" value="{track:02d} - {artist} - {title}">
-            </div>
-            <div class="token-helper">
-              <span>可用占位符：</span>
-              <button class="token-btn" data-token="{track:02d}">{track:02d}</button>
-              <button class="token-btn" data-token="{artist}">{artist}</button>
-              <button class="token-btn" data-token="{title}">{title}</button>
-              <button class="token-btn" data-token="{album}">{album}</button>
-            </div>
-
-            <div class="rename-preview-box">
-              <div class="preview-item">
-                <span class="item-label">当前主文件名：</span>
-                <span class="item-val old-name" id="oldFileName">--</span>
-              </div>
-              <div class="preview-arrow">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
-                <span>预检计算结果 (同名 .lrc 与封面同步更新)</span>
-              </div>
-              <div class="preview-item highlight-box">
-                <span class="item-label">生成新文件名：</span>
-                <span class="item-val new-name" id="newFileName">--</span>
-              </div>
-            </div>
-
-            <div class="precheck-status">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="#10b981"><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm3.78-9.72a.75.75 0 0 0-1.06-1.06L7 8.94 5.28 7.22a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.06 0l4.25-4.25z"/></svg>
-              <span>预检通过：字符合法，原扩展名保护，无同名冲突，就绪执行</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 交互区 B: 10段 RBJ 双极均衡器 -->
-    <div class="sandbox-panel" id="panel-equalizer">
-      <div class="eq-workbench-card">
-        <div class="eq-top-controls">
-          <div class="eq-info-group">
-            <span class="eq-brand">10-BAND STEREO GRAPHIC EQUALIZER</span>
-            <span class="eq-algo-tag">RBJ Biquad • 5ms Linear Interpolation • Headroom Guard</span>
-          </div>
-
-          <div class="preset-selector">
-            <span class="preset-label">调音预设：</span>
-            <div class="preset-buttons" id="eqPresetButtons">
-              <button class="preset-btn active" data-preset="flat">平直 (Flat)</button>
-              <button class="preset-btn" data-preset="bass">重低音 (Bass Boost)</button>
-              <button class="preset-btn" data-preset="vocal">清澈人声 (Vocal)</button>
-              <button class="preset-btn" data-preset="rock">摇滚 (Rock)</button>
-              <button class="preset-btn" data-preset="jazz">爵士 (Jazz)</button>
-              <button class="preset-btn" data-preset="classical">古典 (Classical)</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 频响曲线 Canvas 仿真画布 -->
-        <div class="eq-canvas-container">
-          <canvas id="eqCurveCanvas" width="960" height="160"></canvas>
-          <div class="canvas-grid-markers">
-            <span>+12 dB</span>
-            <span>+6 dB</span>
-            <span>0 dB</span>
-            <span>-6 dB</span>
-            <span>-12 dB</span>
-          </div>
-        </div>
-
-        <!-- 10 个立体声双极推子 -->
-        <div class="eq-faders-rack" id="eqFadersRack">
-          <!-- 由 JS 渲染 10 段竖向推子 -->
-        </div>
-
-        <div class="eq-footer-status">
-          <div class="headroom-meter">
-            <span class="meter-label">HEADROOM ANTI-CLIPPING</span>
-            <div class="meter-bar-track">
-              <div class="meter-bar-fill" id="headroomBar" style="width: 25%;"></div>
-            </div>
-            <span class="meter-val" id="headroomDb">-1.8 dB</span>
-          </div>
-          <p class="eq-footnote">
-            * Zeo Player 引擎采用 Robert Bristow-Johnson (RBJ) peaking biquad 滤波器。推子调节或切换预设时系数按 5ms 线性逼近平滑渐变，无惧大幅推拉，绝无瞬态杂音与破音爆破。
-          </p>
-        </div>
-      </div>
+    <div class="shots-grid">
+      <figure class="shot-card">
+        <img src="assets/img-metadata-table.webp" alt="元数据页" loading="lazy">
+        <figcaption>元数据页：全库标签大表，右侧检查器直接编辑标签、封面和歌词</figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="assets/img-now-playing.webp" alt="全屏播放" loading="lazy">
+        <figcaption>全屏播放：背景跟随封面主色，逐行歌词和波形进度条</figcaption>
+      </figure>
     </div>
   </section>
 
-  <!-- 原生架构与性能底座 (Architecture Section) -->
-  <section class="section-container" id="architecture">
-    <div class="section-header">
-      <div class="section-eyebrow">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-        NATIVE ARCHITECTURE
-      </div>
-      <h2 class="section-title">纯粹系统原生，彻底告别 Electron 的沉重</h2>
-      <p class="section-subtitle">
-        为极致性能而生。不打包整套 Chromium 浏览器与 Node.js 运行时，用真正的底层系统 API 绘制每一帧。
-      </p>
-    </div>
-
-    <div class="tech-stack-grid">
-      <div class="stack-card">
-        <div class="stack-num">01</div>
-        <h3 class="stack-title">纯 Rust + NSH 原生双端外壳</h3>
-        <p class="stack-desc">
-          macOS 端直连 AppKit，Windows 端直通 Win32 与 Direct2D 硬件加速。启动速度在 200 毫秒以内，闲置时彻底释放 CPU，内存常驻轻至数十兆字节。
-        </p>
-        <div class="stack-foot">
-          <span class="tech-badge">macOS AppKit</span>
-          <span class="tech-badge">Windows Direct2D</span>
-        </div>
-      </div>
-
-      <div class="stack-card">
-        <div class="stack-num">02</div>
-        <h3 class="stack-title">SQLite 原生内嵌与内存倒排索引</h3>
-        <p class="stack-desc">
-          所有曲目元数据、播放统计与标签关系存放在本地 SQLite 数据库中。配合内存倒排索引秒开秒查，无假值污染，杜绝频繁磁盘 IO。
-        </p>
-        <div class="stack-foot">
-          <span class="tech-badge">Bundled SQLite</span>
-          <span class="tech-badge">In-Memory Index</span>
-        </div>
-      </div>
-
-      <div class="stack-card">
-        <div class="stack-num">03</div>
-        <h3 class="stack-title">严苛的多级封面与内存防爆机制</h3>
-        <p class="stack-desc">
-          严禁 data: URI 滥用与全局大图常驻。列表采用按需升级的单文件缩略图（96px 智能按需晋升 400px）；全屏伴播大图走 8 项有界内存 LRU，确保数万首大曲库不发生内存泄漏。
-        </p>
-        <div class="stack-foot">
-          <span class="tech-badge">Bounded LRU</span>
-          <span class="tech-badge">Progressive Upgrade</span>
-        </div>
-      </div>
-
-      <div class="stack-card">
-        <div class="stack-num">04</div>
-        <h3 class="stack-title">单实例与原生系统级集成</h3>
-        <p class="stack-desc">
-          macOS 采用文件锁配合分布式通知唤醒，Windows 采用具名 Mutex 防止多开。深度打通系统媒体控制（macOS Now Playing、Windows SMTC 本地封面直投、媒体快捷键抢占与托盘动态交互）。
-        </p>
-        <div class="stack-foot">
-          <span class="tech-badge">System Media Session</span>
-          <span class="tech-badge">Single Instance Lock</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 发烧级播放体验 (Playback & Audiophile Features) -->
-  <section class="section-container" id="playback">
-    <div class="section-header">
-      <div class="section-eyebrow">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-        AUDIOPHILE ENGINE
-      </div>
-      <h2 class="section-title">每一个发烧细节，都经受严谨推敲</h2>
-      <p class="section-subtitle">
-        从高精度采样解码到耳机拔出静默保护，带来纯净无瑕的听觉享受。
-      </p>
-    </div>
-
-    <div class="audio-features-grid">
-      <div class="audio-feature-card">
-        <div class="card-icon-circle">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
-        </div>
-        <h4>曲间无缝对接 (Gapless Prefetch)</h4>
-        <p>本曲解码即将结束时提前预取下一首曲目解码器与重采样器，精确计算样本边界无缝衔接。现场演唱会与概念连贯专辑杜绝断崖突兀。</p>
-      </div>
-
-      <div class="audio-feature-card">
-        <div class="card-icon-circle">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
-        </div>
-        <h4>ReplayGain 2.0 增益标准化</h4>
-        <p>自动识别曲目与专辑级增益标签，支持自定义预放大分贝与无标签兜底增益，更有前级 Headroom 动态防削波保护。</p>
-      </div>
-
-      <div class="audio-feature-card">
-        <div class="card-icon-circle">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20M7 5l5 7-5 7M17 5l-5 7 5 7"/></svg>
-        </div>
-        <h4>0–5000ms 自定义淡入淡出</h4>
-        <p>切歌、暂停、开始播放与拖动跳转时音量平滑渐变（默认 200ms），歌曲自然放毕无缝接续时不淡变，既温柔又精准。</p>
-      </div>
-
-      <div class="audio-feature-card">
-        <div class="card-icon-circle">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5M4 20L21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></svg>
-        </div>
-        <h4>黄金比例随机 (Smart Shuffle)</h4>
-        <p>按黄金比例算法在乱序播放时均匀摊开同一歌手的曲目，杜绝传统伪随机带来的同歌手歌曲扎堆撞车尴尬。</p>
-      </div>
-
-      <div class="audio-feature-card">
-        <div class="card-icon-circle">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
-        </div>
-        <h4>外接设备热拔出自动暂停</h4>
-        <p>拔掉有线耳机或断开蓝牙音频时自动平滑暂停播放，避免在自习室、办公室等公共场合发生外放社死风险。</p>
-      </div>
-
-      <div class="audio-feature-card">
-        <div class="card-icon-circle">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-        </div>
-        <h4>行级歌词与 ±30s 单曲独立偏移</h4>
-        <p>同名 <code>.lrc</code> 侧车优先解析。支持悬停行时间戳、点击某行即时 Seek 跳转；右侧独立微调控件随曲目持久化记忆。</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- 对比评估矩阵 (Comparison Section) -->
-  <section class="section-container" id="comparison">
-    <div class="section-header">
-      <div class="section-eyebrow">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
-        COMPARISON MATRIX
-      </div>
-      <h2 class="section-title">为什么选择 Zeo Player？</h2>
-      <p class="section-subtitle">
-        在传统经典老牌播放器与现代流媒体客户端之间，探寻极致工程与现代体验的黄金交点。
-      </p>
-    </div>
-
-    <div class="comparison-table-wrapper">
-      <table class="comparison-table">
-        <thead>
-          <tr>
-            <th class="col-dim">核心维度</th>
-            <th class="col-zeo highlight-th">
-              <div class="th-brand">
-                <img src="assets/icon.svg" width="20" height="20" alt="Zeo">
-                <span>Zeo Player</span>
-              </div>
-              <span class="th-badge">推荐选择</span>
-            </th>
-            <th class="col-other">传统播放器 (foobar2000 / AIMP)</th>
-            <th class="col-other">流媒体客户端 (Electron / 商业套壳)</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td class="dim-label">技术架构</td>
-            <td class="val-zeo highlight-td">纯 Rust + 原生外壳 (AppKit / Direct2D)</td>
-            <td class="val-other">C++ / 历史 Win32 遗留框架</td>
-            <td class="val-other">Node.js + Chromium 网页运行时</td>
-          </tr>
-          <tr>
-            <td class="dim-label">内存常驻占用</td>
-            <td class="val-zeo highlight-td"><strong>~30 - 50 MB</strong> (极低)</td>
-            <td class="val-other">~20 - 40 MB (极低)</td>
-            <td class="val-other">350 MB - 1 GB+ (高耗电)</td>
-          </tr>
-          <tr>
-            <td class="dim-label">曲库与元数据治理</td>
-            <td class="val-zeo highlight-td"><strong>24 列专业虚拟大表 + 模板重命名 + 侧车同步</strong></td>
-            <td class="val-other">功能齐全但依赖繁复插件与复杂排版</td>
-            <td class="val-other">仅简单列表，无专业元数据管理能力</td>
-          </tr>
-          <tr>
-            <td class="dim-label">文件系统双向监控</td>
-            <td class="val-zeo highlight-td"><strong>原生 FSEvents / 指纹追踪，改名移位不丢历史</strong></td>
-            <td class="val-other">部分支持或需手动全库重新扫描</td>
-            <td class="val-other">弱化本地文件夹，强依赖云端上传</td>
-          </tr>
-          <tr>
-            <td class="dim-label">音频算法品质</td>
-            <td class="val-zeo highlight-td"><strong>曲间无缝预取 + 10段平滑无爆音EQ + ReplayGain</strong></td>
-            <td class="val-other">DSP 链路完整，但配置繁杂</td>
-            <td class="val-other">简单粗暴音量调节，缺少专业无缝机制</td>
-          </tr>
-          <tr>
-            <td class="dim-label">用户隐私与权限</td>
-            <td class="val-zeo highlight-td"><strong>100% 本地优先，无账户体系，零追踪遥测</strong></td>
-            <td class="val-other">100% 本地优先</td>
-            <td class="val-other">强制登录、推送广告、持续收集听歌行为</td>
-          </tr>
-          <tr>
-            <td class="dim-label">现代交互支持</td>
-            <td class="val-zeo highlight-td"><strong>全局命令面板 (⌘K)、封面主色提取、自适应深浅色</strong></td>
-            <td class="val-other">界面年代感明显，缺乏现代快捷交互</td>
-            <td class="val-other">界面现代，但充斥社交与商业元素</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <!-- 获取下载与系统支持 (Download & Platforms Section) -->
   <section class="section-container" id="download">
     <div class="section-header">
-      <div class="section-eyebrow">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-        DOWNLOAD & PLATFORMS
-      </div>
-      <h2 class="section-title">随时随地，沉浸在纯净的本地音乐中</h2>
-      <p class="section-subtitle">
-        专为 macOS 与 Windows 深度打造的原生桌面应用。纯净低耗，双击即用，零账号绑定，100% 属于你的本地音乐资产。
-      </p>
+      <div class="section-eyebrow">DOWNLOAD</div>
+      <h2 class="section-title">下载</h2>
+      <p class="section-subtitle">开源免费，通过 GitHub Releases 分发。</p>
     </div>
 
     <div class="download-cards-grid">
-      <!-- macOS 下载卡片 -->
       <div class="download-card">
         <div class="download-platform-header">
-          <div class="platform-icon-box macos">
+          <div class="platform-icon-box">
             <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
               <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.36-.56.65-.96 1.7-0.84 2.72.99.08 1.96-.48 2.57-1.23z"/>
             </svg>
           </div>
           <div>
-            <div class="platform-tag">APPLE SILICON & INTEL</div>
-            <h3 class="platform-name">macOS 客户端</h3>
+            <h3 class="platform-name">macOS</h3>
+            <div class="platform-tag">Apple Silicon / Intel · macOS 12+</div>
           </div>
         </div>
-
-        <p class="download-desc">
-          深度融合 macOS 设计规范。基于 AppKit 原生渲染，支持系统级 Now Playing 锁屏与控制中心联动、触控栏/键盘媒体键响应，菜单栏黑白动态托盘即时播控。
-        </p>
-
-        <div class="download-specs-list">
-          <div class="spec-row">
-            <span class="spec-name">系统架构</span>
-            <span class="spec-info">Universal (Apple Silicon M系列 / Intel 64位)</span>
-          </div>
-          <div class="spec-row">
-            <span class="spec-name">系统版本需求</span>
-            <span class="spec-info">macOS 12.0 (Monterey) 或更高版本</span>
-          </div>
-          <div class="spec-row">
-            <span class="spec-name">无损格式覆盖</span>
-            <span class="spec-info">FLAC, ALAC, WAV, AIFF, M4A, OGG, MP3</span>
-          </div>
-        </div>
-
-        <div class="download-action-group">
-          <a href="https://github.com/subf/zeo-player/releases" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-lg download-btn">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            <span>获取 macOS 版本 (.dmg)</span>
-          </a>
-          <span class="release-subtext">通过 GitHub Releases 安全下载最新稳定构建</span>
-        </div>
+        <p class="download-desc">AppKit 原生界面，支持菜单栏控制、Now Playing 和媒体键。</p>
+        <a href="https://github.com/subf/zeo-player/releases" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-lg download-btn">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          <span>GitHub Releases 下载</span>
+        </a>
       </div>
 
-      <!-- Windows 下载卡片 -->
       <div class="download-card">
         <div class="download-platform-header">
-          <div class="platform-icon-box windows">
+          <div class="platform-icon-box">
             <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
               <path d="M3 5.45l7.55-1.03v7.33H3V5.45zm0 13.1l7.55 1.03v-7.33H3v6.3zm8.45 1.15L21 21.3V11.75H11.45v7.95zm0-15.4l9.55 1.6v7.95H11.45V4.3z"/>
             </svg>
           </div>
           <div>
-            <div class="platform-tag">WIN32 & DIRECT2D</div>
-            <h3 class="platform-name">Windows 客户端</h3>
+            <h3 class="platform-name">Windows</h3>
+            <div class="platform-tag">x64 · Windows 10 / 11</div>
           </div>
         </div>
-
-        <p class="download-desc">
-          完全脱离 Chromium 套壳。Direct2D 硬件加速极致平滑渲染，独家支持 WinRT SMTC 系统媒体中心缩略图直投，硬件媒体快捷键无冲突抢占，系统任务栏托盘右键极速呼出。
-        </p>
-
-        <div class="download-specs-list">
-          <div class="spec-row">
-            <span class="spec-name">系统架构</span>
-            <span class="spec-info">x86_64 (64-bit)</span>
-          </div>
-          <div class="spec-row">
-            <span class="spec-name">系统版本需求</span>
-            <span class="spec-info">Windows 10 / Windows 11</span>
-          </div>
-          <div class="spec-row">
-            <span class="spec-name">无损格式覆盖</span>
-            <span class="spec-info">FLAC, ALAC, WAV, AIFF, M4A, OGG, MP3</span>
-          </div>
-        </div>
-
-        <div class="download-action-group">
-          <a href="https://github.com/subf/zeo-player/releases" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-lg download-btn">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            <span>获取 Windows 版本 (.exe)</span>
-          </a>
-          <span class="release-subtext">绿色轻量、无流氓捆绑、即开即用</span>
-        </div>
+        <p class="download-desc">Win32 + Direct2D 原生界面，支持 SMTC 系统媒体通知和托盘控制。</p>
+        <a href="https://github.com/subf/zeo-player/releases" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-lg download-btn">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          <span>GitHub Releases 下载</span>
+        </a>
       </div>
     </div>
 
-    <!-- 用户保证与隐私背书条 -->
-    <div class="user-guarantee-bar">
-      <div class="guarantee-item">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#10b981" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <div>
-          <strong>100% 本地隐私优先</strong>
-          <span>零网络外联、无后台遥测，音频与标签完全属于你</span>
-        </div>
-      </div>
-      <div class="guarantee-item">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#10b981" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
-        <div>
-          <strong>纯原生轻盈低耗</strong>
-          <span>~35MB 运行内存，告别 Electron 带来的发热与电量消耗</span>
-        </div>
-      </div>
-      <div class="guarantee-item">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#10b981" stroke-width="2"><path d="M20 7h-9M14 17H5M12 3v18"/></svg>
-        <div>
-          <strong>自由透明开源</strong>
-          <span>基于 Rust 打造，所有源代码与构建流程公开透明</span>
-        </div>
-      </div>
-    </div>
+    <p class="download-note">
+      支持 MP3、FLAC、WAV、AIFF、M4A（AAC / ALAC）、AAC、OGG Vorbis。
+      想自己编译的话，克隆仓库后 <code>nsh run .</code> 即可，详见 README。
+    </p>
   </section>
 
-  <!-- 全局快捷命令面板交互弹窗 (Command Palette ⌘K Modal) -->
-  <div class="cmd-modal-backdrop" id="cmdModalBackdrop">
-    <div class="cmd-modal-window">
-      <div class="cmd-search-header">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" class="cmd-search-icon">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <input type="text" class="cmd-input" id="cmdInput" placeholder="键入命令或搜索功能 (例如: 均衡器、元数据、无缝播放)..." autocomplete="off">
-        <kbd class="cmd-esc-badge" id="cmdCloseBtn">ESC</kbd>
-      </div>
-
-      <div class="cmd-results-list" id="cmdResultsList">
-        <!-- 动态命令列表项 -->
-      </div>
-
-      <div class="cmd-modal-footer">
-        <div class="cmd-shortcuts-hint">
-          <span><kbd>↑</kbd> <kbd>↓</kbd> 导航</span>
-          <span><kbd>↵</kbd> 执行跳转</span>
-          <span><kbd>ESC</kbd> 关闭面板</span>
-        </div>
-        <span class="cmd-brand-tag">Zeo Native Command Palette</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 页脚 -->
   <footer class="footer">
     <div class="footer-container">
       <div class="footer-col-brand">
@@ -885,51 +228,31 @@
           <img src="assets/icon.svg" alt="Zeo Player" width="24" height="24">
           <span class="brand-name">Zeo Player</span>
         </div>
-        <p class="footer-tagline">
-          专为严苛音乐收藏者打造的本地音频工作台。<br>
-          纯 Rust 构建 • 100% 本地优先 • 自由开源。
-        </p>
+        <p class="footer-tagline">本地优先的音乐播放器，开源免费。</p>
       </div>
 
       <div class="footer-col">
-        <h4>导航链接</h4>
-        <ul>
-          <li><a href="#management">元数据大表</a></li>
-          <li><a href="#interactive">在线体验沙盒</a></li>
-          <li><a href="#playback">发烧音频引擎</a></li>
-          <li><a href="#architecture">原生架构解析</a></li>
-        </ul>
-      </div>
-
-      <div class="footer-col">
-        <h4>开源与资源</h4>
+        <h4>链接</h4>
         <ul>
           <li><a href="https://github.com/subf/zeo-player" target="_blank" rel="noopener">GitHub 仓库</a></li>
-          <li><a href="https://github.com/subf/zeo-player/releases" target="_blank" rel="noopener">版本发布 (Releases)</a></li>
-          <li><a href="https://github.com/subf/zeo-player/blob/main/AGENTS.md" target="_blank" rel="noopener">开发者架构手册</a></li>
-          <li><a href="https://nsh.dev" target="_blank" rel="noopener">NSH 框架官网</a></li>
+          <li><a href="https://github.com/subf/zeo-player/releases" target="_blank" rel="noopener">Releases</a></li>
+          <li><a href="https://nsh.dev" target="_blank" rel="noopener">NSH 框架</a></li>
         </ul>
       </div>
 
       <div class="footer-col">
-        <h4>系统支持</h4>
-        <div class="platform-chips">
-          <span class="platform-chip">macOS 12.0+ (Apple Silicon / Intel)</span>
-          <span class="platform-chip">Windows 10 / 11 (x64)</span>
-        </div>
+        <h4>支持平台</h4>
+        <ul>
+          <li>macOS 12+（Apple Silicon / Intel）</li>
+          <li>Windows 10 / 11（x64）</li>
+        </ul>
       </div>
     </div>
 
     <div class="footer-bottom">
-      <div class="footer-copyright">
-        © 2026 Zeo Player. Released under Open Source License.
-      </div>
-      <div class="footer-meta">
-        Built with Rust & Native Shell (NSH). Zero Webview Overhead.
-      </div>
+      <span>© 2026 Zeo Player</span>
+      <span>Built with Rust & NSH</span>
     </div>
   </footer>
-
-  <script src="app.js"></script>
 </body>
 </html>
