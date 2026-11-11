@@ -4,6 +4,8 @@
 
 支持 MP3、FLAC、WAV、AIFF、M4A（AAC / ALAC）、AAC、OGG Vorbis。
 
+官网：https://subframe7536.github.io/zeo-player-nsh/
+
 ## 功能
 
 **界面和系统**
