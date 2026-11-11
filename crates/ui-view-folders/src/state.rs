@@ -60,7 +60,7 @@ pub(crate) fn create_folder_ui() -> FolderUi {
         let r = flatten_with(&tree.get(), &s.folder_expanded.get());
         Rc::new(r)
     });
-    let files = computed(move || here.with(|p| p.files.clone()));
+    let files = computed(move || here.with(|p| p.all.clone()));
 
     let active = signal(None::<DragState>);
     let over = signal(None::<String>);

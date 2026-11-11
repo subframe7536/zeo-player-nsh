@@ -69,7 +69,7 @@ fn rows_follow_expand_state() {
 }
 
 #[test]
-fn place_shows_folder_files_and_subtree() {
+fn place_shows_folder_subtree() {
     let mut tracks = vec![
         entry("/m/a/1.mp3"),
         entry("/m/a/b/2.mp3"),
@@ -92,15 +92,13 @@ fn place_shows_folder_files_and_subtree() {
         place_with(&tree, Some("/gone"), '/').path.as_deref(),
         Some("/m")
     );
-    // 根：files 只是直接曲目；all 是整棵子树；trail 是完整根路径。
-    assert_eq!(*m.files, vec![2]);
+    // 根：all 是整棵子树（子文件夹在前）；trail 是完整根路径。
     assert_eq!(*m.all, vec![1, 0, 2]);
     assert_eq!(m.folders, 1);
     assert_eq!(m.tracks, 3);
     assert_eq!(m.bytes, 600);
     assert_eq!(m.trail, "/m");
     let a = place_with(&tree, Some("/m/a"), '/');
-    assert_eq!(*a.files, vec![0]);
     assert_eq!(*a.all, vec![1, 0]);
     assert_eq!(a.trail, "m / a");
     // 多个根：只列根，没选时显示名字靠前的那个。
@@ -185,7 +183,7 @@ fn windows_paths_build_the_same_tree() {
     let top = place_with(&tree, None, '\\');
     assert_eq!(top.path.as_deref(), Some("D:\\"));
     let m = place_with(&tree, Some("C:\\m"), '\\');
-    assert_eq!(*m.files, vec![1]);
+    assert_eq!(*m.all, vec![0, 1]);
     assert_eq!(m.trail, "C:\\m");
     let a = place_with(&tree, Some("C:\\m\\a"), '\\');
     assert_eq!(a.trail, "m / a");

@@ -88,7 +88,7 @@ fn font_select_opens_a_searchable_popover() {
 }
 
 /// 文件夹页：左侧目录树只列文件夹（根与子文件夹），右侧默认显示第一个
-/// 根直接包含的曲目；点子文件夹后右侧换成它的文件。
+/// 根（含子文件夹）的全部曲目；点子文件夹后右侧换成它子树的文件。
 #[test]
 fn folders_page_shows_tree_and_files() {
     let mut app = start(1200.0, 800.0);
@@ -111,8 +111,9 @@ fn folders_page_shows_tree_and_files() {
     for label in ["大小", "时长", "格式"] {
         assert!(t.iter().any(|s| s == label), "{label}: {t:?}");
     }
-    // 默认选中根：右侧是它直接包含的曲目（子文件夹里的不在列）。
+    // 默认选中根：右侧是它（含子文件夹）的全部曲目。
     app.wait_for("text:测试歌曲").unwrap();
+    app.wait_for("text:mono").unwrap();
     app.press("sub").unwrap();
     app.wait_for("text:mono").unwrap();
     app.wait_for("text:short").unwrap();

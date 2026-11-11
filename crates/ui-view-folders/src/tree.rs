@@ -153,9 +153,7 @@ pub(crate) struct Place {
     pub(crate) folders: usize,
     pub(crate) tracks: usize,
     pub(crate) bytes: u64,
-    /// 本文件夹直接包含的曲目（列表与点播队列）。
-    pub(crate) files: Rc<Vec<usize>>,
-    /// 子树全部曲目（「播放全部」）。
+    /// 子树全部曲目（列表、「播放全部」与点播队列；子文件夹在前）。
     pub(crate) all: Rc<Vec<usize>>,
 }
 
@@ -175,7 +173,6 @@ pub(crate) fn place_with(tree: &[Folder], at: Option<&str>, sep: char) -> Place 
             folders: 0,
             tracks: 0,
             bytes: 0,
-            files: Rc::default(),
             all: Rc::default(),
         };
     };
@@ -204,7 +201,6 @@ pub(crate) fn place_with(tree: &[Folder], at: Option<&str>, sep: char) -> Place 
         folders: node.children.len(),
         tracks: node.total,
         bytes: node.bytes,
-        files: Rc::new(node.tracks.clone()),
         all: Rc::new(all),
     }
 }
