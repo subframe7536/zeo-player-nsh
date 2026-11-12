@@ -102,13 +102,16 @@ thread_local! {
     static FOLDER_UI: RefCell<Option<FolderUi>> = const { RefCell::new(None) };
 }
 
+/// 侧栏树、文件夹页、拖拽浮层与增删改弹窗共用的一份状态。首次调用可能在
+/// 任何视图里（换页的 `dynamic`、隐藏到托盘会拆掉的界面壳），所以建在根
+/// owner 下（`in_root`），缓存才不会随调用处 dispose 变成死信号。
 pub(crate) fn folder_ui() -> FolderUi {
     FOLDER_UI.with(|cell| {
         let mut b = cell.borrow_mut();
         if let Some(ui) = b.as_ref() {
             return ui.clone();
         }
-        let ui = create_folder_ui();
+        let ui = zeo_ui_store::in_root(create_folder_ui);
         *b = Some(ui.clone());
         ui
     })

@@ -12,6 +12,14 @@ pub fn later(f: impl FnOnce() + 'static) {
     });
 }
 
+/// 在根组件的 owner 下运行 `f`：跨视图共享、缓存在线程局部里的信号 /
+/// memo 要建在这里——建在调用处（页面 `dynamic`、`when(!hidden)` 的界面
+/// 壳）的话，换页或隐藏到托盘时随之 dispose，缓存里留下的是死信号，再次
+/// 显示时一读就 panic、整个界面停摆。
+pub fn in_root<R>(f: impl FnOnce() -> R) -> R {
+    store().owner.run(f)
+}
+
 /// 「把一件事排回界面侧跑」的把手：`Send`，可以带进后台线程。`STORE`
 /// 是线程局部的，工作线程拿不到 `store()`，在界面侧拿 `poster()` 的
 /// 克隆带去，`post(f)` 排的事由 `install` 的轮询循环在界面侧执行。

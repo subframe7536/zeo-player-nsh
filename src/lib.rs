@@ -490,7 +490,8 @@ fn bench_close() {
         zeo_ui_store::set_close_action(CloseAction::Ask);
         wait(500).await;
         eprintln!("ZEO_PLAYER_BENCH step quit");
-        zeo_shell::quit();
+        // 走托盘「退出」：重新显示后界面轮询（托盘派发）还活着才退得掉。
+        zeo_shell::simulate_tray(zeo_shell::TrayAction::Quit);
     });
 }
 
