@@ -125,13 +125,11 @@ pub(crate) fn table(
 
     let guide_line_x = signal(Option::<f32>::None);
 
-    let render_head = {
+    let head_cell = {
         let sort = sort.clone();
         let col_widths = col_widths.clone();
         let guide_line_x = guide_line_x.clone();
-        move |cell: &nsh_base::DataTableHeaderCell| -> AnyElement {
-            let key = cell.key.to_string();
-            let title = cell.title.clone();
+        move |key: String, title: SharedString| -> AnyElement {
             let align = COLUMNS
                 .iter()
                 .find(|(k, ..)| *k == key)
@@ -343,6 +341,27 @@ pub(crate) fn table(
                 .child(handle_view)
                 .into_element()
         }
+    };
+
+    // 表头格按位置取列：上游自定义表头只在渲染器 / 排序 / 选中变化时重跑，
+    // 列集变了（「显示列」勾选）同一位置仍是旧 key / 标题（见 upstream.md）。
+    // 这里按 `cell.column` 从 `visible_cols` 响应式推出当前列，只重建这一格。
+    let render_head = move |cell: &nsh_base::DataTableHeaderCell| -> AnyElement {
+        let column = cell.column as usize;
+        dynamic(move || {
+            let at = visible_cols.with(|active| {
+                COLUMNS
+                    .iter()
+                    .filter(|(k, ..)| active.contains(*k))
+                    .nth(column)
+                    .map(|(k, t, ..)| (k.to_string(), SharedString::from(*t)))
+            });
+            match at {
+                Some((key, title)) => head_cell(key, title),
+                None => view().into_element(),
+            }
+        })
+        .into_element()
     };
 
     // 不设 `render_cell`：它是全局开关，一设整表体就走逐格 dynamic +

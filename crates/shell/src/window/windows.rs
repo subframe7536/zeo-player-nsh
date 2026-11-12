@@ -320,6 +320,12 @@ pub fn start() {
         .name("zeo-player-kbhook".into())
         .spawn(media_hook_thread)
         .ok();
+    // 根组件挂载时窗口通常已建好（runner 先建窗口再装应用）：当场子类化，
+    // 自绘窗口按钮（`zeo_ui_frame::caption`）赶得上首帧，不会在显示后
+    // 再切一次标题栏样式引起布局跳动。没找到再交给线程轮询。
+    if hook() {
+        return;
+    }
     std::thread::Builder::new()
         .name("zeo-player-window".into())
         .spawn(|| {

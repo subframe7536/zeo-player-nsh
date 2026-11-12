@@ -267,6 +267,14 @@ fn metadata_column_selector_opens() {
     // 勾选未选中的「作曲」
     app.press("text:作曲").unwrap();
     app.wait_for("text:显示列 (16/24)").unwrap();
+    // 隐藏靠前的「艺术家」：其后的表头都要左移换成新列，不留旧标题
+    // （上游自定义表头不随列集重跑，曾出现标题错位、重复）。
+    app.wait_for("id:resize:artist").unwrap();
+    app.press("role:checkbox[艺术家]").unwrap();
+    app.wait_for("text:显示列 (15/24)").unwrap();
+    app.wait_for_gone("id:resize:artist", Duration::from_secs(2))
+        .unwrap();
+    app.wait_for("id:resize:album").unwrap();
 
     // 点击「默认」还原为 15 列
     app.press("text:默认").unwrap();

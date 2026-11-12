@@ -68,7 +68,19 @@ fn cover_frame<E: IntoElement>(
     frame.child(glyph(g)).child(when(
         move || src().is_some(),
         move || {
+            // 换源（96→400 升档）时平台先清掉旧图、等新图解码完才画，
+            // 中间露出底下的占位图。把上一个源设成 placeholder：它的解码
+            // 结果还在内存缓存里（按路径取，不碰磁盘——小文件升档后已
+            // 删），同步就画上，新图到了再盖过去。首次没有上一个源时用
+            // 当前源本身（同一请求，加载器复用）。
+            let last = stored(None::<SharedString>);
+            let trail = computed(move || {
+                let now = src().unwrap_or_default();
+                let prev = last.replace(Some(now.clone()));
+                prev.filter(|p| !p.is_empty()).unwrap_or(now)
+            });
             image(move || src().unwrap_or_default())
+                .placeholder(move || trail.get())
                 .test_id("cover-img")
                 .absolute()
                 .inset(px(0.0))

@@ -231,23 +231,31 @@ pub fn install() -> Store {
     // 时恢复上次存的（`set_placement` 会按现在的显示器校正）；之后平台
     // 每次上报的位置变化写回配置。`state` 在焦点变化等不动位置的时候也
     // 重报，与已存值比对去重（`window_placement` 是非信号的直读，本效果
-    // 只订阅窗口状态 memo）。
+    // 只订阅窗口状态 memo）。主窗口此时还隐藏着（见 `reveal_when_ready`），
+    // 还原不会被看到。`placed`：`None` 还没还原，`Some(saved)` 已还原。
     let win = nsh_core::element::desktop::main_window();
-    let restored = stored(false);
-    effect(move || {
-        let Some(state) = win.state() else {
-            return;
-        };
-        if !restored.replace(true) {
-            if zeo_shell::remembered()
-                && let Some(saved) = library_store().window_placement()
-            {
-                win.set_placement(saved);
+    let placed = stored(None::<Option<nsh_core::desktop::WindowPlacement>>);
+    effect({
+        let win = win.clone();
+        move || {
+            let Some(state) = win.state() else {
+                return;
+            };
+            if placed.with(|p| p.is_none()) {
+                let saved = zeo_shell::remembered()
+                    .then(|| library_store().window_placement())
+                    .flatten();
+                if let Some(saved) = saved {
+                    win.set_placement(saved);
+                }
+                placed.replace(Some(saved));
+                return;
             }
-            return;
-        }
-        if zeo_shell::remembered() && library_store().window_placement() != Some(state.placement) {
-            library_store().set_window_placement(state.placement);
+            if zeo_shell::remembered()
+                && library_store().window_placement() != Some(state.placement)
+            {
+                library_store().set_window_placement(state.placement);
+            }
         }
     });
 
@@ -481,10 +489,58 @@ pub fn install() -> Store {
         }
     }
     // 在设好循环模式之后：随机模式下恢复的队列按它重新洗牌。
-    player().restore_last();
+    let restoring = player().restore_last();
+    // 跟随封面的强调色按要恢复的曲目先算好（同步读库），首帧就是最终配色，
+    // 不必等轮询见到曲目后再变一次色。
+    if let Some(path) = &restoring {
+        request_accent(&s, Some(path));
+    }
+    reveal_when_ready(s, win, placed, restoring.is_some());
     zeo_shell::start();
     if !library_store().roots().is_empty() {
         scan();
     }
     s
+}
+
+/// 启动显示的等待上限（毫秒）：首屏状态迟迟落不定（拿不到窗口状态、
+/// 曲目装载失败）也按时显示，窗口不会一直藏着。
+const REVEAL_MAX_MS: u64 = 1500;
+
+/// 启动时主窗口按 nsh.json `window.defaultVisible: false` 隐藏着创建，
+/// 等首屏状态落定再显示：上次的窗口位置已还原、上次的曲目已装上（播放条
+/// 与封面强调色就位）。否则用户会看到窗口先在默认位置出现再跳走、播放条
+/// 与配色在首帧之后才变过来。显示前再等一帧，让上面的改动（位置、标题栏
+/// 样式）先落到平台与布局上。
+fn reveal_when_ready(
+    s: Store,
+    win: nsh_core::element::desktop::WindowRef,
+    placed: Stored<Option<Option<nsh_core::desktop::WindowPlacement>>>,
+    restoring: bool,
+) {
+    const FRAME: Duration = Duration::from_millis(16);
+    spawn(async move {
+        let deadline = Instant::now() + Duration::from_millis(REVEAL_MAX_MS);
+        loop {
+            let ready = placed.with(|p| p.is_some())
+                && (!restoring || s.track.with_untracked(|t| t.path.is_some()));
+            if ready || Instant::now() >= deadline {
+                break;
+            }
+            timer(FRAME).await;
+        }
+        timer(FRAME).await;
+        // 已经显示过（如第二份实例转来的唤起）就不再抢焦点。
+        if win.state().is_some_and(|st| st.visible) {
+            return;
+        }
+        zeo_shell::show();
+        // Windows 隐藏窗口上的 `SetWindowPlacement` 只记普通位置、不保留
+        // 最大化 / 全屏（见 upstream.md），显示后再套一次模式。
+        if let Some(Some(saved)) = placed.get()
+            && saved.mode != nsh_core::desktop::WindowMode::Normal
+        {
+            win.set_placement(saved);
+        }
+    });
 }

@@ -95,8 +95,11 @@ pub fn Home() -> impl IntoElement {
         }
     });
 
+    // 只按「曲库空不空」换整页：直接读 `s.tracks` 会让每次扫描 / 索引刷新
+    // 都整页重建，封面图片元素跟着重建、重新解码，闪一下占位图。
+    let empty = computed(move || s.tracks.with(|t| t.is_empty()));
     view().flex_1().child(dynamic(move || {
-        if s.tracks.with(|t| t.is_empty()) {
+        if empty.get() {
             return no_library().into_element();
         }
         view()

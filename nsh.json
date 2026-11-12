@@ -8,6 +8,9 @@
   "theme": "theme.json",
   "appearance": "system",
   "singleInstance": true,
+  "window": {
+    "defaultVisible": false
+  },
   "icon": {
     "macos": "resources/icon.png",
     "windows": "resources/icon-windows.png"

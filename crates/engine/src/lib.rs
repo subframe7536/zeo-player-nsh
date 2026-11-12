@@ -106,22 +106,21 @@ impl Player {
     }
 
     /// 恢复上次播放的曲目（暂停在上次的位置）：还没有曲目、文件还在时才做。
-    /// 返回是否恢复了。
-    pub fn restore_last(&self) -> bool {
+    /// 返回恢复的曲目路径（装载在引擎线程异步完成）。
+    pub fn restore_last(&self) -> Option<String> {
         if self.state().track.path.is_some() {
-            return false;
+            return None;
         }
-        let Some((last, mut queue)) = zeo_db::last_played() else {
-            return false;
-        };
+        let (last, mut queue) = zeo_db::last_played()?;
         if !Path::new(&last.path).is_file() {
-            return false;
+            return None;
         }
         if !queue.contains(&last.path) {
             queue = vec![last.path.clone()];
         }
+        let path = last.path.clone();
         self.cue(last.path, queue, last.time.max(0.0));
-        true
+        Some(path)
     }
 
     /// 记下播放状态（曲目、位置、队列），下次启动由 [`Self::restore_last`]

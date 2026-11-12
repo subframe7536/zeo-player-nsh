@@ -30,14 +30,22 @@ pub fn install() {
     let own = global::<Own>();
     // `current_window()` 要在渲染里取（找树的窗口），句柄带进任务里用。
     let win = current_window();
+    let take_over = move || {
+        let mut attributes = WindowAttributes::default();
+        attributes.title_bar = Some(TitleBarOptions::default());
+        win.set(attributes);
+        own.set(Own(true));
+    };
+    // 通常 `zeo_shell::start` 已当场子类化：首帧就是应用的按钮。
+    if zeo_shell::caption_ready() {
+        take_over();
+        return;
+    }
     spawn(async move {
         // 窗口建好后约 200 ms 内子类化；之前仍是 NSH 自己画的按钮。
         for _ in 0..300 {
             if zeo_shell::caption_ready() {
-                let mut attributes = WindowAttributes::default();
-                attributes.title_bar = Some(TitleBarOptions::default());
-                win.set(attributes);
-                own.set(Own(true));
+                take_over();
                 return;
             }
             timer(std::time::Duration::from_millis(50)).await;
