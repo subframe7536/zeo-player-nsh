@@ -128,6 +128,9 @@ pub struct Store {
     pub hidden: Signal<bool>,
     /// 点了关闭、等用户选择「托盘 / 退出」。
     pub close_prompt: Signal<bool>,
+    /// 关闭询问里「记住选择」的勾选态：勾上才把这次的选择写进配置，
+    /// 不勾就只做这一次、下次关闭照旧询问。
+    pub close_remember: Signal<bool>,
     /// 标题栏搜索框的内容；非空时内容区显示搜索结果。
     pub search: Signal<String>,
     /// 显示搜索页（没有搜索词时也展示：图标栏点放大镜打开，页顶有输入框）。

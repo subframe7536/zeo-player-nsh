@@ -221,6 +221,28 @@ pub fn modal(content: View, on_close: impl Fn() + Copy + 'static) -> AnyElement 
         .into_element()
 }
 
+/// 警报弹窗（`role: alertDialog` 的 `dialog`）：外观与 [`modal`] 相同，但
+/// Esc 与点遮罩都关不掉——警报要求用户当场做出选择，没有「顺手点掉」
+/// 的出口；关闭只能由内容里的按钮改写它的挂载条件。
+pub fn alert_dialog(content: View) -> AnyElement {
+    nsh_base::dialog()
+        .animation(ModalAnimation::Fade)
+        .role(AccessibilityRole::AlertDialog)
+        .close_on_escape(false)
+        .close_on_backdrop_press(false)
+        .child(
+            view()
+                .absolute()
+                .inset(px(0.0))
+                .bg(black_a(0.5))
+                .items_center()
+                .justify_center()
+                .on_press(|| {})
+                .child(content),
+        )
+        .into_element()
+}
+
 /// shadcn TabsList：`h-9 rounded-lg bg-muted p-[3px]`。选中的凸起片
 /// （底色、边框、`shadow-sm`）画在列表的 indicator 上：它在各 tab 底下、
 /// 贴到选中项并原生弹簧跟过去，上下收进列表的 3pt 内边距。浅色用 `card`

@@ -303,25 +303,48 @@ fn metadata_narrow_window_layout() {
 }
 
 /// 点窗口的关闭按钮：平台把按压报给 `App()` 的 `on_close_press`（
-/// `close_on_press(false)` 下不直接关），走 `close_requested`——默认
-/// 「每次询问」弹出选择而窗口不动；选「最小化到托盘」后窗口隐藏
-/// （`s.hidden` 卸载 shell）而窗口对象与引擎都在。
+/// `close_on_press(false)` 下不直接关），走 `close_requested`——「每次询问」
+/// 下弹出警报式选择而窗口不动：没有「取消」，Esc 也关不掉，必须选一个。
+/// 「记住选择」勾着才把选择写进配置（下次关闭不再询问），不勾只做这一次。
 #[test]
-fn window_close_press_asks_then_hides_to_tray() {
-    let mut app = start(1440.0, 900.0);
+fn window_close_prompt_is_an_alert_and_saves_only_when_checked() {
+    use zeo_player::config::CloseAction;
+
     let store = zeo_player::config::library_store();
-    store.set_close_action(zeo_player::config::CloseAction::Ask);
+    // 勾着（默认）：选「最小化到托盘」后记住，界面卸载而窗口对象与引擎都在。
+    store.set_close_action(CloseAction::Ask);
+    let mut app = start(1440.0, 900.0);
     app.press_window_close("main").unwrap();
     app.wait_for("关闭窗口").unwrap();
     // 询问时窗口内容原样留着。
     assert!(app.shows("首页"), "ask: window keeps its contents");
+    // 警报没有「取消」：Esc 关不掉它。
+    app.press_key("escape").unwrap();
+    app.wait_for("关闭窗口").unwrap();
     app.press("最小化到托盘").unwrap();
     app.wait_for_gone("首页", Duration::from_secs(5)).unwrap();
-    // 已记住托盘：再点直接隐藏；窗口对象仍在——是拦截不是退出。
-    app.press_window_close("main").unwrap();
+    assert_eq!(
+        store.close_action(),
+        CloseAction::Tray,
+        "checked: 记住这次的选择"
+    );
     assert!(
         app.window_state("main").unwrap().is_some(),
         "tray close must keep the window alive"
     );
-    store.set_close_action(zeo_player::config::CloseAction::Ask);
+
+    // 不勾「记住选择」：只做这一次，配置仍是「每次询问」。
+    store.set_close_action(CloseAction::Ask);
+    let mut app = start(1440.0, 900.0);
+    app.press_window_close("main").unwrap();
+    app.wait_for("关闭窗口").unwrap();
+    app.press("text:记住选择").unwrap();
+    app.press("最小化到托盘").unwrap();
+    app.wait_for_gone("首页", Duration::from_secs(5)).unwrap();
+    assert_eq!(
+        store.close_action(),
+        CloseAction::Ask,
+        "unchecked: 不写配置"
+    );
+    store.set_close_action(CloseAction::Ask);
 }

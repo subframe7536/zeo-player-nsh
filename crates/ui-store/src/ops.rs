@@ -224,10 +224,13 @@ pub fn set_remember_frame(on: bool) {
     std::thread::spawn(move || library_store().set_remember_frame(on));
 }
 
-/// 回答关闭询问：记住选择，然后照做。
+/// 回答关闭询问：勾了「记住选择」才记住这次的选择，然后照做。
 pub fn answer_close(action: zeo_types::config::CloseAction) {
-    store().close_prompt.set(false);
-    set_close_action(action);
+    let s = store();
+    s.close_prompt.set(false);
+    if s.close_remember.get_untracked() {
+        set_close_action(action);
+    }
     match action {
         zeo_types::config::CloseAction::Tray => zeo_shell::hide(),
         zeo_types::config::CloseAction::Quit => zeo_shell::quit(),

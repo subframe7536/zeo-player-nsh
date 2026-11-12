@@ -85,6 +85,7 @@ pub fn install() -> Store {
         queue: signal(Same(snap.track.queue.clone())),
         hidden: signal(false),
         close_prompt: signal(false),
+        close_remember: signal(true),
         search: signal(String::new()),
         playlists: signal(Same(Arc::new({
             let mut lists = zeo_playlists::load();

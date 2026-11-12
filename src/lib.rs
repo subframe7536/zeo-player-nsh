@@ -230,30 +230,60 @@ fn page(nav: Signal<Nav>) -> AnyElement {
         .into_element()
 }
 
-/// 第一次点关闭：最小化到托盘还是退出。应用内的弹窗（nsh-base `dialog`，
-/// shadcn AlertDialog 的外观）；选择会记住（设置里可改）。取消、Esc 或点
-/// 遮罩时不关窗口。
+/// 点关闭：最小化到托盘还是退出。警报式弹窗（`alertDialog`）——Esc 与点
+/// 遮罩都关不掉，必须选一个；「记住选择」勾上才把这次的选择写进配置（下次
+/// 关闭不再询问），不勾就只做这一次。选择始终能在「设置」里改。
 fn close_prompt() -> AnyElement {
     use zeo_types::config::CloseAction;
     use zeo_ui_components::button::{Size, Variant, text_button};
     let s = zeo_ui_store::store();
-    let cancel = move || s.close_prompt.set(false);
+    let remember = s.close_remember;
+    let toggle = move || remember.update(|on| *on = !*on);
     let content = zeo_ui_components::form::dialog_content(440.0)
         .child(zeo_ui_components::form::dialog_header(
             "关闭窗口",
-            Some("最小化到托盘后音乐继续播放，可以从托盘图标打开窗口、切歌或退出。这个选择会被记住，可以在「设置」里更改。"),
+            Some("最小化到托盘后音乐继续播放，可以从托盘图标打开窗口、切歌或退出。"),
         ))
+        // 整行可点：复选框本身与标签都能切换（复选框吃掉按压，行不会再
+        // 收到一次，不会翻两次）。
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .cursor_pointer()
+                .on_press(toggle)
+                .child(zeo_ui_components::checkbox::checkbox(
+                    move || remember.get(),
+                    || false,
+                    "记住选择",
+                    move |on| remember.set(on),
+                ))
+                .child(
+                    text("记住选择")
+                        .text_size(px(14.0))
+                        .line_height(px(14.0))
+                        .text_color(fg()),
+                ),
+        )
         .child(
             zeo_ui_components::form::dialog_footer()
-                .child(text_button(Variant::Outline, Size::Default, None, "取消", cancel))
-                .child(text_button(Variant::Secondary, Size::Default, None, "退出 Zeo Player", || {
-                    zeo_ui_store::answer_close(CloseAction::Quit)
-                }))
-                .child(text_button(Variant::Default, Size::Default, None, "最小化到托盘", || {
-                    zeo_ui_store::answer_close(CloseAction::Tray)
-                })),
+                .child(text_button(
+                    Variant::Secondary,
+                    Size::Default,
+                    None,
+                    "退出 Zeo Player",
+                    || zeo_ui_store::answer_close(CloseAction::Quit),
+                ))
+                .child(text_button(
+                    Variant::Default,
+                    Size::Default,
+                    None,
+                    "最小化到托盘",
+                    || zeo_ui_store::answer_close(CloseAction::Tray),
+                )),
         );
-    zeo_ui_components::form::modal(content, cancel)
+    zeo_ui_components::form::alert_dialog(content)
 }
 
 /// 「删除文件」的确认弹窗：回收站 / 直接删（不可恢复）按设置里的「删除

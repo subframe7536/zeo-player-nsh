@@ -29,7 +29,11 @@ pub(crate) fn window_section() -> View {
     )
     .child(supported.then(|| {
         zeo_ui_components::radio::group_cards()
-            .child(option(CloseAction::Ask, "每次询问", "第一次关闭时选择"))
+            .child(option(
+                CloseAction::Ask,
+                "每次询问",
+                "每次关闭都询问，除非勾了「记住选择」",
+            ))
             .child(option(CloseAction::Tray, "最小化到托盘", "继续播放"))
             .child(option(CloseAction::Quit, "退出", "停止播放并退出"))
     }))
