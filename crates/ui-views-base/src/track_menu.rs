@@ -76,7 +76,6 @@ pub fn track_menu_selectable(
     rename: Option<Rc<dyn Fn(&str)>>,
     selected_paths: Option<Rc<dyn Fn() -> Vec<String>>>,
 ) -> AnyElement {
-    let gate = store::menu_control();
     let single_path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
     let multi_paths = {
         let selected_paths = selected_paths.clone();
@@ -93,10 +92,7 @@ pub fn track_menu_selectable(
             single.into_iter().collect::<Vec<_>>()
         }
     };
-    let menu = context_menu()
-        .trigger(row)
-        .open(gate.open())
-        .on_open_change(gate.menu_change());
+    let menu = context_menu().trigger(row);
     let single_items = {
         let multi_paths = multi_paths.clone();
         let single_path = single_path.clone();

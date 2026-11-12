@@ -58,8 +58,6 @@ pub(crate) fn default_columns() -> BTreeSet<String> {
 
 pub(crate) fn column_selector(visible_cols: Signal<BTreeSet<String>>) -> AnyElement {
     let open = signal(false);
-    let gate = zeo_ui_store::menu_control();
-    effect(gate.evicted(open));
 
     let trigger = view()
         .h(px(32.0))
@@ -73,7 +71,7 @@ pub(crate) fn column_selector(visible_cols: Signal<BTreeSet<String>>) -> AnyElem
         .cursor_pointer()
         .window_drag(false)
         .bg(move || {
-            if gate.is_open() {
+            if open.get() {
                 hover()
             } else {
                 nsh_base::theme().card
@@ -223,13 +221,16 @@ pub(crate) fn column_selector(visible_cols: Signal<BTreeSet<String>>) -> AnyElem
         let open = open.clone();
         move || {
             open.set(false);
-            gate.close();
         }
     };
 
     let selector = popover()
-        .open(gate.open_with(open))
-        .on_open_change(gate.popover_change(open))
+        .open(move || Some(open.get()))
+        .on_open_change(move |e: &nsh_base::PopoverEvent| {
+            if let nsh_base::PopoverEvent::OpenChange(next, _) = e {
+                open.set(*next);
+            }
+        })
         .placement(Placement::Bottom)
         .align(Align::Start)
         .offset(px(6.0))
@@ -239,7 +240,7 @@ pub(crate) fn column_selector(visible_cols: Signal<BTreeSet<String>>) -> AnyElem
 
     view()
         .child(when(
-            move || gate.is_open(),
+            move || open.get(),
             move || {
                 overlay()
                     .test_id("column_selector_overlay")

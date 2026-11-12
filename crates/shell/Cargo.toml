@@ -12,10 +12,6 @@ zeo-types.workspace = true
 zeo-engine.workspace = true
 zeo-icons.workspace = true
 
-# 系统文件夹选择器（NSOpenPanel / IFileDialog）；托盘图标与菜单。
-[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
-tray-icon = "0.26"
-
 # Windows：子类化窗口拦截 WM_CLOSE、接管标题栏的非客户区（应用自己画窗口按钮）、
 # 关窗后结束进程、托盘时收缩工作集、全局媒体键钩子。
 [target.'cfg(target_os = "windows")'.dependencies]

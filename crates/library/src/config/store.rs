@@ -294,4 +294,27 @@ impl LibraryStore {
     pub fn reset_keybinds(&self) {
         self.update_config(|c| c.keybinds.clear());
     }
+
+    /// 全局快捷键绑定表（动作 id → 按键文本；只含绑定中的条目）。
+    pub fn global_keybinds(&self) -> std::collections::BTreeMap<String, String> {
+        self.config().global_keybinds.clone()
+    }
+
+    /// 改一个动作的全局键位：`Some(key)` 绑定，`None` 解绑（全局默认
+    /// 就是不绑，所以没有「回默认」的覆盖态）。
+    pub fn set_global_keybind(&self, action: &str, key: Option<&str>) {
+        self.update_config(|c| match key {
+            Some(key) => {
+                c.global_keybinds.insert(action.to_owned(), key.to_owned());
+            }
+            None => {
+                c.global_keybinds.remove(action);
+            }
+        });
+    }
+
+    /// 清空全部全局快捷键绑定。
+    pub fn reset_global_keybinds(&self) {
+        self.update_config(|c| c.global_keybinds.clear());
+    }
 }

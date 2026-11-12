@@ -5,7 +5,6 @@ pub(crate) fn genre_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow>
     let s = store::store();
     let t = nsh_base::theme();
     let (input_c, ring, popover_c, card_c) = (t.input, t.ring, t.popover, t.card);
-    let gate = store::menu_control();
     let query = signal(String::new());
     let genres = move || {
         let raw = draft.with(|d| {
@@ -115,8 +114,6 @@ pub(crate) fn genre_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow>
                         })
                         .query(move || Some(SharedString::from(query.get())))
                         .on_query_change(move |q: &SharedString| query.set(q.to_string()))
-                        .open(gate.open())
-                        .on_open_change(gate.combobox_change())
                         .on_change(move |v: &Vec<SharedString>| {
                             let mut list: Vec<String> = Vec::new();
                             for x in v {

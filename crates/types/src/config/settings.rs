@@ -99,6 +99,10 @@ pub struct LibraryConfig {
     /// 只有与默认不同的条目才落盘，空串表示用户明确解绑（不回默认值）。
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub keybinds: std::collections::BTreeMap<String, String>,
+    /// 全局快捷键：动作 id → 按键文本；默认全不绑（媒体键由平台接管、
+    /// 不在此列），只有显式绑定的条目才落盘。
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub global_keybinds: std::collections::BTreeMap<String, String>,
 }
 
 fn default_fade_ms() -> u32 {
@@ -158,6 +162,7 @@ impl Default for LibraryConfig {
             remember_frame: true,
             window_placement: None,
             keybinds: std::collections::BTreeMap::new(),
+            global_keybinds: std::collections::BTreeMap::new(),
         }
     }
 }

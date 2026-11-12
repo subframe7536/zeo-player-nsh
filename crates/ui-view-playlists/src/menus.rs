@@ -4,12 +4,7 @@ use super::*;
 
 /// 「新建歌单」菜单（侧栏歌单区表头「+」的弹层内容）。
 pub fn add_playlist_menu(trigger: View) -> AnyElement {
-    let gate = store::menu_control();
-    let add = menu()
-        .offset(px(4.0))
-        .trigger(trigger)
-        .open(gate.open())
-        .on_open_change(gate.menu_change());
+    let add = menu().offset(px(4.0)).trigger(trigger);
     popup!(add, 200.0)
         .child(item("新建歌单", Some(Icon::Playlist), || {
             store::new_playlist(false, Vec::new())
@@ -97,11 +92,7 @@ pub(crate) fn sidebar_row(p: &Playlist) -> AnyElement {
     if favorite {
         return row.into_element();
     }
-    let gate = store::menu_control();
-    let menu = context_menu()
-        .trigger(row)
-        .open(gate.open())
-        .on_open_change(gate.menu_change());
+    let menu = context_menu().trigger(row);
     popup!(menu, 180.0)
         .child(item(
             if smart {

@@ -193,8 +193,6 @@ pub fn start() {
         return;
     }
     crate::single_instance::enforce();
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    crate::tray::install_tray_handlers();
     platform::start();
 }
 
@@ -212,45 +210,21 @@ pub fn show() {
     hidden.remove(&0);
     drop(hidden);
     notify();
-    #[cfg(target_os = "windows")]
-    {
-        // 隐藏后走 NSH 的 WindowRequest::Show 会卡死（`UpdateWindow`
-        // 同步重画链）；直接 ShowWindowAsync。还没拿到 HWND 时回退。
-        if hwnd().is_some() {
-            platform::show();
-        } else {
-            let window = nsh_core::element::desktop::main_window();
-            window.show();
-            window.focus();
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let window = nsh_core::element::desktop::main_window();
-        window.show();
-        window.focus();
-    }
+    let window = nsh_core::element::desktop::main_window();
+    window.show();
+    window.focus();
 }
 
 /// 退出应用（结束播放）：与 Cmd+Q / 退出菜单同一条收尾路径
-/// （NSH `desktop::quit` 不再回到关闭拦截）。Windows 上直接结束进程：
-/// `desktop::quit` 的 batch → `WM_NSH_CLOSE` → `PostQuitMessage` 链在
-/// 隐藏后也会卡死，而进程退出本就走 `exit_now` 这条硬收尾（窗口销毁
-/// 时同一个函数）。
+/// （NSH `desktop::quit` 不再回到关闭拦截）。Windows 上窗口销毁时子类
+/// 过程仍走 `exit_now` 硬收尾（先转发 `WM_DESTROY` 给上游过程，托盘图
+/// 标随窗口销毁摘掉）。
 pub fn quit() {
     QUITTING.store(true, Ordering::Relaxed);
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     nsh_core::element::desktop::quit();
-    #[cfg(target_os = "windows")]
-    platform::exit_now();
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     std::process::exit(0);
-}
-
-/// 更新托盘（当前曲目、播放 / 暂停）：图标字形、悬停提示、菜单、
-/// macOS 的菜单栏文字。
-pub fn update_tray(state: crate::tray::TrayState) {
-    platform::update(state);
 }
 
 /// 把空闲内存还给系统（隐藏到托盘后调用）：界面拆掉释放的堆页

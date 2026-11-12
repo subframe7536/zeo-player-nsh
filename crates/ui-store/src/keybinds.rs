@@ -7,16 +7,27 @@ use std::collections::BTreeMap;
 
 use super::*;
 
-pub use zeo_keybinds::{KeyAction, Keybinds, capture_candidates, effective_keybinds};
+pub use zeo_keybinds::{
+    BindScope, GLOBAL_ACTIONS, KeyAction, Keybinds, capture_candidates, effective_global_keybinds,
+    effective_keybinds,
+};
 
 /// 当前生效键位表（配置实时值）。
 pub fn keybinds_map() -> Keybinds {
     effective_keybinds(&library_store().keybinds())
 }
 
+/// 当前生效的全局键位表（配置实时值）。
+pub fn global_keybinds_map() -> Keybinds {
+    effective_global_keybinds(&library_store().global_keybinds())
+}
+
 /// 配置写入后把生效表同步进信号（`install` 与各 setter 调用）。
 pub(crate) fn refresh_keybinds() {
     store().keybinds.set(Same(Arc::new(keybinds_map())));
+    store()
+        .global_keybinds
+        .set(Same(Arc::new(global_keybinds_map())));
 }
 
 /// 一个动作的生效键位（空串 = 未绑定）。
@@ -56,23 +67,69 @@ pub fn set_keybind(action: KeyAction, key: Option<String>) {
 /// 触发全部取消（`bind_key` 不注册）、设置页红字置顶；改掉任一方后
 /// 剩余动作的绑定自动恢复——冲突只是状态，不动配置。
 pub fn conflicted_actions() -> std::collections::BTreeSet<KeyAction> {
-    store().keybinds.with(|map| {
-        let mut counts = BTreeMap::<&str, usize>::new();
-        for k in map.values() {
-            if !k.is_empty() {
-                *counts.entry(k.as_str()).or_default() += 1;
-            }
-        }
-        map.iter()
-            .filter(|(_, k)| !k.is_empty() && counts[k.as_str()] > 1)
-            .map(|(a, _)| *a)
-            .collect()
+    store()
+        .keybinds
+        .with(|map| conflicted_in(map, std::iter::empty()))
+}
+
+/// 全局生效表里的冲突动作：全局表内同键，或与窗口内键位撞键（窗口聚
+/// 焦时全局键先响，会压住局部绑定）。冲突中不注册，语义同
+/// `conflicted_actions`。
+pub fn global_conflicted_actions() -> std::collections::BTreeSet<KeyAction> {
+    store().keybinds.with(|local| {
+        store()
+            .global_keybinds
+            .with(|map| conflicted_in(map, local.values()))
     })
+}
+
+fn conflicted_in<'a>(
+    map: &'a Keybinds,
+    extra: impl Iterator<Item = &'a String>,
+) -> std::collections::BTreeSet<KeyAction> {
+    let mut counts = BTreeMap::<&str, usize>::new();
+    for k in map
+        .values()
+        .map(String::as_str)
+        .chain(extra.map(String::as_str))
+    {
+        if !k.is_empty() {
+            *counts.entry(k).or_default() += 1;
+        }
+    }
+    map.iter()
+        .filter(|(_, k)| !k.is_empty() && counts[k.as_str()] > 1)
+        .map(|(a, _)| *a)
+        .collect()
 }
 
 /// 全部键位回默认（清空覆盖）。
 pub fn reset_keybinds() {
     library_store().reset_keybinds();
+    library_store().reset_global_keybinds();
+    refresh_keybinds();
+}
+
+/// 一个动作的全局生效键位（空串 = 未绑定）。
+pub fn global_key_of(action: KeyAction) -> String {
+    store()
+        .global_keybinds
+        .with(|m| m.get(&action).cloned().unwrap_or_default())
+}
+
+/// 一个动作的全局键位标签；未绑定为空串。
+pub fn global_key_label_of(action: KeyAction) -> String {
+    let key = global_key_of(action);
+    if key.is_empty() {
+        String::new()
+    } else {
+        key_label(&key)
+    }
+}
+
+/// 改 `action` 的全局键位：`Some(key)` 绑定，`None` / 空串解绑。
+pub fn set_global_keybind(action: KeyAction, key: Option<String>) {
+    library_store().set_global_keybind(action.id(), key.as_deref().filter(|k| !k.is_empty()));
     refresh_keybinds();
 }
 

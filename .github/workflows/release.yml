@@ -20,15 +20,14 @@ jobs:
         include:
           - os: macos-latest
             target: macos
-          # Windows 用满幅图标（macOS 惯例的留白图标在任务栏里小一圈；见 AGENTS.md「应用图标」）
           - os: windows-latest
             target: windows
-            icon: --icon resources/icon-windows.png
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
-      - run: nsh package . --target ${{ matrix.target }} ${{ matrix.icon }}
+      # 图标按平台由 nsh.json 的 icon 对象给（Windows 满幅，见 AGENTS.md「应用图标」）。
+      - run: nsh package . --target ${{ matrix.target }}
       - name: DMG (macOS)
         if: runner.os == 'macOS'
         # 用户下载的安装镜像：拖 .app 到 Applications。更新归档

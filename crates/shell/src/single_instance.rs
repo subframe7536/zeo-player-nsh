@@ -1,23 +1,23 @@
 //! 单实例：正式构建只允许一份进程；第二份把第一份实例的窗口激活后退出。
-//! NSH 没有「已有实例」的入口，这里直接用系统 API：
 //!
-//! - Windows：固定名字的互斥体（`Local\dev.subf.zeo-player.single`）判重；
-//!   给第一份实例的顶层 `NshWindow` 窗口直接投递注册消息
-//!   `dev.subf.zeo-player.show`（`window.rs` 的 `proc` 收进来调
-//!   [`handle_message`]、`show()` 自己），找不到窗口退回广播；然后
-//!   `TerminateProcess`（不跑析构，顺带绕开已知的退出死锁）。
-//! - macOS：临时目录下的 `<bundle id>.lock` 文件锁（flock）判重——拿不
-//!   到排他锁说明已有实例，按 pid 找更旧的实例激活它，并发分布式通知
+//! - Windows / 打包产物：`nsh.json` 的 `"singleInstance": true` 交给上
+//!   游 runner（`nsh-windows-app`）——第二份在窗口创建前经按 app id
+//!   命名的互斥体判重，把启动参数用 `WM_COPYDATA` 转交第一份（藏在
+//!   托盘的主窗口也会被重新显示、提到最前）后退出，这里不再有平台
+//!   代码。
+//! - macOS：上游不实现（`singleInstance` 只靠 LaunchServices，挡不住
+//!   直接执行二进制或 `open -n`），这里保留临时目录
+//!   `<bundle id>.lock` 的文件锁（flock）判重——拿不到排他锁说明已
+//!   有实例，按 pid 找更旧的实例激活它，并发分布式通知
 //!   `dev.subf.zeo-player.show` 让它把窗口提到最前（藏在托盘的窗口
-//!   `activate` 不会放出来），然后退出。`runningApplications` 有注册延
-//!   迟、同时启动互相看不见，故不用它判重。Dock / `open` 由
-//!   LaunchServices 挡，这里拦的是直接执行二进制或 `open -n`；拿不到
-//!   bundle id（非 .app 启动，如 cargo run --release）无从判重，放行。
+//!   `activate` 不会放出来），然后退出。`runningApplications` 有注册
+//!   延迟、同时启动互相看不见，故不用它判重。Dock / `open` 由
+//!   LaunchServices 挡，这里拦的是直接执行二进制或 `open -n`；拿不
+//!   到 bundle id（非 .app 启动）无从判重，放行。
 //!
 //! 只有开发构建与测试不拦（设了 `ZEO_PLAYER_DATA_DIR` 的正式构建也拦）。
-//! 在拉起引擎与曲库之前调用（`App()` 第一行——进程死在 `view.load` 里、
-//! NSH `view.show` 之前；窗口建出来不带 WS_VISIBLE，第二份的窗口不会闪
-//! 一下）。
+//! 在拉起引擎与曲库之前调用（`App()` 第一行——macOS 的第二份进程死在
+//! `view.load` 里、NSH `view.show` 之前，不会闪一下窗口）。
 
 /// 单实例检查；幂等，在拉起引擎与曲库之前调用。
 pub fn enforce() {
@@ -91,9 +91,8 @@ mod platform {
         app.activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps)
     }
 
-    /// 单实例：固定名文件锁（对应 Windows 的命名互斥体）判重——能拿到排
-    /// 他锁的是第一份；拿不到说明已有实例，激活它、发「显示已有窗口」通
-    /// 知，再退出自己。
+    /// 单实例：固定名文件锁判重——能拿到排他锁的是第一份；拿不到说明
+    /// 已有实例，激活它、发「显示已有窗口」通知，再退出自己。
     pub fn enforce() {
         let Some(id) = NSBundle::mainBundle().bundleIdentifier() else {
             return;
@@ -159,109 +158,11 @@ mod platform {
     }
 }
 
-// --- Windows -------------------------------------------------------------------
-
-/// 「显示已有窗口」消息到了第一份实例的窗口（`window.rs` 的 `proc` 转
-/// 过来）。返回是不是单实例消息（要不要消费掉）。
-#[cfg(target_os = "windows")]
-pub(crate) use platform::handle_message;
-
-#[cfg(target_os = "windows")]
-mod platform {
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM};
-    use windows_sys::Win32::System::Threading::{
-        CreateMutexW, GetCurrentProcess, GetCurrentProcessId, TerminateProcess,
-    };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GW_OWNER, GetClassNameW, GetWindow, GetWindowThreadProcessId, HWND_BROADCAST,
-        PostMessageW, RegisterWindowMessageW,
-    };
-
-    /// 「显示已有窗口」的注册消息值（`enforce` 注册，同名同值）。
-    static INSTANCE_MSG: AtomicU32 = AtomicU32::new(0);
-
-    /// 「显示已有窗口」消息到了第一份实例的窗口（`window.rs` 的 `proc` 转
-    /// 过来）：显示自己（藏在托盘的也放出来）。返回是不是单实例消息
-    /// （要不要消费掉）。
-    pub fn handle_message(msg: u32) -> bool {
-        let m = INSTANCE_MSG.load(Ordering::Relaxed);
-        if m == 0 || msg != m {
-            return false;
-        }
-        crate::show();
-        true
-    }
-
-    /// 固定名字的互斥体判重。已存在说明另一份在跑——给它发「显示已有
-    /// 窗口」再退出。互斥体句柄由第一份实例保有，随进程退出自动释放，
-    /// 无需显式关闭。
-    pub fn enforce() {
-        // SAFETY: 注册消息同名同值；消息与互斥体都是会话级的系统对象。
-        unsafe {
-            INSTANCE_MSG.store(
-                RegisterWindowMessageW(windows_sys::w!("dev.subf.zeo-player.show")),
-                Ordering::Relaxed,
-            );
-            let mutex = CreateMutexW(
-                std::ptr::null(),
-                1,
-                windows_sys::w!("Local\\dev.subf.zeo-player.single"),
-            );
-            if mutex.is_null() || GetLastError() != ERROR_ALREADY_EXISTS {
-                return;
-            }
-            post_show();
-            TerminateProcess(GetCurrentProcess(), 0);
-        }
-    }
-
-    /// 找第一份实例的顶层 `NshWindow` 窗口直接投递（比广播可靠，也只发给
-    /// 同类窗口）；它的窗口还没建好（几乎同时启动）时退回广播——那份实
-    /// 例自己本来就要显示，丢了也无妨。
-    fn post_show() {
-        struct Ctx {
-            hwnd: HWND,
-            msg: u32,
-        }
-        unsafe extern "system" fn each(hwnd: HWND, ctx: LPARAM) -> i32 {
-            let ctx = unsafe { &mut *(ctx as *mut Ctx) };
-            let mut pid = 0u32;
-            let mut name = [0u16; 64];
-            // SAFETY: 读窗口进程、所有者与类名；别的进程的窗口也能查。
-            let n = unsafe {
-                GetWindowThreadProcessId(hwnd, &mut pid);
-                if pid == GetCurrentProcessId() || !GetWindow(hwnd, GW_OWNER).is_null() {
-                    return 1;
-                }
-                GetClassNameW(hwnd, name.as_mut_ptr(), name.len() as i32)
-            };
-            if String::from_utf16_lossy(&name[..n.max(0) as usize]) != "NshWindow" {
-                return 1;
-            }
-            // SAFETY: 向别的进程的窗口投递我们刚注册的消息；对不认识它的
-            // 窗口过程无害（默认处理）。
-            unsafe { PostMessageW(hwnd, ctx.msg, 0, 0) };
-            ctx.hwnd = hwnd;
-            0
-        }
-        let mut ctx = Ctx {
-            hwnd: std::ptr::null_mut(),
-            msg: INSTANCE_MSG.load(Ordering::Relaxed),
-        };
-        // SAFETY: ctx 只在枚举期间被回调写。
-        unsafe { EnumWindows(Some(each), &mut ctx as *mut Ctx as LPARAM) };
-        if ctx.hwnd.is_null() {
-            // SAFETY: 广播给所有顶层窗口。
-            unsafe { PostMessageW(HWND_BROADCAST, ctx.msg, 0, 0) };
-        }
-    }
-}
-
 // --- 其它平台 -------------------------------------------------------------------
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+// Windows 由打包 runner 的 `singleInstance` 判重（见模块文档），`enforce`
+// 在这些平台是空操作。
+#[cfg(not(target_os = "macos"))]
 mod platform {
     pub fn enforce() {}
 }

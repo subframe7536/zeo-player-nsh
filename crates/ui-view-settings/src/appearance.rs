@@ -260,7 +260,6 @@ fn font_select() -> AnyElement {
     let installed = signal(None::<Same<Vec<String>>>);
     let t = nsh_base::theme();
     let (input_c, ring, card_c) = (t.input, t.ring, t.card);
-    let gate = zeo_ui_store::menu_control();
     nsh_base::combobox()
         // combobox 的根是 input 所在的行：外壳复刻输入框（同编辑信息的
         // 流派行），chevron 在行内、清除钮在其左。
@@ -321,8 +320,6 @@ fn font_select() -> AnyElement {
         .align(Align::End)
         .offset(px(4.0))
         .margin(px(8.0))
-        .open(gate.open())
-        .on_open_change(gate.combobox_change())
         // 打开才枚举已安装字体；离开设置页本节销毁，数据与任务一起释放。
         .on_open(move || {
             if installed.get_untracked().is_some() {

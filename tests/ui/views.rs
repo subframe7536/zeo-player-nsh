@@ -46,9 +46,9 @@ fn sidebar_switchable_views_and_auto_linkage() {
     app.wait_for("text:测试歌曲").unwrap();
 }
 
-/// 右键菜单互斥：再开一个菜单时旧的关掉（右键按下不产生 PressOutside，
-/// 平台不会收旧菜单，靠 `store::menu_control` 的令牌互斥）；右键点到
-/// 没有菜单的地方，开着的菜单也要关掉。
+/// 右键菜单互斥：再开一个菜单时旧的关掉（上游 0.5.0 起次级点击纳入
+/// PressOutside，菜单互斥由平台接管）；点到没有菜单的地方，开着的菜单
+/// 也要关掉。
 #[test]
 fn context_menus_replace_each_other() {
     let mut app = start(1200.0, 800.0);
@@ -76,8 +76,11 @@ fn context_menus_replace_each_other() {
         .unwrap();
     assert_eq!(app.screen().count("role:menu").unwrap(), 1);
 
-    // 右键点在没有菜单的地方（页头）：菜单关掉。
-    app.right_click("text:文件夹 >> nth=0").unwrap();
+    // 点在没有菜单的地方（页头）：PressOutside 把菜单关掉。真机上右键
+    // 点空处同走 PressOutside（上游 #1544），但无头驱动的 right_click
+    // 只发 ContextMenu + MouseUp、没有次级按压，这里用主按压覆盖同一条
+    // 关闭路径。
+    app.press("text:文件夹 >> nth=0").unwrap();
     app.wait_for_gone("role:menuitem[重命名文件…]", Duration::from_secs(2))
         .unwrap();
     assert_eq!(app.screen().count("role:menu").unwrap(), 0);

@@ -32,8 +32,7 @@ fn isolate() -> bool {
             let empty_dir = data.join("zz_empty_folder");
             let _ = std::fs::create_dir_all(&empty_dir);
             // 关掉「记住窗口大小和位置」：曲库存储进程全局，并行用例的
-            // 窗口位置会互相写 / 互相恢复（恢复时窗口状态上报，见下
-            // `set_viewport` 的回种注释）。
+            // 窗口位置会互相写 / 互相恢复。
             let config = serde_json::json!({
                 "roots": [
                     dunce::canonicalize(CORPUS).unwrap(),
@@ -70,12 +69,7 @@ fn start(width: f32, height: f32) -> Headless {
     config.viewport = size(px(width), px(height));
     config.environment.os = Os::MacOs;
     zeo_player::engine::Player::global().set_volume(0.0);
-    let viewport = config.viewport;
     let mut app = Headless::start(config).expect("start the app");
-    // 驱动侧缓存的 environment.window 从 0 起（engine 才拿 config.viewport
-    // 填）：主窗口状态一上报整份 environment 就把引擎的 env.window 盖成 0，
-    // 列宽断点全当窄窗口——先按真实尺寸回种一次。
-    app.set_viewport(viewport).unwrap();
     app.wait_for("首页").unwrap();
     app
 }

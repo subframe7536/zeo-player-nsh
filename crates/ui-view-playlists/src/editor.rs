@@ -383,7 +383,6 @@ pub(crate) fn tag_select(
     // 宽由触发器记（cover_realign_flex）。
     let (min_w, layout) = cover_realign_flex(pulse);
     let trigger = select_trigger(current, || None, "值", 0.0, "选择标签").on_layout(layout);
-    let gate = store::menu_control();
     let no_tags = move || !s.tracks.get().iter().any(|t| !t.genres.is_empty());
     nsh_base::select()
         .flex_1()
@@ -411,8 +410,6 @@ pub(crate) fn tag_select(
         .align(Align::Start)
         .offset(px(4.0))
         .margin(px(8.0))
-        .open(gate.open())
-        .on_open_change(gate.select_change())
         .on_open(move || cover_realign(pulse))
         .on_change(move |v: &Option<SharedString>| {
             if let Some(v) = v {

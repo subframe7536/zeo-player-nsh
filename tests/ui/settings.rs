@@ -1,4 +1,5 @@
 use super::*;
+use nsh_core::geometry::point;
 
 #[test]
 fn sidebar_navigates_between_library_views() {

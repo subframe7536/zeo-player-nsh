@@ -5,7 +5,7 @@ pub mod single_instance;
 pub mod tray;
 pub mod window;
 
-pub use tray::{TrayAction, TrayState, take_tray_actions};
+pub use tray::{TrayAction, TrayState, take_tray_actions, tray_for};
 
 #[cfg(any(debug_assertions, test))]
 pub use tray::simulate_tray;

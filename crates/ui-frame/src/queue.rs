@@ -19,10 +19,6 @@ const ROW: f32 = 52.0;
 
 /// 队列按钮与它打开的弹层。`open` 由应用持有（按钮的高亮也读它）。
 pub fn queue_button(open: Signal<bool>) -> AnyElement {
-    // 与所有弹出层互斥（菜单、另一个 popover）：令牌被夺走时本地 `open`
-    // 复位，触发器高亮随之熄灭。
-    let gate = zeo_ui_store::menu_control();
-    effect(gate.evicted(open));
     // 触发器由 popover 接管按压（切换开合、`expanded` 状态），所以是普通
     // view：nsh-base 的 button 自己吃掉按压，popover 收不到。外形同 shadcn
     // ghost `icon-sm`。
@@ -44,8 +40,12 @@ pub fn queue_button(open: Signal<bool>) -> AnyElement {
             move || if open.get() { primary() } else { muted_fg() },
         ));
     popover()
-        .open(gate.open_with(open))
-        .on_open_change(gate.popover_change(open))
+        .open(move || Some(open.get()))
+        .on_open_change(move |e: &nsh_base::PopoverEvent| {
+            if let nsh_base::PopoverEvent::OpenChange(next, _) = e {
+                open.set(*next);
+            }
+        })
         .placement(Placement::Top)
         .align(Align::End)
         .offset(px(12.0))

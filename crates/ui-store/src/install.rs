@@ -108,8 +108,9 @@ pub fn install() -> Store {
         folder_message: signal(String::new()),
         folder_op: signal(None),
         update: signal(UpdateState::Idle),
-        menu_open: signal(None),
         keybinds: signal(Same(Arc::new(keybinds_map()))),
+        global_keybinds: signal(Same(Arc::new(global_keybinds_map()))),
+        key_capture: signal(None),
     };
     STORE.with(|cell| cell.set(Some(s)));
     let (tx, posted) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
@@ -250,8 +251,8 @@ pub fn install() -> Store {
     });
 
     // 托盘图标与菜单跟着当前曲目与播放状态（memo 拦掉进度刷新：订阅整个
-    // playback 信号会让 effect 每 100ms 都跑一次 format! + 通道 +
-    // SetMenuItemInfoW；平台侧 apply 还有一层按 TrayState 的重复过滤）。
+    // playback 信号会让 effect 每 100ms 都重设整个托盘）。上游 `set_tray`
+    // 整体替换：图标 / 提示 / 菜单随状态重建。
     let tray_key = computed(move || {
         let (title, artist, has_track) = s
             .track
@@ -260,12 +261,33 @@ pub fn install() -> Store {
     });
     effect(move || {
         let (title, artist, playing, has_track) = tray_key.get();
-        zeo_shell::update_tray(zeo_shell::TrayState {
+        nsh_core::element::desktop::set_tray(zeo_shell::tray_for(&zeo_shell::TrayState {
             title,
             artist,
             playing,
             has_track,
-        });
+        }));
+    });
+
+    // 全局快捷键（`register_global_shortcut`，窗口外 / 隐藏到托盘也生效）：
+    // 生效表或捕获态变动时换 owner 全撤重绑——捕获中先清空，按下的候选键
+    // 才不会被自己已注册的全局键吃掉。媒体键上游的 `Key` 表达不了：
+    // Windows 走低级键盘钩子（`zeo-shell` 的 media_hook_thread），macOS
+    // 走系统媒体会话，不在此列。
+    effect(move || {
+        if s.key_capture.get().is_some() {
+            return;
+        }
+        let conflicted = global_conflicted_actions();
+        for (action, key) in s.global_keybinds.get().iter() {
+            if key.is_empty() || conflicted.contains(action) {
+                continue;
+            }
+            let action = *action;
+            let _ = nsh_core::element::desktop::register_global_shortcut(key, move || {
+                run_keybind(action)
+            });
+        }
     });
 
     // 曲库：扫盘状态、根目录与索引。主题色走全局配置——别处（多窗口 /

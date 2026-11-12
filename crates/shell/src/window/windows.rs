@@ -1,6 +1,5 @@
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
-use std::sync::mpsc::{Sender, channel};
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -29,11 +28,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_SYSCOMMAND, WM_SYSKEYDOWN, WNDPROC, WS_CAPTION, WS_THICKFRAME,
 };
 
-use crate::tray::TrayState;
-
 pub static HWND_VALUE: OnceLock<u64> = OnceLock::new();
 static OLD_PROC: AtomicIsize = AtomicIsize::new(0);
-static TRAY_TX: OnceLock<Mutex<Sender<TrayMsg>>> = OnceLock::new();
 
 /// 让钩子线程重挂低级键盘钩子（钩子链后装先调：窗口每次激活都
 /// 把我们的钩子挪回链首，跟 AIMP 这类自己拦媒体键的播放器争抢）。
@@ -104,8 +100,6 @@ fn media_hook_thread() {
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     let mut l = l;
     match msg {
-        // 第二份实例「显示已有窗口」（`single_instance` 直接投递或广播）。
-        m if crate::single_instance::handle_message(m) => return 0,
         // 窗口激活：把键盘钩子挪回链首（后装先调，抢回媒体键）。
         WM_ACTIVATE if w != 0 => {
             let tid = HOOK_TID.load(Ordering::Relaxed);
@@ -272,27 +266,7 @@ pub fn close() {
     }
 }
 
-/// 显示并激活主窗口（托盘「显示」）：直接 `ShowWindowAsync` +
-/// `SetForegroundWindow`，不走 NSH 的 `WindowRequest::Show`——那条链是
-/// 引擎 batch → `WM_NSH_WAKE` → `surface.drain` → `shell::request` →
-/// `window::show` → `UpdateWindow` 同步重画，隐藏后再走它会整串卡死。
-/// `ShowWindowAsync` 只把显示事件投进窗口队列，调用线程永不阻塞；
-/// `WM_SHOWWINDOW` 经子类过程报 `shown_by_system`，界面照旧重挂。
-pub(crate) fn show() {
-    let Some(h) = hwnd() else {
-        return;
-    };
-    // SAFETY: 普通调用；`ShowWindowAsync` 可跨线程且不等待目标线程。
-    unsafe {
-        let _ = ShowWindowAsync(h, SW_SHOW);
-        if IsIconic(h) != 0 {
-            let _ = ShowWindowAsync(h, SW_RESTORE);
-        }
-        let _ = SetForegroundWindow(h);
-    }
-}
-
-/// 主窗口已销毁：移除托盘图标后直接结束进程。
+/// 主窗口已销毁：直接结束进程。
 ///
 /// NSH 0.3.0 在 UI 线程退出时由线程局部析构释放 D3D / D2D 设备。Windows
 /// 在持有加载器锁时运行这些析构，部分显卡驱动（Intel `igd10umt64xe`）
@@ -300,21 +274,8 @@ pub(crate) fn show() {
 /// 就停在那里：窗口没了，进程不退。这里不走那条路径。应用数据都在改动时
 /// 写盘，退出时没有要收尾的东西。
 pub(crate) fn exit_now() {
-    if let Some(tx) = TRAY_TX.get() {
-        let (done_tx, done_rx) = channel();
-        if tx.lock().unwrap().send(TrayMsg::Remove(done_tx)).is_ok() {
-            let _ = done_rx.recv_timeout(Duration::from_millis(500));
-        }
-    }
     // SAFETY: 结束本进程；不运行线程局部析构与 DLL 卸载回调。
     unsafe { TerminateProcess(GetCurrentProcess(), 0) };
-}
-
-/// 发给托盘线程的消息。
-enum TrayMsg {
-    State(TrayState),
-    /// 移除托盘图标，完成后回复。
-    Remove(Sender<()>),
 }
 
 unsafe extern "system" fn find(hwnd: HWND, out: LPARAM) -> i32 {
@@ -370,42 +331,6 @@ pub fn start() {
             }
         })
         .ok();
-    // 托盘：自己的线程，带消息循环（托盘图标的隐藏窗口在这里收消息）。
-    let (tx, rx) = channel::<TrayMsg>();
-    let _ = TRAY_TX.set(Mutex::new(tx));
-    std::thread::Builder::new()
-        .name("zeo-player-tray".into())
-        .spawn(move || {
-            crate::tray::create();
-            loop {
-                // SAFETY: 本线程的消息循环。
-                unsafe {
-                    let mut msg: MSG = std::mem::zeroed();
-                    while PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
-                        TranslateMessage(&msg);
-                        DispatchMessageW(&msg);
-                    }
-                }
-                while let Ok(msg) = rx.try_recv() {
-                    match msg {
-                        TrayMsg::State(state) => crate::tray::apply(&state),
-                        TrayMsg::Remove(done) => {
-                            crate::tray::remove();
-                            let _ = done.send(());
-                            return;
-                        }
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(30));
-            }
-        })
-        .ok();
-}
-
-pub fn update(state: TrayState) {
-    if let Some(tx) = TRAY_TX.get() {
-        let _ = tx.lock().unwrap().send(TrayMsg::State(state));
-    }
 }
 
 pub fn trim_memory() {

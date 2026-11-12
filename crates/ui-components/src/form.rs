@@ -9,7 +9,6 @@ use nsh_core::prelude::*;
 
 use super::button::RADIUS_MD;
 use super::icons::{Icon, icon};
-use zeo_ui_store as store;
 use zeo_ui_store::theme::*;
 
 /// shadcn 的 `rounded-lg`。
@@ -424,7 +423,6 @@ pub fn select_with_trigger(
         trig
     };
 
-    let gate = store::menu_control();
     let has_glyph = options.iter().any(|o| o.glyph.is_some());
 
     let mut items = Vec::with_capacity(options.len());
@@ -459,8 +457,6 @@ pub fn select_with_trigger(
         .align(Align::Start)
         .offset(px(4.0))
         .margin(px(8.0))
-        .open(gate.open())
-        .on_open_change(gate.select_change())
         .on_open(move || cover_realign(pulse))
         .on_change(move |v: &Option<SharedString>| {
             if let Some(v) = v

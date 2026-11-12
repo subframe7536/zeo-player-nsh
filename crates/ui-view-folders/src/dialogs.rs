@@ -129,11 +129,7 @@ pub(crate) fn delete_folder_dialog(
 /// 根目录行特殊：它是曲库根（设置页管），不给重命名 / 删除，改成
 /// 「从曲库移除」（只摘配置，不动文件）。
 pub(crate) fn tree_menu(trigger: View, row: Memo<Option<TreeRow>>, ops: Rc<Ops>) -> AnyElement {
-    let gate = store::menu_control();
-    let menu = context_menu()
-        .trigger(trigger)
-        .open(gate.open())
-        .on_open_change(gate.menu_change());
+    let menu = context_menu().trigger(trigger);
     let path = move || row.with_untracked(|r| r.as_ref().map(|r| r.path.clone()));
     let is_root = row.with_untracked(|r| r.as_ref().is_some_and(|r| r.depth == 0));
     let message = ops.message;

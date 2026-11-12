@@ -170,13 +170,15 @@ pub struct Store {
     pub folder_op: Signal<Option<FileOp>>,
     /// 应用更新状态（「关于」页）。
     pub update: Signal<UpdateState>,
-    /// 当前开着的弹出菜单（`menu_control` 的 id）：同一时刻只开一个。
-    /// 桌面上右键按下不产生 PressOutside（平台只发 ContextMenu 事件），
-    /// 已开的菜单不会被平台关掉，由它互斥。
-    pub menu_open: Signal<Option<u64>>,
     /// 生效的快捷键表（`KeyAction` → 键位；空串 = 未绑定）：绑定挂在读
     /// 它的 `dynamic` 里，换绑时换 owner 重绑。
     pub keybinds: Signal<Same<Keybinds>>,
+    /// 生效的全局快捷键表（`KeyAction` → 键位；空串 = 未绑定，默认全
+    /// 不绑）：`install` 的 effect 换绑时整体注销重绑。
+    pub global_keybinds: Signal<Same<Keybinds>>,
+    /// 设置页「按下新键」捕获态（`Some` = 正在捕获）：全局快捷键此时
+    /// 整体注销，按下的候选键不会被已注册的全局键吃掉。
+    pub key_capture: Signal<Option<(zeo_keybinds::BindScope, KeyAction)>>,
 }
 
 pub use zeo_types::config::SidebarSection;

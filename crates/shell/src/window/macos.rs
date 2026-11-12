@@ -7,8 +7,6 @@ use objc2::runtime::{AnyObject, Bool, Imp, Sel};
 use objc2::{MainThreadMarker, sel};
 use objc2_app_kit::{NSApplication, NSWindow};
 
-use crate::tray::TrayState;
-
 /// NSH 原来的 `applicationShouldHandleReopen:hasVisibleWindows:` 实现。
 static ORIGINAL_REOPEN: OnceLock<usize> = OnceLock::new();
 
@@ -51,8 +49,8 @@ fn main_window(mtm: MainThreadMarker) -> Option<Retained<NSWindow>> {
     Some(window)
 }
 
-/// 挂钩 NSH 的共享代理（Dock 重开、单实例通知）并创建托盘；窗口还没
-/// 建好时稍后重试。
+/// 挂钩 NSH 的共享代理（Dock 重开、单实例通知）；窗口还没建好时稍
+/// 后重试。
 fn hook(attempt: u32) {
     DispatchQueue::main().exec_async(move || {
         let Some(mtm) = MainThreadMarker::new() else {
@@ -84,16 +82,11 @@ fn hook(attempt: u32) {
             let old = unsafe { method.set_implementation(imp) };
             let _ = ORIGINAL_REOPEN.set(old as usize);
         }
-        crate::tray::create();
     });
 }
 
 pub fn start() {
     hook(0);
-}
-
-pub fn update(state: TrayState) {
-    DispatchQueue::main().exec_async(move || crate::tray::apply(&state));
 }
 
 pub fn trim_memory() {

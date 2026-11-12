@@ -40,8 +40,6 @@ pub(crate) fn fmt_offset(ms: i64) -> String {
 pub(crate) fn offset_rail() -> AnyElement {
     let s = store();
     let open = signal(false);
-    let gate = menu_control();
-    effect(gate.evicted(open));
     let value = move || {
         let v = s.lyrics_offset.get();
         if v == 0 {
@@ -91,8 +89,12 @@ pub(crate) fn offset_rail() -> AnyElement {
         )
         .child(
             popover()
-                .open(gate.open_with(open))
-                .on_open_change(gate.popover_change(open))
+                .open(move || Some(open.get()))
+                .on_open_change(move |e: &nsh_base::PopoverEvent| {
+                    if let nsh_base::PopoverEvent::OpenChange(next, _) = e {
+                        open.set(*next);
+                    }
+                })
                 .placement(Placement::Left)
                 .align(Align::Center)
                 .offset(px(12.0))

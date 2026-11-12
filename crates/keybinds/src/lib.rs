@@ -243,6 +243,42 @@ impl KeyAction {
     }
 }
 
+/// 可全局绑定的动作（窗口外也生效，`register_global_shortcut`）：全屏
+/// 播放页内的动作（`in_full_player`）除外——它们只在全屏上下文有意义。
+/// 媒体控制键（⏯ / ⏮ / ⏭）上游的 `Key` 表达不了，不在键位候选里。
+pub const GLOBAL_ACTIONS: &[KeyAction] = &[
+    KeyAction::Toggle,
+    KeyAction::Prev,
+    KeyAction::Next,
+    KeyAction::SeekBack,
+    KeyAction::SeekFwd,
+    KeyAction::VolDown,
+    KeyAction::VolUp,
+    KeyAction::Mute,
+    KeyAction::Like,
+    KeyAction::LoopMode,
+    KeyAction::Palette,
+    KeyAction::PaletteOpen,
+    KeyAction::SettingsOpen,
+    KeyAction::FullScreen,
+    KeyAction::NavHome,
+    KeyAction::NavLibrary,
+    KeyAction::NavArtists,
+    KeyAction::NavAlbums,
+    KeyAction::NavMetadata,
+    KeyAction::NavFolders,
+    KeyAction::NavGenres,
+    KeyAction::CloseWindow,
+];
+
+/// 键位绑定的作用域：窗口内（`on_key`）还是全局（`register_global_
+/// shortcut`）。设置页的捕获态按它分发写库。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum BindScope {
+    Local,
+    Global,
+}
+
 /// 键位表（动作 → 生效键位，空串 = 未绑定）。
 pub type Keybinds = BTreeMap<KeyAction, String>;
 
@@ -264,6 +300,29 @@ pub fn effective_keybinds(overrides: &BTreeMap<String, String>) -> Keybinds {
                 .filter(valid)
                 .cloned()
                 .unwrap_or_else(|| a.default_key().to_owned());
+            (*a, key)
+        })
+        .collect()
+}
+
+/// 全局快捷键的生效键位：只看 `GLOBAL_ACTIONS`，默认全不绑（
+/// `default_key` 不参与）；非法键位（语法错、平台保留键）同
+/// `effective_keybinds` 丢弃。
+pub fn effective_global_keybinds(overrides: &BTreeMap<String, String>) -> Keybinds {
+    let apple = try_apple_keys().unwrap_or(false);
+    let os = try_os();
+    let valid = |key: &&String| {
+        nsh_core::keymap::Keystroke::parse_with(key, apple)
+            .is_ok_and(|k| os.is_none_or(|os| k.reserved(os).is_none()))
+    };
+    GLOBAL_ACTIONS
+        .iter()
+        .map(|a| {
+            let key = overrides
+                .get(a.id())
+                .filter(|k| !k.is_empty() && valid(k))
+                .cloned()
+                .unwrap_or_default();
             (*a, key)
         })
         .collect()

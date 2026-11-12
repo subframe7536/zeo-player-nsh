@@ -24,7 +24,7 @@ pub(crate) use zeo_ui_components::slider::{SliderStyle, slider};
 pub(crate) use zeo_ui_store::theme::*;
 
 pub(crate) use zeo_ui_store::{
-    format_time, menu_control, nudge_lyrics_offset, seek_to, set_lyrics_offset, store,
+    format_time, nudge_lyrics_offset, seek_to, set_lyrics_offset, store,
 };
 
 mod anim;

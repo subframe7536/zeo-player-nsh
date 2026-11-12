@@ -1,145 +1,81 @@
-use std::cell::RefCell;
+//! 系统托盘：0.5.0 起走上游 `element::desktop` 的 `set_tray` / `Tray`
+//!（`install` 的响应式 effect 按 [`TrayState`] 调 [`tray_for`] 重设整
+//! 个托盘）。图标是播放 / 暂停按钮的同一图形写成 SVG
+//!（`ImageSrc::svg_markup`）交给上游：macOS 当模板图按系统文字色绘
+//! 制；上游在 Windows 上也把 SVG 当模板（任务栏文字色），彩色垫砖图
+//! 标要自己光栅化走 `ImageSrc::rgba` 位图源（svg 里垫应用图标同款的
+//! 渐变圆角方块）。左键点图标 = 播放 / 暂停（`Tray::on_click`，上游
+//! 只吃主键），右键出菜单。菜单项与图标的动作经 `push_tray` 排队、
+//! [`take_tray_actions`] 由界面轮询统一派发——`simulate_tray`（测量脚
+//! 本）与真实菜单走同一条路。
 
-use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+use nsh_core::element::ImageSrc;
+use nsh_core::element::desktop::{MenuItem, Tray, tray};
 
 use crate::window::notify;
 
-struct Tray {
-    icon: TrayIcon,
-    toggle: MenuItem,
-    prev: MenuItem,
-    next: MenuItem,
-    /// 播放 / 暂停两个字形图标（左键点图标切播放暂停，图标跟状态换）。
-    play: Option<Icon>,
-    pause: Option<Icon>,
-}
-
-thread_local! {
-    static TRAY: RefCell<Option<Tray>> = const { RefCell::new(None) };
-    /// 上次应用到托盘的状态，相同就跳过系统调用（store 的 memo 已经
-    /// 拦掉进度类高频刷新，这层兜底重复调用）。
-    static LAST: RefCell<Option<TrayState>> = const { RefCell::new(None) };
-}
-
-/// 托盘图标：播放 / 暂停按钮的同一图形（`icons::play_pause_svg`——
-/// 同一组顶点 + 同款圆角描边）交给 `nsh_core::svg` 光栅化。macOS 是
-/// 模板图（只取 alpha，系统按菜单栏明暗反色成黑白）；Windows 的 svg
-/// 在字形下垫了应用图标同款的浅绿渐变圆角方块（`tile`），深浅任务栏
-/// 都可见。
-fn glyph_icon(pause: bool) -> Option<Icon> {
-    // 44px：菜单栏 22pt @2x（tray-icon 会把更高的缩到 22pt）；
-    // 64px：Windows 按 DPI 缩到 16–32px。
-    let size = if cfg!(target_os = "macos") { 44 } else { 64 };
-    // 图标旁不再排文字，图形居中。
-    let dy = 0.0;
-    // macOS 字形缩到格子的 80%（满格顶着菜单栏上下沿显挤）；
-    // Windows 字形缩到 3/4，底砖保持满幅。
+/// 按当前状态构造托盘：图标字形（显示的是动作——播放中给暂停键）、
+/// 悬停提示与菜单。上游的 `set_tray` 是整体替换，状态变化时重调
+/// [`tray_for`] 即可，菜单文案与禁用态随重建更新。
+pub fn tray_for(state: &TrayState) -> Tray {
+    // 图标字形缩到格子的 80%（macOS）/ 3/4（Windows）：满格顶着显挤，
+    // 底砖保持满幅。
     let scale = if cfg!(target_os = "macos") {
         0.8
     } else {
         3.0 / 4.0
     };
-    let svg = zeo_icons::play_pause_svg(pause, cfg!(target_os = "windows"), dy, scale);
-    let raster = nsh_core::svg::rasterize(svg.as_bytes(), size).ok()?;
-    // Raster 是预乘 RGBA，`Icon::from_rgba` 要非预乘——半透明边缘不
-    // 除回 alpha 会发黑。macOS 模板图只看 alpha，RGB 给黑即可。
-    let mut rgba = raster.pixels;
-    for px in rgba.chunks_exact_mut(4) {
-        let a = px[3] as u32;
-        if a == 0 {
-            continue;
-        }
-        if cfg!(target_os = "macos") {
-            px[..3].fill(0);
-        } else {
+    let off = !state.has_track;
+    let mut tray = tray()
+        .tooltip(tray_tooltip(state))
+        .menu([
+            MenuItem::new(if state.playing { "暂停" } else { "播放" })
+                .disabled(off)
+                .on_select(|| push_tray(TrayAction::Toggle)),
+            MenuItem::new("上一首")
+                .disabled(off)
+                .on_select(|| push_tray(TrayAction::Previous)),
+            MenuItem::new("下一首")
+                .disabled(off)
+                .on_select(|| push_tray(TrayAction::Next)),
+            MenuItem::separator(),
+            MenuItem::new("显示 Zeo Player").on_select(|| push_tray(TrayAction::Show)),
+            MenuItem::new("退出 Zeo Player").on_select(|| push_tray(TrayAction::Quit)),
+        ])
+        .on_click(|_| push_tray(TrayAction::Toggle));
+    if let Some(icon) = tray_icon(state, scale) {
+        tray = tray.icon(icon);
+    }
+    tray
+}
+
+/// 托盘图标源：macOS 交 SVG 给上游当模板图；上游在 Windows 上也把
+/// SVG 当模板（按任务栏文字色绘制），彩色垫砖要自己光栅化走位图
+/// 源——64px、`ImageData` 要非预乘 RGBA（`rasterize` 出的是预乘，
+/// 逐像素除回 alpha，半透明边缘不除会发黑）。
+fn tray_icon(state: &TrayState, scale: f32) -> Option<ImageSrc> {
+    if cfg!(target_os = "windows") {
+        let svg = zeo_icons::play_pause_svg(state.playing, true, 0.0, scale);
+        let raster = nsh_core::svg::rasterize(svg.as_bytes(), 64).ok()?;
+        let mut rgba = raster.pixels;
+        for px in rgba.chunks_exact_mut(4) {
+            let a = px[3] as u32;
+            if a == 0 {
+                continue;
+            }
             for c in &mut px[..3] {
                 *c = ((*c as u32 * 255 + a / 2) / a).min(255) as u8;
             }
         }
+        Some(ImageSrc::rgba(64, 64, rgba))
+    } else {
+        Some(ImageSrc::svg_markup(&zeo_icons::play_pause_svg(
+            state.playing,
+            false,
+            0.0,
+            scale,
+        )))
     }
-    Icon::from_rgba(rgba, size, size).ok()
-}
-
-/// 在托盘所属线程上创建（macOS 主线程；Windows 托盘线程）。
-pub(crate) fn create() {
-    let menu = Menu::new();
-    let toggle = MenuItem::with_id("toggle", "播放", false, None);
-    let prev = MenuItem::with_id("prev", "上一首", false, None);
-    let next = MenuItem::with_id("next", "下一首", false, None);
-    let show = MenuItem::with_id("show", "显示 Zeo Player", true, None);
-    let quit = MenuItem::with_id("quit", "退出 Zeo Player", true, None);
-    let _ = menu.append_items(&[
-        &toggle,
-        &prev,
-        &next,
-        &PredefinedMenuItem::separator(),
-        &show,
-        &quit,
-    ]);
-    let (play, pause) = (glyph_icon(false), glyph_icon(true));
-    // 左键点图标 = 播放 / 暂停（`TrayIconEvent` 里处理），右键出菜单。
-    let mut builder = TrayIconBuilder::new()
-        .with_menu(Box::new(menu))
-        .with_tooltip("Zeo Player")
-        .with_menu_on_left_click(false);
-    if let Some(icon) = play.clone() {
-        #[cfg(target_os = "macos")]
-        {
-            builder = builder.with_icon_templated(icon);
-        }
-        #[cfg(target_os = "windows")]
-        {
-            builder = builder.with_icon(icon);
-        }
-    }
-    match builder.build() {
-        Ok(icon) => TRAY.with(|t| {
-            *t.borrow_mut() = Some(Tray {
-                icon,
-                toggle,
-                prev,
-                next,
-                play,
-                pause,
-            })
-        }),
-        Err(err) => eprintln!("zeo-player: 托盘图标创建失败：{err}"),
-    }
-}
-
-/// 移除托盘图标（`TrayIcon` 析构时从通知区删除）。
-#[cfg(target_os = "windows")]
-pub(crate) fn remove() {
-    TRAY.with(|t| drop(t.borrow_mut().take()));
-    LAST.with(|l| *l.borrow_mut() = None);
-}
-
-pub(crate) fn apply(state: &TrayState) {
-    if LAST.with(|l| l.borrow().as_ref() == Some(state)) {
-        return;
-    }
-    LAST.with(|l| *l.borrow_mut() = Some(state.clone()));
-    TRAY.with(|t| {
-        let t = t.borrow();
-        let Some(t) = t.as_ref() else {
-            return;
-        };
-        t.toggle
-            .set_text(if state.playing { "暂停" } else { "播放" });
-        for item in [&t.toggle, &t.prev, &t.next] {
-            item.set_enabled(state.has_track);
-        }
-        let _ = t.icon.set_tooltip(Some(tray_tooltip(state)));
-        // 图标即播放 / 暂停按钮：显示的是动作（播放中给暂停键）。
-        let glyph = if state.playing { &t.pause } else { &t.play };
-        if let Some(glyph) = glyph.clone() {
-            #[cfg(target_os = "macos")]
-            let _ = t.icon.set_icon_templated(Some(glyph));
-            #[cfg(target_os = "windows")]
-            let _ = t.icon.set_icon(Some(glyph));
-        }
-    });
 }
 
 /// 托盘菜单的操作。
@@ -162,7 +98,6 @@ pub struct TrayState {
 }
 
 /// 「曲名 — 歌手」（无歌手只留曲名）：菜单行与悬停提示共用。
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn track_label(s: &TrayState) -> String {
     if s.artist.is_empty() {
         s.title.clone()
@@ -172,7 +107,6 @@ fn track_label(s: &TrayState) -> String {
 }
 
 /// 悬停提示：有曲目是「曲名 — 歌手」，没有就回到应用名。
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn tray_tooltip(s: &TrayState) -> String {
     if s.has_track {
         track_label(s)
@@ -183,7 +117,7 @@ fn tray_tooltip(s: &TrayState) -> String {
 
 static TRAY_ACTIONS: std::sync::Mutex<Vec<TrayAction>> = std::sync::Mutex::new(Vec::new());
 
-/// 取走托盘上发生的操作（菜单项、Windows 上单击图标）。
+/// 取走托盘上发生的操作（菜单项、单击图标）。
 pub fn take_tray_actions() -> Vec<TrayAction> {
     std::mem::take(&mut *TRAY_ACTIONS.lock().unwrap())
 }
@@ -201,35 +135,6 @@ pub fn simulate_tray(action: TrayAction) {
 fn push_tray(action: TrayAction) {
     TRAY_ACTIONS.lock().unwrap().push(action);
     notify();
-}
-
-/// 托盘事件直接回调（不进 tray-icon 的通道），每个事件唤醒界面。
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-pub(crate) fn install_tray_handlers() {
-    tray_icon::menu::MenuEvent::set_event_handler(Some(|event: tray_icon::menu::MenuEvent| {
-        let action = match event.id.0.as_str() {
-            "show" => TrayAction::Show,
-            "toggle" => TrayAction::Toggle,
-            "prev" => TrayAction::Previous,
-            "next" => TrayAction::Next,
-            "quit" => TrayAction::Quit,
-            _ => return,
-        };
-        push_tray(action);
-    }));
-    tray_icon::TrayIconEvent::set_event_handler(Some(
-        |event: tray_icon::TrayIconEvent| match event {
-            // 左键点图标 = 播放 / 暂停（两平台一致；右键出菜单，
-            // `menu_on_right_click` 默认开）。不做双击判别——单击即时
-            // toggle，快速双击就是两次 toggle（净状态不变）。
-            tray_icon::TrayIconEvent::Click {
-                button: tray_icon::MouseButton::Left,
-                button_state: tray_icon::MouseButtonState::Up,
-                ..
-            } => push_tray(TrayAction::Toggle),
-            _ => {}
-        },
-    ));
 }
 
 #[cfg(test)]

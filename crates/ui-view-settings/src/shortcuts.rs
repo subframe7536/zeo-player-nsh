@@ -1,7 +1,9 @@
-//! 设置 →「快捷键」：全部动作的可自定义键位（覆盖存 `library.json`
-//! 的 `keybinds`，改后立即生效）。点键位胶囊进入捕获态，按下的下一个
-//! 组合键即新绑定；撞上已有键位时不顶绑——同键双方都不能触发、红字
-//! 置顶，改掉任一方后原绑定自动恢复。
+//! 设置 →「快捷键」：窗口内动作的可自定义键位（覆盖存 `library.json`
+//! 的 `keybinds`）与全局快捷键（`global_keybinds`，窗口外 / 隐藏到托
+//! 盘也生效，默认全不绑），改后立即生效。点键位胶囊进入捕获态，按下
+//! 的下一个组合键即新绑定；撞上已有键位时不顶绑——同键双方都不能触
+//! 发、红字置顶，改掉任一方后原绑定自动恢复。全局键与窗口内键位撞键
+//! 同样算冲突（窗口聚焦时全局键先响）。
 
 use std::collections::BTreeSet;
 
@@ -12,7 +14,30 @@ use super::search_box;
 use zeo_ui_components::button::{Size, Variant, icon_button, text_button};
 use zeo_ui_components::icons::Icon;
 use zeo_ui_store::theme::*;
-use zeo_ui_store::{KeyAction, key_label_of, store};
+use zeo_ui_store::{BindScope, KeyAction, key_label_of, store};
+
+type Capture = Signal<Option<(BindScope, KeyAction)>>;
+
+fn scope_label_of(scope: BindScope, action: KeyAction) -> String {
+    match scope {
+        BindScope::Local => key_label_of(action),
+        BindScope::Global => zeo_ui_store::global_key_label_of(action),
+    }
+}
+
+fn scope_key_of(scope: BindScope, action: KeyAction) -> String {
+    match scope {
+        BindScope::Local => zeo_ui_store::key_of(action),
+        BindScope::Global => zeo_ui_store::global_key_of(action),
+    }
+}
+
+fn set_scoped_bind(scope: BindScope, action: KeyAction, key: Option<String>) {
+    match scope {
+        BindScope::Local => zeo_ui_store::set_keybind(action, key),
+        BindScope::Global => zeo_ui_store::set_global_keybind(action, key),
+    }
+}
 
 /// 「按键搜索」录制态的临时绑定：`When::Always` 让输入框聚焦时文本键
 /// 也被录制而不是输进框里；按下的组合键以带引号的平台标签（`"⌘→"` /
@@ -40,13 +65,15 @@ fn record_search_keys(recording: Signal<bool>, query: Signal<String>) {
     }
 }
 
-/// 捕获态注册的临时绑定：`on_key` 是最新绑定优先，这些盖过全局快捷键
-/// （含全屏页的）；Esc 取消、Backspace / Delete 解绑——最后注册，优先。
-fn capture_keys(capture: Signal<Option<KeyAction>>) {
+/// 捕获态注册的临时绑定：`on_key` 是最新绑定优先，这些盖过窗口内绑定
+/// （含全屏页的）；全局快捷键则由 `s.key_capture` 联动整体注销，按到
+/// 自己已注册的全局键也照常被捕获。Esc 取消、Backspace / Delete 解绑
+/// ——最后注册，优先。
+fn capture_keys(capture: Capture) {
     for key in zeo_ui_store::capture_candidates() {
         on_key(&key, move |k| {
-            if let Some(action) = capture.get_untracked() {
-                zeo_ui_store::set_keybind(action, Some(k.to_owned()));
+            if let Some((scope, action)) = capture.get_untracked() {
+                set_scoped_bind(scope, action, Some(k.to_owned()));
             }
             capture.set(None);
         });
@@ -54,8 +81,8 @@ fn capture_keys(capture: Signal<Option<KeyAction>>) {
     on_key("escape", move |_| capture.set(None));
     for key in ["backspace", "delete"] {
         on_key(key, move |_| {
-            if let Some(action) = capture.get_untracked() {
-                zeo_ui_store::set_keybind(action, Some(String::new()));
+            if let Some((scope, action)) = capture.get_untracked() {
+                set_scoped_bind(scope, action, Some(String::new()));
             }
             capture.set(None);
         });
@@ -65,17 +92,18 @@ fn capture_keys(capture: Signal<Option<KeyAction>>) {
 /// 一个动作的键位胶囊：常态显示当前键位（未绑定为「未绑定」）；捕获中
 /// 变「按下新快捷键…」；冲突中红框红字。
 fn key_pill(
+    scope: BindScope,
     action: KeyAction,
-    capture: Signal<Option<KeyAction>>,
+    capture: Capture,
     recording: Signal<bool>,
     conflicted: bool,
 ) -> AnyElement {
-    let capturing = move || capture.get() == Some(action);
+    let capturing = move || capture.get() == Some((scope, action));
     let label = move || {
         if capturing() {
             "按下新快捷键…".to_owned()
         } else {
-            let label = key_label_of(action);
+            let label = scope_label_of(scope, action);
             if label.is_empty() {
                 "未绑定".to_owned()
             } else {
@@ -83,7 +111,7 @@ fn key_pill(
             }
         }
     };
-    let unbound = move || !capturing() && key_label_of(action).is_empty();
+    let unbound = move || !capturing() && scope_label_of(scope, action).is_empty();
     nsh_base::button()
         .min_w(px(64.0))
         .h(px(26.0))
@@ -116,10 +144,10 @@ fn key_pill(
         .on_press(move |_: &()| {
             recording.set(false);
             // 已在捕获别的动作时换目标；同一颗再点退出捕获。
-            if capture.get_untracked() == Some(action) {
+            if capture.get_untracked() == Some((scope, action)) {
                 capture.set(None);
             } else {
-                capture.set(Some(action));
+                capture.set(Some((scope, action)));
             }
         })
         .child(
@@ -143,8 +171,9 @@ fn key_pill(
 }
 
 fn action_row(
+    scope: BindScope,
     action: KeyAction,
-    capture: Signal<Option<KeyAction>>,
+    capture: Capture,
     recording: Signal<bool>,
     conflicted: bool,
 ) -> View {
@@ -162,7 +191,7 @@ fn action_row(
                 .line_height(px(13.0))
                 .text_color(if conflicted { like_red() } else { fg() }),
         )
-        .child(key_pill(action, capture, recording, conflicted))
+        .child(key_pill(scope, action, capture, recording, conflicted))
 }
 
 /// 搜索匹配：标题按子串模糊匹配（忽略大小写与分隔符）；键位走等值
@@ -171,7 +200,7 @@ fn action_row(
 /// `⌘a` 却不会误中 `⌥⌘←`）。键位认原始写法（`mod-right`）、平台
 /// 标签（`⌘→` / `Ctrl+→`）与 `mod` 的常见叫法 `cmd` / `ctrl` /
 /// `command` / `⌘`。
-fn action_matches(action: KeyAction, q: &str) -> bool {
+fn action_matches(scope: BindScope, action: KeyAction, q: &str) -> bool {
     let norm = |s: &str| {
         s.chars()
             .filter(|c| !matches!(c, ' ' | '+' | '-' | '_' | '/'))
@@ -190,11 +219,11 @@ fn action_matches(action: KeyAction, q: &str) -> bool {
     if !exact && norm(action.title()).contains(&nq) {
         return true;
     }
-    let key = zeo_ui_store::key_of(action);
+    let key = scope_key_of(scope, action);
     if key.is_empty() {
         return false;
     }
-    let mut hay = vec![key.clone(), key_label_of(action)];
+    let mut hay = vec![key.clone(), scope_label_of(scope, action)];
     for alias in ["cmd", "ctrl", "command", "⌘"] {
         hay.push(key.replacen("mod", alias, 1));
     }
@@ -211,13 +240,15 @@ fn group_block(
     name: &'static str,
     set: &BTreeSet<KeyAction>,
     q: &str,
-    capture: Signal<Option<KeyAction>>,
+    capture: Capture,
     recording: Signal<bool>,
 ) -> Option<View> {
     let rows: Vec<KeyAction> = KeyAction::ALL
         .iter()
         .copied()
-        .filter(|a| a.group() == name && !set.contains(a) && action_matches(*a, q))
+        .filter(|a| {
+            a.group() == name && !set.contains(a) && action_matches(BindScope::Local, *a, q)
+        })
         .collect();
     (!rows.is_empty()).then(|| {
         view()
@@ -232,7 +263,47 @@ fn group_block(
             )
             .children(
                 rows.iter()
-                    .map(|&a| action_row(a, capture, recording, false)),
+                    .map(|&a| action_row(BindScope::Local, a, capture, recording, false)),
+            )
+    })
+}
+
+/// 全局快捷键分组：可全局绑定的动作全集（`GLOBAL_ACTIONS`），冲突行
+/// 同样顶置。组头附一行说明（窗口外生效、媒体键由平台接管）。
+fn global_block(
+    set: &BTreeSet<(BindScope, KeyAction)>,
+    q: &str,
+    capture: Capture,
+    recording: Signal<bool>,
+) -> Option<View> {
+    let rows: Vec<KeyAction> = zeo_ui_store::GLOBAL_ACTIONS
+        .iter()
+        .copied()
+        .filter(|a| {
+            !set.contains(&(BindScope::Global, *a)) && action_matches(BindScope::Global, *a, q)
+        })
+        .collect();
+    (!rows.is_empty()).then(|| {
+        view()
+            .gap(px(2.0))
+            .child(
+                text("全局快捷键")
+                    .text_size(px(11.0))
+                    .line_height(px(11.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(faint())
+                    .pb(px(4.0)),
+            )
+            .child(
+                text("窗口最小化到托盘也生效；媒体控制键由系统接管（Windows 低级键盘钩子 / macOS 媒体会话），不在此列。")
+                    .text_size(px(11.0))
+                    .line_height(px(15.0))
+                    .text_color(faint())
+                    .pb(px(6.0)),
+            )
+            .children(
+                rows.iter()
+                    .map(|&a| action_row(BindScope::Global, a, capture, recording, false)),
             )
     })
 }
@@ -240,7 +311,9 @@ fn group_block(
 pub(crate) fn shortcuts_section() -> View {
     let s = store();
     let query = signal(String::new());
-    let capture = signal(None::<KeyAction>);
+    // 捕获态存在 store 上：`install` 的全局快捷键 effect 靠它联动（捕
+    // 获中注销全部全局键，候选键才不会被自己注册的键吃掉）。
+    let capture = s.key_capture;
     // 搜索词一变就退出捕获态：输入框聚焦时文本键进搜索框、修饰键却
     // 仍会进捕获，继续捕获只会误绑。
     effect(move || {
@@ -264,13 +337,16 @@ pub(crate) fn shortcuts_section() -> View {
         view()
     });
     let dirty = move || {
-        s.keybinds.with(|m| {
-            KeyAction::ALL
-                .iter()
-                .any(|a| m.get(a).is_some_and(|k| k != a.default_key()))
-        })
+        s.global_keybinds
+            .with(|m| m.values().any(|k| !k.is_empty()))
+            || s.keybinds.with(|m| {
+                KeyAction::ALL
+                    .iter()
+                    .any(|a| m.get(a).is_some_and(|k| k != a.default_key()))
+            })
     };
-    // 还原前弹系统确认框（同删除歌单的确认路径），确认才清覆盖表。
+    // 还原前弹系统确认框（同删除歌单的确认路径），确认才清覆盖表
+    // （窗口内与全局一起清）。
     let reset = view()
         .opacity(move || if dirty() { 1.0f32 } else { 0.4f32 })
         .child(text_button(
@@ -281,7 +357,7 @@ pub(crate) fn shortcuts_section() -> View {
             move || {
                 let answer = nsh_base::alert_dialog()
                     .title("还原默认快捷键？")
-                    .description("所有自定义键位都会被清除，恢复为默认绑定。")
+                    .description("所有自定义键位与全局快捷键都会被清除，恢复为默认绑定。")
                     .cancel("cancel", "取消")
                     .destructive("reset", "还原")
                     .show();
@@ -317,27 +393,39 @@ pub(crate) fn shortcuts_section() -> View {
                 .min_w(px(0.0)),
         )
         .child(reset);
-    // 冲突行顶置 + 各分组（冲突中的动作从原分组拿掉）：`conflicted_
-    // actions` 读 `s.keybinds`，dynamic 订阅它与搜索词，任一变即重排。
+    // 冲突行顶置 + 各分组（冲突中的动作从原分组拿掉）：冲突集读两个
+    // 键位信号，dynamic 订阅它们与搜索词，任一变即重排。全局组排在最
+    // 后（动作多、默认全未绑定）。
     let list = dynamic(move || {
-        let set = zeo_ui_store::conflicted_actions();
+        let local = zeo_ui_store::conflicted_actions();
+        let global = zeo_ui_store::global_conflicted_actions();
+        let set: BTreeSet<(BindScope, KeyAction)> = local
+            .iter()
+            .map(|&a| (BindScope::Local, a))
+            .chain(global.iter().map(|&a| (BindScope::Global, a)))
+            .collect();
         let q = query.get();
-        let hit: Vec<KeyAction> = set
+        let hit: Vec<(BindScope, KeyAction)> = set
             .iter()
             .copied()
-            .filter(|a| action_matches(*a, &q))
+            .filter(|(scope, a)| action_matches(*scope, *a, &q))
             .collect();
-        let groups: Vec<View> = ["播放", "界面", "窗口", "全屏播放中"]
+        let mut groups: Vec<View> = ["播放", "界面", "窗口", "全屏播放中"]
             .iter()
-            .filter_map(|&g| group_block(g, &set, &q, capture, recording))
+            .filter_map(|&g| {
+                let local_set: BTreeSet<KeyAction> = local.clone();
+                group_block(g, &local_set, &q, capture, recording)
+            })
             .collect();
+        groups.extend(global_block(&set, &q, capture, recording));
         let none = !q.trim().is_empty() && hit.is_empty() && groups.is_empty();
         view()
             .gap(px(16.0))
             .child((!hit.is_empty()).then(|| {
-                view()
-                    .gap(px(2.0))
-                    .children(hit.iter().map(|&a| action_row(a, capture, recording, true)))
+                view().gap(px(2.0)).children(
+                    hit.iter()
+                        .map(|&(scope, a)| action_row(scope, a, capture, recording, true)),
+                )
             }))
             .children(groups)
             .child(none.then(|| {

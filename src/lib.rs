@@ -8,7 +8,6 @@ mod e2e;
 
 use std::rc::Rc;
 
-use nsh_core::ContextMenuEvent;
 use nsh_core::desktop::{TitleBarOptions, TitleBarStyle, WindowAttributes};
 use nsh_core::element::desktop::{current_window, main_window};
 use nsh_core::prelude::*;
@@ -158,10 +157,6 @@ pub fn App() -> impl IntoElement {
         .text_color(fg())
         // 文字样式由里面的文字继承：整个界面跟着设置里的字体走。
         .font_family(zeo_ui_store::font_family)
-        // 右键事件只派发给最近的监听者：点到没有菜单的地方才轮到根——
-        // 清掉「当前菜单」令牌，开着的菜单随之关闭（右键不产生
-        // PressOutside，不这样处理旧菜单会一直留着）。
-        .on_context_menu(move |_: &ContextMenuEvent| s.menu_open.set(None))
         .child(when(move || !s.hidden.get(), shell))
         // 弹窗按叠放顺序挂载：设置在最底，「关闭窗口」的询问盖过一切。
         .child(when(
@@ -503,8 +498,9 @@ fn bench_close() {
 #[native_module("zeo-player/native")]
 fn native(registry: &mut Registry) {
     // 打包 runner 在 `nsh_windows_app::main()` / `nsh_macos_app::main()`
-    // 之前调这里（`set_ui_sets` 的参数）：第二份实例在这个点退出，连
-    // NSH 的窗口都不会创建，不会闪一下。
+    // 之前调这里（`set_ui_sets` 的参数）：Windows 的判重已由 runner 的
+    // `singleInstance` 在窗口创建前做完；macOS 的第二份实例在这个点
+    // 退出，连 NSH 的窗口都不会创建，不会闪一下。
     zeo_shell::single_instance::enforce();
     registry.register::<App>();
 }
