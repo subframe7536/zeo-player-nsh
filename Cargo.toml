@@ -7,9 +7,10 @@ publish = false
 [workspace]
 members = ["crates/*"]
 
-# 各 crate 共用的依赖版本：nsh-* 跟 nightly 频道（nsh update nightly），rev 与
-# `nsh --version` 括号里的提交一致，dev-dependencies 里的 nsh-engine / nsh-testing
-# 一起改。nightly 不发 crates.io，走 git。`sh scripts/update-nsh.sh` 一键对齐。
+# 各 crate 共用的依赖版本：nsh-* 跟随 NSH 的 nightly / stable 频道，
+# `sh scripts/update-nsh.sh` 挑更新的频道并一键对齐——nightly 不发 crates.io，
+# 走 git rev（与 `nsh --version` 括号里的提交一致）；stable 走 crates.io 版本号。
+# dev-dependencies 里的 nsh-engine / nsh-testing 一起改。
 [workspace.dependencies]
 nsh-core = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702", features = ["svg"] }
 nsh-base = { git = "https://github.com/longbridge/nsh", rev = "c5214aaf4bbdf33bc1d59e9595e009b6aa54d702" }
