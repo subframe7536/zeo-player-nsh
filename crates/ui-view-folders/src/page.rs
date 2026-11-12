@@ -301,7 +301,7 @@ pub(crate) fn folder_page(
             });
 
             view()
-                .px(px(32.0))
+                .px(px(PAGE_X))
                 .py(px(12.0))
                 .gap(px(12.0))
                 .border_b_1()

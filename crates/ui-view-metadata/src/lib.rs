@@ -55,7 +55,7 @@ pub fn page() -> View {
         selected.update(|set| set.retain(|p| live.contains(p.as_str())));
     });
 
-    // 当前显示序：筛选（文件名 / 标题 / 歌手 / 专辑，不分大小写）+ app
+    // 当前显示序：筛选（文件名 / 标题 / 歌手 / 专辑 / 标签，不分大小写）+ app
     // 侧排序（无排序 = 曲库序）。未排序时不读 `rows`，避免后台分批写入
     // 频繁导致全表重算与重建。
     let displayed = computed(move || {
@@ -71,6 +71,7 @@ pub fn page() -> View {
                     || contains_ignore_case(&t.artist, &q)
                     || contains_ignore_case(&t.album, &q)
                     || contains_ignore_case(&t.album_artist, &q)
+                    || t.genres.iter().any(|g| contains_ignore_case(g, &q))
             })
             .cloned()
             .collect();
@@ -98,13 +99,6 @@ pub fn page() -> View {
             if empty.get() {
                 return no_library().into_element();
             }
-            let pad_x = move || {
-                if zeo_ui_components::tracks::content_break() < 860.0 {
-                    16.0
-                } else {
-                    32.0
-                }
-            };
             let gap_w = move || {
                 if zeo_ui_components::tracks::content_break() < 860.0 {
                     10.0
@@ -122,33 +116,30 @@ pub fn page() -> View {
             view()
                 .flex_1()
                 .min_w(px(0.0))
-                .child(
-                    page_header(
-                        || "元数据".into(),
-                        move || {
-                            format!(
-                                "{} 首曲目 · 已选 {} 首",
-                                count.get(),
-                                selected.with(|set| set.len())
-                            )
-                        },
-                        None,
-                        None,
-                    )
-                    .px(move || px(pad_x())),
-                )
+                .child(page_header(
+                    || "元数据".into(),
+                    move || {
+                        format!(
+                            "{} 首曲目 · 已选 {} 首",
+                            count.get(),
+                            selected.with(|set| set.len())
+                        )
+                    },
+                    None,
+                    None,
+                ))
                 .child(
                     view()
                         .flex_row()
                         .items_center()
                         .gap(px(8.0))
-                        .px(move || px(pad_x()))
-                        .pb(px(12.0))
+                        .px(px(PAGE_X))
+                        .pb(px(16.0))
                         .child(
                             input_field(true)
                                 .w(move || px(filter_w()))
                                 .label("筛选")
-                                .placeholder("筛选文件名、标题、艺术家、专辑")
+                                .placeholder("筛选文件名、标题、艺术家、专辑、标签")
                                 .default_value(untracked(|| filter.get()))
                                 .window_drag(false)
                                 .on_change(move |t: &str| filter.set(t.to_owned())),
@@ -277,7 +268,7 @@ pub fn page() -> View {
                         .flex_1()
                         .min_h(px(0.0))
                         .flex_row()
-                        .px(move || px(pad_x()))
+                        .px(px(PAGE_X))
                         .pb(px(BAR_SPACE))
                         .gap(move || px(gap_w()))
                         .child(
@@ -286,7 +277,7 @@ pub fn page() -> View {
                                 .min_w(px(0.0))
                                 .rounded(px(12.0))
                                 .border_1()
-                                .border_color(nsh_base::theme().input)
+                                .border_color(border())
                                 .bg(nsh_base::theme().card)
                                 .shadow_xs()
                                 .overflow_hidden()

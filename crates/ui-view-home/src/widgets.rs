@@ -61,16 +61,17 @@ pub(crate) fn metric(
     label: &'static str,
 ) -> View {
     view()
-        .gap(px(4.0))
+        .gap(px(6.0))
+        .items_end()
         .child(
             view()
                 .flex_row()
                 .items_end()
-                .gap(px(2.0))
+                .gap(px(3.0))
                 .child(
                     text(value)
-                        .text_size(px(26.0))
-                        .line_height(px(26.0))
+                        .text_size(px(24.0))
+                        .line_height(px(24.0))
                         .font_weight(FontWeight::BOLD)
                         .tabular_nums()
                         .text_color(fg()),
@@ -78,7 +79,7 @@ pub(crate) fn metric(
                 .child(
                     text(unit)
                         .text_size(px(13.0))
-                        .line_height(px(18.0))
+                        .line_height(px(16.0))
                         .text_color(muted_fg()),
                 ),
         )
@@ -86,7 +87,7 @@ pub(crate) fn metric(
             text(label)
                 .text_size(px(12.0))
                 .line_height(px(12.0))
-                .text_color(muted_fg()),
+                .text_color(faint()),
         )
 }
 
@@ -98,17 +99,16 @@ pub(crate) fn hero(stats: Signal<zeo_db::PlayStats>, now: Signal<u64>) -> View {
     view()
         .window_drag(true)
         .flex_row()
-        .items_center()
-        .px(px(32.0))
-        .pt(px(28.0))
-        .pb(px(24.0))
+        .items_end()
+        .px(px(PAGE_X))
+        .pb(px(PAGE_HEADER_PB + 8.0))
         .child(
             view()
                 .gap(px(8.0))
                 .child(
                     text(move || greeting(hour()))
-                        .text_size(px(28.0))
-                        .line_height(px(28.0))
+                        .text_size(px(PAGE_TITLE))
+                        .line_height(px(PAGE_TITLE))
                         .font_weight(FontWeight::BOLD)
                         .text_color(fg()),
                 )
@@ -123,8 +123,8 @@ pub(crate) fn hero(stats: Signal<zeo_db::PlayStats>, now: Signal<u64>) -> View {
         .child(
             view()
                 .flex_row()
-                .items_center()
-                .gap(px(36.0))
+                .items_end()
+                .gap(px(32.0))
                 .child(metric(
                     move || format!("{:.1}", stats.with(|v| v.week_secs) / 3600.0),
                     "h",
@@ -146,12 +146,18 @@ pub(crate) fn hero(stats: Signal<zeo_db::PlayStats>, now: Signal<u64>) -> View {
 /// 节标题。
 pub(crate) fn section_title(title: &'static str) -> Text {
     text(title)
-        .text_size(px(15.0))
-        .line_height(px(15.0))
-        .font_weight(FontWeight::SEMIBOLD)
+        .text_size(px(18.0))
+        .line_height(px(18.0))
+        .font_weight(FontWeight::BOLD)
         .text_color(fg())
 }
 
-/// 卡条统一的最小卡宽与间距（翻页范围按它算）。
-pub(crate) const STRIP_MIN_W: f32 = 200.0;
-pub(crate) const STRIP_GAP: f32 = 14.0;
+/// 卡条里封面 / 头像的边长与卡片内边距：卡宽固定为两者之和，翻页
+/// 范围按它算，卡条从左排起、放不下横向滚动。
+pub(crate) const CARD_ART: f32 = 160.0;
+pub(crate) const CARD_PAD: f32 = 8.0;
+pub(crate) const STRIP_MIN_W: f32 = CARD_ART + CARD_PAD * 2.0;
+pub(crate) const STRIP_GAP: f32 = 8.0;
+
+/// 节间距。
+pub(crate) const SECTION_GAP: f32 = 40.0;

@@ -20,6 +20,13 @@ pub fn layout_width() -> f32 {
 pub const TITLE_BAR: f32 = 40.0;
 /// 底部播放条高度（含外边距），列表据此留出底部空间。
 pub const BAR_SPACE: f32 = 104.0;
+/// 各页内容的左右边距（页头、首页、元数据表等共用，内容线对齐）。
+pub const PAGE_X: f32 = 32.0;
+/// 页头大标题的字号（与行高相同、leading-none）。页头不留顶部内边距：
+/// 标题框顶边与侧栏搜索框顶边同落在 `top_inset()` 上。
+pub const PAGE_TITLE: f32 = 28.0;
+/// 页头到正文的间距。
+pub const PAGE_HEADER_PB: f32 = 20.0;
 
 /// 主体界面底色：同侧栏一样的饱和加值，但提亮度成粉彩（更亮的有色底）。
 pub fn bg() -> AdaptiveColor {

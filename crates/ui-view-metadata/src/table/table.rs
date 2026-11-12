@@ -33,13 +33,10 @@ pub(crate) fn table(
                 c.resizable = Some(false);
                 c.fixed = (*key == "file_name").into();
                 if *key == "file_name" {
-                    // sticky 固定文件名列：列级右边框（与其余网格线同色的
-                    // border-input）。普通省略已由 classes.cell 与
-                    // classes.header_cell 统一处理。
-                    c.header_class = Some(SharedString::from(
-                        "bg-card border-r border-input font-medium",
-                    ));
-                    c.cell_class = Some(SharedString::from("border-r border-input"));
+                    // sticky 固定文件名列：全表唯一的竖线，横向滚动时标出
+                    // 固定区边界。其余列不画竖线，只靠行分隔与留白分列。
+                    c.header_class = Some(SharedString::from("bg-card border-r border-border"));
+                    c.cell_class = Some(SharedString::from("border-r border-border"));
                 }
                 // 其余列保持 None，不设多余列级覆盖，消除拖拽改列宽时逐格的字串拼接与堆分配开销。
                 defs.push(c);
@@ -94,7 +91,7 @@ pub(crate) fn table(
             if set.is_empty() {
                 return vec![SharedString::new_static("bg-card"); slice.len()];
             }
-            let active = SharedString::new_static("bg-primary/8");
+            let active = SharedString::new_static("bg-primary/10");
             let card = SharedString::new_static("bg-card");
             slice
                 .iter()
@@ -113,20 +110,18 @@ pub(crate) fn table(
     };
 
     let mut classes = DataTableClasses::default();
-    // 全部网格线与工具栏输入框同色（border-input）：sticky 表头底线、
-    // 单元格列分隔、行体行分隔统一一个颜色。
-    classes.header = Some(SharedString::from("bg-card border-b border-input"));
+    // 现代表格：没有逐格竖线，表头一条实线、行间淡分隔线；只有 sticky
+    // 文件名列保留一条竖线（列级 class）。表头底色不透明，滚动时盖住行。
+    classes.header = Some(SharedString::from("bg-card border-b border-border"));
     classes.header_content = Some(SharedString::from("h-full self-stretch"));
-    classes.header_cell = Some(SharedString::from(
-        "text-muted-foreground font-medium border-r border-input",
-    ));
-    classes.cell = Some(SharedString::from("px-3 border-r border-input"));
+    classes.header_cell = Some(SharedString::from("text-muted-foreground font-medium"));
+    classes.cell = Some(SharedString::from("px-3"));
     // 不设 fixed_edge：上游在固定列后缘叠画两条 1pt 分隔（表体一条 +
     // 固定区逐行各一条，view.rs `edge()`），会与固定列单元格自身的
     // border-r 连叠变深。固定列分隔只留列级 cell_class / header_class
-    // 那条 border-r border-input。
-    classes.row = Some(SharedString::from("border-b border-input"));
-    classes.row_hover = Some(SharedString::from("bg-accent/40"));
+    // 那条 border-r。
+    classes.row = Some(SharedString::from("border-b border-border/50"));
+    classes.row_hover = Some(SharedString::from("bg-muted/60"));
 
     let guide_line_x = signal(Option::<f32>::None);
 
@@ -196,11 +191,7 @@ pub(crate) fn table(
                         .with(|m| m.get(&key).copied())
                         .unwrap_or(default_w);
                     let start_mouse_x = e.page.x.0;
-                    let pad_x = if zeo_ui_components::tracks::content_break() < 860.0 {
-                        16.0
-                    } else {
-                        32.0
-                    };
+                    let pad_x = zeo_ui_store::theme::PAGE_X;
                     // 把手 14pt 宽、贴表头单元格右缘（即列线所在）；`location`
                     // 是落点在把手内的坐标，随抓握点变。列线页面 x = 落点 +
                     // 落点到把手右缘的距离，与抓在把手哪里无关。
@@ -342,9 +333,9 @@ pub(crate) fn table(
                         .on_press(sort_toggle)
                         .child(
                             text(title)
-                                .text_size(px(13.0))
-                                .line_height(px(13.0))
-                                .font_weight(FontWeight::MEDIUM)
+                                .text_size(px(12.0))
+                                .line_height(px(12.0))
+                                .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(muted_fg()),
                         )
                         .child(sort_indicator),
@@ -368,7 +359,7 @@ pub(crate) fn table(
             visible_window.with(|(s, _)| (*s).min(total) as u32)
         })
         .data(move || data.get())
-        .row_height(px(32.0))
+        .row_height(px(36.0))
         .header_height(Some(px(36.0)))
         .font_size(px(13.0))
         .stripe(false)

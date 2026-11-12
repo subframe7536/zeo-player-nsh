@@ -105,9 +105,9 @@ pub fn Home() -> impl IntoElement {
             .child(
                 scroll().flex_1().child(
                     view()
-                        .px(px(32.0))
+                        .px(px(PAGE_X))
                         .pb(px(BAR_SPACE))
-                        .gap(px(28.0))
+                        .gap(px(SECTION_GAP))
                         .child(featured_card(featured))
                         .child(recent(stats))
                         .child(hot_artists(stats))

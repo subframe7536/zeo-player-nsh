@@ -1,7 +1,7 @@
 use super::*;
 
-/// 热门艺术家：播放次数前 8 的歌手，大圆头像 + 名；单行横排、放不
-/// 下横向滚动（够宽时 `flex_1` 仍摊满整行）；点到「歌手」页详情。
+/// 热门艺术家：播放次数前 8 的歌手，大圆头像 + 名；固定宽卡单行横排、
+/// 放不下横向滚动；点到「歌手」页详情。
 pub(crate) fn hot_artists(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
     let s = store();
     dynamic(move || {
@@ -29,16 +29,8 @@ pub(crate) fn hot_artists(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
                 );
                 let art_name = stored(name.clone());
                 strip = strip.child(
-                    button()
-                        .flex_1()
-                        .min_w(px(200.0))
-                        .gap(px(8.0))
+                    card_shell(name.clone())
                         .items_center()
-                        .p(px(10.0))
-                        .rounded(px(14.0))
-                        .accessibility_label(SharedString::from(name.clone()))
-                        .hover(|st| st.bg(hover()))
-                        .active(|st| st.opacity(0.75))
                         .on_press(move |_: &()| {
                             // 深链进「歌手」详情：选好后切导航，Artists 直接开详情。
                             sel.set(Some(art_name.get()));
@@ -48,22 +40,23 @@ pub(crate) fn hot_artists(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
                             avatar(
                                 move || cover_path.get(),
                                 move || art_name.get(),
-                                Some(140.0),
+                                Some(CARD_ART),
                             )
                         }))
                         .child(
                             text(name.clone())
                                 .number_of_lines(1)
-                                .text_size(px(13.0))
-                                .line_height(px(13.0))
-                                .text_color(muted_fg()),
+                                .text_size(px(14.0))
+                                .line_height(px(14.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(fg()),
                         ),
                 );
             }
             strip
         });
         view()
-            .gap(px(12.0))
+            .gap(px(16.0))
             .child(shelf.title("热门艺术家"))
             .child(strip)
             .into_element()
@@ -112,7 +105,7 @@ pub(crate) fn new_added(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
             table = table.child(track_menu(row, track, None, move || play(), None));
         }
         view()
-            .gap(px(12.0))
+            .gap(px(16.0))
             .child(section_title("新添加"))
             .child(table)
             .into_element()
@@ -155,7 +148,7 @@ pub(crate) fn recent(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
             strip
         });
         view()
-            .gap(px(12.0))
+            .gap(px(16.0))
             .child(shelf.title("最近播放"))
             .child(strip)
             .into_element()

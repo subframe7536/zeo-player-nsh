@@ -91,6 +91,22 @@ fn metadata_rename_dialog_rejects_separators() {
     app.press("取消").unwrap();
 }
 
+/// 筛选框也匹配标签（流派），不分大小写。
+#[test]
+fn metadata_filter_matches_tags() {
+    let mut app = start(1400.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("元数据").unwrap();
+    app.wait_for("label:筛选").unwrap();
+    // 语料里只有 sine.flac 带「Dream Pop」标签（不分大小写）。
+    app.type_text("label:筛选", "dream pop").unwrap();
+    app.wait_for("text:sine.flac").unwrap();
+    app.wait_for_gone("text:sine.wav", Duration::from_secs(2))
+        .unwrap();
+}
+
 /// 曲库索引刷新（`s.tracks` 变更）不重建整页：筛选框的输入与单选面板
 /// 都留住。用「重新扫描」触发——只重读标签，不写语料。
 #[test]

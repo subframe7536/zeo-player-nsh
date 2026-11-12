@@ -27,8 +27,9 @@ pub fn editor_dialog() -> AnyElement {
         .default_value(untracked(|| draft.with(|d| d.name.clone())))
         .placeholder("歌单名称")
         .on_change(move |t: &str| draft.update(|d| d.name = t.to_owned()))
-        .on_submit(move |_: &str| save())
-        .on_blur(move || save());
+        // 只在回车 / 「保存」时提交：失焦不能保存——名称框自动聚焦，点
+        // 智能规则里任何一个输入框都会让它失焦，保存会把弹窗直接关掉。
+        .on_submit(move |_: &str| save());
     let description = if smart {
         Some("按条件从曲库自动聚合，曲库变化时跟着更新。")
     } else {

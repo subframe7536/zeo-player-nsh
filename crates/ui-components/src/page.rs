@@ -33,25 +33,25 @@ pub fn page_header(
                 ),
         )
     });
+    // 不留顶部内边距、标题 leading-none：标题顶边与侧栏搜索框顶边对齐。
     view()
         .flex_row()
         .items_end()
         .gap(px(16.0))
-        .px(px(32.0))
-        .pt(px(10.0))
-        .pb(px(16.0))
+        .px(px(PAGE_X))
+        .pb(px(PAGE_HEADER_PB))
         .window_drag(true)
         .child(
             view()
                 .flex_1()
                 .min_w(px(0.0))
-                .gap(px(4.0))
+                .gap(px(8.0))
                 .child(back_button)
                 .child(
                     text(title)
                         .number_of_lines(1)
-                        .text_size(px(28.0))
-                        .line_height(px(32.0))
+                        .text_size(px(PAGE_TITLE))
+                        .line_height(px(PAGE_TITLE))
                         .font_weight(FontWeight::BOLD)
                         .text_color(fg()),
                 )

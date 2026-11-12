@@ -1,9 +1,8 @@
 use super::*;
 
 /// 横向卡条的翻页状态：`el` 指到条子本体，`offset` 随 `on_scroll`、
-/// `viewport` 随 `on_layout` 刷新。`min_content` 是所有卡都按
-/// `min_w` 排开的内容宽——它比视口窄时卡被 `flex_1` 摊满整行、
-/// 条子不滚。
+/// `viewport` 随 `on_layout` 刷新。`min_content` 是所有固定宽卡排开
+/// 的内容宽——它不超过视口时整行放得下、条子不滚。
 #[derive(Clone, Copy)]
 pub(crate) struct Shelf {
     pub(crate) el: ElementRef,
@@ -77,14 +76,16 @@ impl Shelf {
             ))
     }
 
-    /// 横向 Scroll：一行横排、藏滚动条（横排卡子项 `flex_1` 够宽摊满、
-    /// `min_w` 顶出滚动区）。`fill` 把卡塞进来。
+    /// 横向 Scroll：一行横排、藏滚动条，固定宽的卡从左排起。`mx(-CARD_PAD)`
+    /// 抵掉卡的内边距，封面与节标题落在同一条内容线上（悬停底色向外
+    /// 多出一圈）。`fill` 把卡塞进来。
     pub(crate) fn strip(&self, fill: impl FnOnce(Scroll) -> Scroll) -> Scroll {
         let this = *self;
         fill(
             scroll()
                 .horizontal()
                 .scrollbar(false)
+                .mx(px(-CARD_PAD))
                 .gap(px(STRIP_GAP))
                 .element_ref(&this.el)
                 .test_id(this.id)
@@ -94,38 +95,43 @@ impl Shelf {
     }
 }
 
+/// 卡条里的一张卡的外壳：固定宽（封面边长 + 内边距）、左对齐、悬停
+/// 底色铺满整卡。卡条从左排起，放不下横向滚动。
+pub(crate) fn card_shell(label: String) -> ButtonElement {
+    button()
+        .w(px(STRIP_MIN_W))
+        .flex_shrink_0()
+        .gap(px(10.0))
+        .items_start()
+        .p(px(CARD_PAD))
+        .rounded(px(12.0))
+        .accessibility_label(SharedString::from(label))
+        .hover(|st| st.bg(hover()))
+        .active(|st| st.opacity(0.75))
+}
+
 /// 推荐卡：封面 + 曲名 + 歌手；按下以这一批为队列从本卡开始播。
-/// `flex_1` + `min_w`：横排卡条里够宽摊满整行、放不下时顶出滚动区。
 pub(crate) fn card(t: &TrackEntry, index: usize, five: Rc<Vec<TrackEntry>>) -> ButtonElement {
     // `src` / `letter` 进 `when` 的响应闭包：要 `Copy`，用 `stored` 持有。
     let path = stored(t.path.clone());
     let title = stored(t.display_title().to_owned());
-    let src = move || cover_for(&path.get(), 140.0);
+    let src = move || cover_for(&path.get(), CARD_ART);
     let letter = move || initial_letter(&title.get(), &path.get());
-    button()
-        .flex_1()
-        .min_w(px(200.0))
-        .gap(px(8.0))
-        .items_center()
-        .p(px(10.0))
-        .rounded(px(14.0))
-        .accessibility_label(SharedString::from(t.display_title().to_owned()))
-        .hover(|st| st.bg(hover()))
-        .active(|st| st.opacity(0.75))
+    card_shell(t.display_title().to_owned())
         .on_press(move |_: &()| play_list(&five, index))
         .child(when(covers_on, move || {
-            cover_initial(src, letter, Some(140.0), 12.0)
+            cover_initial(src, letter, Some(CARD_ART), 8.0)
         }))
         .child(
             view()
+                .w_full()
                 .px(px(2.0))
-                .items_center()
-                .gap(px(2.0))
+                .gap(px(6.0))
                 .child(
                     text(t.display_title().to_owned())
                         .number_of_lines(1)
-                        .text_size(px(13.0))
-                        .line_height(px(13.0))
+                        .text_size(px(14.0))
+                        .line_height(px(14.0))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(fg()),
                 )
@@ -214,19 +220,24 @@ pub(crate) fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement
                     ),
             );
         }
+        // 信息列 `flex_1`：右侧列表在窄窗口隐藏时它吃满余宽，卡里不留
+        // 一大块空白；宽窗口下与列表平分，列表另有 40% 封顶。
         view()
             .flex_row()
             .items_center()
-            .gap(px(24.0))
-            .p(px(20.0))
-            .rounded(px(16.0))
+            .gap(px(28.0))
+            .p(px(24.0))
+            .rounded(px(20.0))
             .bg(primary().opacity(0.08))
-            .child(when(covers_on, move || cover(art, Some(180.0), 12.0)))
+            .child(when(covers_on, move || {
+                cover(art, Some(176.0), 12.0).shadow_md()
+            }))
             .child(
                 view()
-                    .w(px(280.0))
+                    .flex_1()
+                    .min_w(px(0.0))
                     .items_start()
-                    .gap(px(10.0))
+                    .gap(px(12.0))
                     .child(
                         view()
                             .px(px(8.0))
@@ -242,13 +253,13 @@ pub(crate) fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement
                     )
                     .child(
                         text(format!("随机翻到了「{}」", title))
-                            .number_of_lines(1)
-                            .text_size(px(22.0))
-                            .line_height(px(22.0))
+                            .number_of_lines(2)
+                            .text_size(px(24.0))
+                            .line_height(px(30.0))
                             .font_weight(FontWeight::BOLD)
                             .text_color(fg()),
                     )
-                    .child(view().h(px(6.0)))
+                    .child(view().h(px(4.0)))
                     .child(
                         view()
                             .flex_row()

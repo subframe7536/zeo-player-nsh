@@ -195,9 +195,8 @@ pub fn hero(
     play: impl Fn() + 'static,
 ) -> View {
     view()
-        .px(px(32.0))
-        .pt(px(12.0))
-        .pb(px(20.0))
+        .px(px(PAGE_X))
+        .pb(px(PAGE_HEADER_PB))
         .gap(px(16.0))
         .window_drag(true)
         .child(
