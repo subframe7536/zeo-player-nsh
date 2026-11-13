@@ -18,19 +18,21 @@ runs:
         if (-not (Test-Path "C:\Program Files\LLVM\bin\libclang.dll")) { choco install llvm -y --no-progress }
         "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
 
-    # stable 频道：Cargo.toml 的 nsh-* 走 crates.io 版本号（见 AGENTS.md 的
-    # nsh-pin 段——pin 在 nightly 时这里要换回 --nightly / NSH_VERSION=nightly）。
+    # nightly 频道：Cargo.toml 的 nsh-* 按 rev 钉在某次 nightly 提交上，
+    # nightly 前移后 CLI 比依赖新，届时同步 rev（见 AGENTS.md 的 nsh-pin 段
+    # ——pin 回 stable 时这里去掉 --nightly / NSH_VERSION）。
     - name: Install nsh (macOS)
       if: runner.os == 'macOS'
       shell: bash
       run: |
-        curl -fsSL https://nsh.dev/install.sh | sh
+        curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Install nsh (Windows)
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
+        $env:NSH_VERSION = 'nightly'
         irm https://nsh.dev/install.ps1 | iex
         "$env:LOCALAPPDATA\nsh\bin" >> $env:GITHUB_PATH
 

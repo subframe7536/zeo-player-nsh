@@ -17,9 +17,10 @@ cd "$(dirname "$0")/.."
 GIT_URL="https://github.com/longbridge/nsh"
 
 cli_commit() {
-  # `nsh 0.4.0 (36b9168 nightly)` → 36b9168；稳定版 `nsh 0.5.0 (f4d68f7)`
-  # 括号里也有提交号但不带 nightly 标记，返回空。
-  nsh --version | sed -nE 's/.*\(([0-9a-f]+) nightly\).*/\1/p'
+  # `nsh 0.4.0 (36b9168 nightly)` / `nsh 0.5.0 (0edac01 nightly 2026-11-12)` →
+  # 36b9168 / 0edac01；稳定版 `nsh 0.5.0 (f4d68f7)` 括号里也有提交号但不带
+  # nightly 标记，返回空。nightly 后可能跟构建日期，不能钉死 `)` 收尾。
+  nsh --version | sed -nE 's/.*\(([0-9a-f]+) nightly[^)]*\).*/\1/p'
 }
 
 cli_build() {
