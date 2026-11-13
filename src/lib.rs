@@ -184,6 +184,10 @@ pub fn App() -> impl IntoElement {
             delete_prompt,
         ))
         .child(when(
+            move || s.welcome.get() && !s.hidden.get(),
+            zeo_ui_views::welcome_page,
+        ))
+        .child(when(
             move || s.close_prompt.get() && !s.hidden.get(),
             close_prompt,
         ))
@@ -205,8 +209,14 @@ pub fn App() -> impl IntoElement {
 /// listbox 的键入定位要用（用户仍可自绑，是自己的选择）。
 fn keys() -> AnyElement {
     dynamic(move || {
+        // 欢迎页盖着整个窗口：期间窗口内快捷键（导航、命令面板、设置、播放键
+        // 等）都停用，免得在看不见的外壳上起作用；只留关窗（它先关面板，再
+        // 走托盘 / 退出的路径）。读 `s.welcome` 让开合时整体重绑。
+        let welcome = zeo_ui_store::store().welcome.get();
         for &action in zeo_ui_store::KeyAction::ALL {
-            if !action.in_full_player() {
+            if !action.in_full_player()
+                && (!welcome || action == zeo_ui_store::KeyAction::CloseWindow)
+            {
                 zeo_ui_store::bind_key(action, move || zeo_ui_store::run_keybind(action));
             }
         }

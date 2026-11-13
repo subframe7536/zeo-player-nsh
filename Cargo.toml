@@ -46,6 +46,7 @@ zeo-ui-view-metadata = { path = "crates/ui-view-metadata" }
 zeo-ui-view-edit-info = { path = "crates/ui-view-edit-info" }
 zeo-ui-view-settings = { path = "crates/ui-view-settings" }
 zeo-ui-view-command-palette = { path = "crates/ui-view-command-palette" }
+zeo-ui-view-welcome = { path = "crates/ui-view-welcome" }
 zeo-ui-now-playing = { path = "crates/ui-now-playing" }
 zeo-ui-frame = { path = "crates/ui-frame" }
 

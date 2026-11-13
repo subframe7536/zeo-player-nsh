@@ -103,6 +103,10 @@ pub struct LibraryConfig {
     /// 不在此列），只有显式绑定的条目才落盘。
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub global_keybinds: std::collections::BTreeMap<String, String>,
+    /// 首次启动的欢迎指南已看过 / 已跳过（旧版文件没有此字段，读作 false；
+    /// 界面侧另有「已有文件夹的老用户不弹」的判断，见 `Store::welcome`）。
+    #[serde(default)]
+    pub welcome_done: bool,
 }
 
 fn default_fade_ms() -> u32 {
@@ -163,6 +167,7 @@ impl Default for LibraryConfig {
             window_placement: None,
             keybinds: std::collections::BTreeMap::new(),
             global_keybinds: std::collections::BTreeMap::new(),
+            welcome_done: false,
         }
     }
 }

@@ -6718,6 +6718,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zeo-ui-view-welcome"
+version = "0.1.0"
+dependencies = [
+ "nsh-core",
+ "zeo-library",
+ "zeo-ui-components",
+ "zeo-ui-store",
+ "zeo-ui-view-settings",
+ "zeo-ui-views-base",
+]
+
+[[package]]
 name = "zeo-ui-views"
 version = "0.1.0"
 dependencies = [
@@ -6732,6 +6744,7 @@ dependencies = [
  "zeo-ui-view-metadata",
  "zeo-ui-view-playlists",
  "zeo-ui-view-settings",
+ "zeo-ui-view-welcome",
  "zeo-ui-views-base",
 ]
 

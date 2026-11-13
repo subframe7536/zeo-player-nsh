@@ -172,6 +172,19 @@ pub(crate) fn update_section() -> View {
     section
 }
 
+/// 「欢迎指南」节：关掉设置，重新打开首次启动时的欢迎指南。
+pub(crate) fn welcome_section() -> View {
+    let reopen = || {
+        store().settings.set(false);
+        zeo_ui_store::open_welcome();
+    };
+    setting_section(
+        "欢迎指南",
+        "重新查看首次启动时的引导：添加音乐文件夹、选择主题色与功能一览。",
+        Some(text_button(Variant::Outline, Size::Sm, None, "重新查看", reopen).into_element()),
+    )
+}
+
 /// 字节数的人读写法（下载进度）。
 fn bytes(n: u64) -> String {
     if n >= 1 << 20 {

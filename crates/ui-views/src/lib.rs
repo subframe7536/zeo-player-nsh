@@ -13,6 +13,7 @@ pub use zeo_ui_view_metadata as metadata;
 pub use zeo_ui_view_playlists as playlists;
 pub use zeo_ui_view_settings as settings;
 pub use zeo_ui_view_settings::dialog as settings_dialog;
+pub use zeo_ui_view_welcome::page as welcome_page;
 
 use std::rc::Rc;
 

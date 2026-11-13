@@ -62,7 +62,8 @@ pub const PRESETS: &[(u32, &'static str)] = &[
 ];
 
 /// 主题色：支持配置「黑白」、「封面」、「自定义」（预设强调色与十六进制颜色代码）。
-pub(crate) fn accent_section() -> View {
+/// 欢迎指南的「主题色」一步也复用它（`zeo-ui-view-welcome`）。
+pub fn accent_section() -> View {
     use zeo_ui_components::form::input_field;
     use zeo_ui_components::radio;
 

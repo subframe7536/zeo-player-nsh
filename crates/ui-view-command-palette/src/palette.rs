@@ -143,6 +143,14 @@ pub(crate) fn palette_content(close: impl Fn() + Copy + 'static) -> CommandEleme
                     &["scan", "refresh", "rescan", "saomiao", "gengxin"][..],
                     None,
                 ),
+                (
+                    "action:welcome",
+                    "欢迎指南",
+                    &[
+                        "welcome", "guide", "tour", "huanying", "zhinan", "引导", "新手",
+                    ][..],
+                    None,
+                ),
             ];
             for (id, label, kws, action) in action_defs {
                 if matches_keyword(&q_lower, label, kws) {
@@ -265,6 +273,7 @@ pub(crate) fn palette_content(close: impl Fn() + Copy + 'static) -> CommandEleme
                         s.full_screen.set(true);
                     }
                     "scan" => store::scan(),
+                    "welcome" => store::open_welcome(),
                     _ => {}
                 }
                 close();

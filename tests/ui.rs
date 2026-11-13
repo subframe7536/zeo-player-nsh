@@ -27,8 +27,11 @@ fn isolate() -> bool {
         std::fs::create_dir_all(&data).unwrap();
         // 关掉「记住窗口大小和位置」：曲库存储是进程全局的，并行用例的
         // 窗口位置会互相写 / 互相恢复。
+        // 同时写 welcome_done：否则空曲库（没语料）首次启动会弹欢迎指南，
+        // 盖住别的用例要点的界面。
         let mut config = serde_json::json!({
             "remember_frame": false,
+            "welcome_done": true,
         });
         if corpus {
             // 语料只有 1–3 秒、几十 KB：library.json 里把过滤阈值写成 0。
@@ -37,6 +40,7 @@ fn isolate() -> bool {
                 "min_duration_secs": 0,
                 "min_size_kb": 0,
                 "remember_frame": false,
+                "welcome_done": true,
             });
         }
         std::fs::write(data.join("library.json"), config.to_string()).unwrap();
@@ -138,3 +142,5 @@ mod metadata;
 mod settings;
 #[path = "ui/views.rs"]
 mod views;
+#[path = "ui/welcome.rs"]
+mod welcome;

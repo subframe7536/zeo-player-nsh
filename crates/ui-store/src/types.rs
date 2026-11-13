@@ -141,6 +141,9 @@ pub struct Store {
     pub editor: Signal<Option<Draft>>,
     /// 设置弹窗打开中。
     pub settings: Signal<bool>,
+    /// 欢迎页（全窗口）显示中：启动时在配置里 `welcome_done` 为假且还没添加任何
+    /// 文件夹时为真（老用户不弹）；「关于」页可重新打开。
+    pub welcome: Signal<bool>,
     /// 期望的全屏播放状态：`App` 的本地信号才是真正挂载状态，外部
     /// （快捷键、命令面板）改这里，由根组件的对账 effect 调 open/close
     /// （动画与歌词 Reveal 记数只在那里做，直接写挂载信号拿不到）。

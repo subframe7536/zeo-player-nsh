@@ -126,6 +126,7 @@ pub(crate) fn command_item_view(entry: &CommandEntry) -> View {
             "action:mute" => Icon::Volume,
             "action:fullscreen" => Icon::Expand,
             "action:scan" => Icon::Refresh,
+            "action:welcome" => Icon::Info,
             _ => Icon::Search,
         };
 

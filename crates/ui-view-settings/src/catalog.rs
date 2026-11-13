@@ -163,6 +163,12 @@ pub(crate) const SECTIONS: &[Section] = &[
         keys: "更新 检查更新 升级 新版本 下载 安装 重启 自动检查",
         build: about::update_section,
     },
+    Section {
+        pane: Pane::About,
+        title: "欢迎指南",
+        keys: "欢迎 指南 引导 新手 教程 首次 入门 重新查看",
+        build: about::welcome_section,
+    },
 ];
 
 /// 不区分大小写命中。

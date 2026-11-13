@@ -149,6 +149,17 @@ fn old_config_migrates() {
 }
 
 #[test]
+fn welcome_done_defaults_to_false_and_roundtrips() {
+    let old: LibraryConfig = serde_json::from_str(r#"{"roots":[]}"#).unwrap();
+    assert!(!old.welcome_done, "旧文件没有此字段：读作未看过");
+    assert!(!LibraryConfig::default().welcome_done);
+    let done: LibraryConfig = serde_json::from_str(r#"{"roots":[],"welcome_done":true}"#).unwrap();
+    assert!(done.welcome_done);
+    let json = serde_json::to_string(&done).unwrap();
+    assert!(json.contains(r#""welcome_done":true"#), "{json}");
+}
+
+#[test]
 fn theme_color_serde_roundtrip() {
     assert_eq!(
         serde_json::from_str::<ThemeColor>(r#""neutral""#).unwrap(),

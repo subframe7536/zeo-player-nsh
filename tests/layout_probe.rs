@@ -41,12 +41,13 @@ fn isolate() -> bool {
                 "min_duration_secs": 0,
                 "min_size_kb": 0,
                 "remember_frame": false,
+                "welcome_done": true,
             });
             std::fs::write(data.join("library.json"), config.to_string()).unwrap();
         } else {
             std::fs::write(
                 data.join("library.json"),
-                serde_json::json!({ "remember_frame": false }).to_string(),
+                serde_json::json!({ "remember_frame": false, "welcome_done": true }).to_string(),
             )
             .unwrap();
         }

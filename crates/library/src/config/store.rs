@@ -147,6 +147,11 @@ impl LibraryStore {
         self.update_config(|c| c.auto_check_updates = on);
     }
 
+    /// 欢迎指南已看过 / 已跳过（持久化）。
+    pub fn set_welcome_done(&self, done: bool) {
+        self.update_config(|c| c.welcome_done = done);
+    }
+
     pub fn set_delete_permanently(&self, on: bool) {
         self.update_config(|c| c.delete_permanently = on);
     }

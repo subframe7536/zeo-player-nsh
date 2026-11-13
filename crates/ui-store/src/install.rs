@@ -95,6 +95,10 @@ pub fn install() -> Store {
         editor: signal(None),
         search_open: signal(false),
         settings: signal(false),
+        welcome: signal({
+            let config = lib.config();
+            !config.welcome_done && config.roots.is_empty()
+        }),
         full_screen: signal(false),
         delete_ask: signal(None),
         edit_info: signal(None),

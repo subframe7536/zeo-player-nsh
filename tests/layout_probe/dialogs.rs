@@ -262,3 +262,145 @@ fn edit_dialog_layout_probe() {
         "弹层应与 trigger 同宽：选项 {item_w:.0}+8 vs trigger {trig_w:.0}"
     );
 }
+
+/// 欢迎页是整窗页面：根节点铺满视口；内容列水平居中、不超 640 宽；每一步的
+/// 文字都在列内（「跳过」除外，它在右上角的标题栏一行里）、不压到标题栏
+/// 一行；功能一览的六张卡片一行三张。
+#[test]
+fn welcome_page_layout_probe() {
+    const W: f32 = 1200.0;
+    const H: f32 = 800.0;
+    const COLUMN: f32 = 640.0;
+    isolate();
+    let mut app = start(W, H);
+    let probed = probe(&mut app);
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[关于]").unwrap();
+    app.wait_for("id:settings-content >> role:button[重新查看]")
+        .unwrap();
+    app.press("id:settings-content >> role:button[重新查看]")
+        .unwrap();
+    app.wait_for("id:welcome >> text:欢迎使用 Zeo Player")
+        .unwrap();
+
+    // 页面铺满视口；该步的文字都在内容列里。
+    let check = |app: &mut Headless, step: &str| {
+        // 淡入（240ms）与指示点的过渡落定。
+        app.wait(Duration::from_millis(500)).unwrap();
+        let p = probed.lock().unwrap();
+        let page = p
+            .test_ids
+            .iter()
+            .find(|(_, t)| t.as_str() == "welcome")
+            .map(|(id, _)| *id)
+            .expect("找不到欢迎页");
+        let (px_, py_, ps) = abs(&p, page).expect("欢迎页没有 frame");
+        assert!(
+            px_.abs() <= 0.5
+                && py_.abs() <= 0.5
+                && (ps.width.0 - W).abs() <= 0.5
+                && (ps.height.0 - H).abs() <= 0.5,
+            "{step}: 欢迎页应铺满视口：({px_:.1},{py_:.1},{:.1}x{:.1})",
+            ps.width.0,
+            ps.height.0
+        );
+        let col_left = (W - COLUMN) / 2.0;
+        let mut checked = 0;
+        for (id, text) in &p.texts {
+            let mut cur = *id;
+            let mut under = false;
+            while let Some(parent) = p.parents.get(&cur) {
+                if *parent == page {
+                    under = true;
+                    break;
+                }
+                cur = *parent;
+            }
+            let Some((x, y, s)) = abs(&p, *id).filter(|_| under) else {
+                continue;
+            };
+            assert!(
+                y >= 40.0 - 0.5 || text == "跳过",
+                "{step}: 文字「{text}」压到标题栏一行（y={y:.1}）"
+            );
+            assert!(
+                y + s.height.0 <= H + 0.5,
+                "{step}: 文字「{text}」超出窗口底（y={y:.1} h={:.1}）",
+                s.height.0
+            );
+            if text == "跳过" {
+                // 右上角，贴窗口右缘（macOS 没有窗口按钮）。
+                assert!(x > W - 120.0, "跳过应在右上角（x={x:.1}）");
+                continue;
+            }
+            checked += 1;
+            assert!(
+                x >= col_left - 0.5 && x + s.width.0 <= col_left + COLUMN + 0.5,
+                "{step}: 文字「{text}」越出内容列：x={x:.1} w={:.1}（列 {col_left:.0}..{:.0}）",
+                s.width.0,
+                col_left + COLUMN
+            );
+        }
+        assert!(
+            checked >= 3,
+            "{step}: 页面里应探到文字节点（实际 {checked}）"
+        );
+    };
+
+    check(&mut app, "欢迎");
+    // 第 1 步：标题在内容列正中。
+    {
+        let p = probed.lock().unwrap();
+        let (x, _, s) = p
+            .texts
+            .iter()
+            .filter(|(_, t)| t.as_str() == "欢迎使用 Zeo Player")
+            .find_map(|(id, _)| abs(&p, *id))
+            .expect("找不到标题");
+        assert!(
+            (x + s.width.0 / 2.0 - W / 2.0).abs() <= 2.0,
+            "标题应水平居中：中心 {:.1}",
+            x + s.width.0 / 2.0
+        );
+    }
+    app.press("id:welcome >> role:button[开始]").unwrap();
+    app.wait_for("id:welcome >> text:添加音乐文件夹").unwrap();
+    check(&mut app, "添加音乐文件夹");
+    app.press("id:welcome >> role:button[下一步]").unwrap();
+    app.wait_for("id:welcome >> role:radio[封面]").unwrap();
+    check(&mut app, "主题色");
+    app.press("id:welcome >> role:button[下一步]").unwrap();
+    app.wait_for("id:welcome >> text:智能歌单").unwrap();
+    check(&mut app, "功能一览");
+
+    let p = probed.lock().unwrap();
+    let title_pos = |title: &str| {
+        p.texts
+            .iter()
+            .filter(|(_, t)| t.as_str() == title)
+            .find_map(|(id, _)| abs(&p, *id))
+            .map(|(x, y, _)| (x, y))
+            .unwrap_or_else(|| panic!("找不到卡片 {title}"))
+    };
+    let titles = [
+        "命令面板",
+        "全屏播放与歌词",
+        "元数据表与批量改名",
+        "智能歌单",
+        "十段均衡器与 ReplayGain",
+        "托盘与全局快捷键",
+    ];
+    for row in titles.chunks(3) {
+        let pos: Vec<_> = row.iter().map(|t| title_pos(t)).collect();
+        for pair in pos.windows(2) {
+            assert!(
+                (pair[0].1 - pair[1].1).abs() <= 1.0 && pair[1].0 > pair[0].0 + 100.0,
+                "{row:?} 应同一行并排：{pos:?}"
+            );
+        }
+    }
+    assert!(
+        title_pos(titles[3]).1 > title_pos(titles[0]).1 + 40.0,
+        "第二行应在第一行下方"
+    );
+}

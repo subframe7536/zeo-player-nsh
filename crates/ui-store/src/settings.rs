@@ -92,6 +92,18 @@ pub fn set_theme_color(color: zeo_types::config::ThemeColor) {
     std::thread::spawn(move || library_store().set_theme_color(color));
 }
 
+/// 打开欢迎页（「关于」页的「重新查看」、命令面板）。
+pub fn open_welcome() {
+    store().welcome.set(true);
+}
+
+/// 结束欢迎页（走完、跳过、Esc 都算）：关掉并记下已看过。
+pub fn finish_welcome() {
+    store().welcome.set(false);
+    update_config(|c| c.welcome_done = true);
+    std::thread::spawn(move || library_store().set_welcome_done(true));
+}
+
 /// 侧栏下半部当前显示的视图（歌单 / 标签 / 文件夹），立即生效并保存。
 pub fn set_sidebar_section(section: SidebarSection) {
     let s = store();

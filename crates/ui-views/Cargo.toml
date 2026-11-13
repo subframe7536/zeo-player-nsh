@@ -17,3 +17,4 @@ zeo-ui-view-metadata.workspace = true
 zeo-ui-view-edit-info.workspace = true
 zeo-ui-view-settings.workspace = true
 zeo-ui-view-command-palette.workspace = true
+zeo-ui-view-welcome.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "zeo-ui-view-welcome"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+nsh-core.workspace = true
+zeo-library.workspace = true
+zeo-ui-views-base.workspace = true
+zeo-ui-store.workspace = true
+zeo-ui-components.workspace = true
+zeo-ui-view-settings.workspace = true
