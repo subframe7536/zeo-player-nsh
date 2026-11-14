@@ -378,16 +378,13 @@ pub(crate) fn tag_select(
     pick: impl Fn(String) + Copy + 'static,
 ) -> AnyElement {
     let s = store();
-    let pulse = signal(0.0f32);
     // 弹性宽加在 select 元素上（根是列容器；触发器里的 flex_1 会在纵轴
-    // 把它压没，只保 min_w 由列拉伸铺满）。宽度脉冲走根的 min_w，基准
-    // 宽由触发器记（cover_realign_flex）。
-    let (min_w, layout) = cover_realign_flex(pulse);
-    let trigger = select_trigger(current, || None, "值", 0.0, "选择标签").on_layout(layout);
+    // 把它压没，只保 min_w 由列拉伸铺满）。
+    let trigger = select_trigger(current, || None, "值", 0.0, "选择标签");
     let no_tags = move || !s.tracks.get().iter().any(|t| !t.genres.is_empty());
     nsh_base::select()
         .flex_1()
-        .min_w(min_w)
+        .min_w(px(0.0))
         .items(move || {
             let tracks = s.tracks.get();
             // 键用小写：匹配不分大小写，只差大小写的标签算同一个。
@@ -411,7 +408,6 @@ pub(crate) fn tag_select(
         .align(Align::Start)
         .offset(px(4.0))
         .margin(px(8.0))
-        .on_open(move || cover_realign(pulse))
         .on_change(move |v: &Option<SharedString>| {
             if let Some(v) = v {
                 pick(v.to_string())

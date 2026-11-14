@@ -305,51 +305,6 @@ pub fn tab_trigger(
         )
 }
 
-/// Select 弹层的 cover 对齐重采脉冲（上游 0.4.0 的限制，见
-/// upstream.md）：弹层把选中行盖在触发器上的对齐只在 cover 行
-/// 首次布局时采样一次，缓存只认弹层尺寸与 cover 在父级的位置；而虚拟
-/// 列表的 scrollToIndex 用估算行高分几帧收敛——采样早于收敛时，滚动
-/// 到位后弹层仍停在错位处。`on_open` 后让弹层宽度在 ±1pt 间抖动几帧：
-/// 弹层宽绑定触发器实测宽（listbox 的 `.w(width)`），尺寸一变就重采，
-/// 最后一次落在收敛后的滚动位置上。1pt 的抖动不可见。
-pub fn cover_realign(pulse: Signal<f32>) {
-    spawn(async move {
-        for i in 0..12u8 {
-            next_frame().await;
-            pulse.set(f32::from(i % 2));
-        }
-        pulse.set(0.0);
-    });
-}
-
-/// 弹性 Select（触发器宽由 select 根的拉伸决定，自身没有 `.w`）的脉
-/// 冲通道：平时 `min_w` 松开随伸缩；脉冲时把根的 `min_w` 锁到「未脉冲
-/// 时记下的实测宽 +1」，强制整行 +1pt——触发器实测宽跟着变，弹层宽
-/// 也就变了。返回加在 select 元素上的 `min_w` 与加在触发器上的布局
-/// 监听（元素间互不覆盖，`select` 自己也在触发器上记宽）。
-pub fn cover_realign_flex(
-    pulse: Signal<f32>,
-) -> (
-    impl Fn() -> Length + Copy + 'static,
-    impl Fn(&Bounds<Points>) + Copy + 'static,
-) {
-    let held = signal(0.0f32);
-    let min_w = move || {
-        if pulse.get() > 0.0 {
-            Length::from(px(held.get() + 1.0))
-        } else {
-            Length::from(px(0.0))
-        }
-    };
-    let layout = move |frame: &Bounds<Points>| {
-        // 脉冲中不更新：held 要保住未脉冲的宽，脉冲才有基准。
-        if pulse.get_untracked() == 0.0 {
-            held.set(frame.size.width.0);
-        }
-    };
-    (min_w, layout)
-}
-
 /// 下拉项的描述：文字、回调，可选分组小标题与前置图标。
 pub struct SelectOption {
     pub heading: Option<&'static str>,
@@ -423,26 +378,12 @@ pub fn select_with_trigger(
     width: f32,
     custom_trigger: Option<View>,
 ) -> AnyElement {
-    let pulse = signal(0.0f32);
-    let mut flex_min_w = None;
-    let trigger = if let Some(trig) = custom_trigger {
-        if width > 0.0 {
-            trig.w(move || px(width + pulse.get()))
-        } else {
-            let (min_w, layout) = cover_realign_flex(pulse);
-            flex_min_w = Some(min_w);
-            trig.on_layout(layout)
-        }
+    let trigger =
+        custom_trigger.unwrap_or_else(|| select_trigger(current, || None, label, width, ""));
+    let trigger = if width > 0.0 {
+        trigger.w(px(width))
     } else {
-        let mut trig = select_trigger(current, || None, label, width, "");
-        if width > 0.0 {
-            trig = trig.w(move || px(width + pulse.get()));
-        } else {
-            let (min_w, layout) = cover_realign_flex(pulse);
-            trig = trig.on_layout(layout);
-            flex_min_w = Some(min_w);
-        }
-        trig
+        trigger
     };
 
     let has_glyph = options.iter().any(|o| o.glyph.is_some());
@@ -479,7 +420,6 @@ pub fn select_with_trigger(
         .align(Align::Start)
         .offset(px(4.0))
         .margin(px(8.0))
-        .on_open(move || cover_realign(pulse))
         .on_change(move |v: &Option<SharedString>| {
             if let Some(v) = v
                 && let Ok(i) = v.parse::<usize>()
@@ -545,9 +485,6 @@ pub fn select_with_trigger(
     if width > 0.0 {
         select_el.into_element()
     } else {
-        select_el
-            .flex_1()
-            .min_w(flex_min_w.expect("弹性分支给了 min_w"))
-            .into_element()
+        select_el.flex_1().min_w(px(0.0)).into_element()
     }
 }
