@@ -415,3 +415,217 @@ fn push_candidate(out: &mut Vec<String>, text: String, apple: bool, os: nsh_core
         out.push(text);
     }
 }
+
+/// 捕获态的查表：候选键位（[`capture_candidates`]）按解析出的
+/// `Keystroke` 索引回原写法——录下的键位与候选清单同一套文本（`mod`
+/// 对应平台主修饰键），清单外的键（Tab、平台保留键、单按修饰键）查不到。
+/// 组件上下文里调用。
+pub fn capture_table() -> std::collections::HashMap<nsh_core::keymap::Keystroke, String> {
+    let apple = apple_keys();
+    capture_candidates()
+        .into_iter()
+        .filter_map(|text| {
+            nsh_core::keymap::Keystroke::parse_with(&text, apple)
+                .ok()
+                .map(|k| (k, text))
+        })
+        .collect()
+}
+
+/// 硬件按键事件（NSH `on_key_down` 的 `KeyEvent`）对应的键位：先按物理
+/// 键 `code`（DOM 写法，`KeyA` / `Digit1` / `ArrowLeft`——不随键盘布局与
+/// Option 组合字符变），没有 `code`（合成输入、无头测试）再按逻辑键
+/// `key`，Shift 打出的字符还原成未按 Shift 的那个键（`"A"` → `a`，`"!"` →
+/// `1`）。单按修饰键与认不出的键返回 `None`。
+pub fn stroke_of_key_event(
+    key: &str,
+    code: &str,
+    modifiers: nsh_core::keymap::Modifiers,
+) -> Option<nsh_core::keymap::Keystroke> {
+    let key = key_of_code(code).or_else(|| key_of_name(key))?;
+    Some(nsh_core::keymap::Keystroke { modifiers, key })
+}
+
+fn key_of_code(code: &str) -> Option<nsh_core::keymap::Key> {
+    use nsh_core::keymap::Key;
+    if let Some(c) = code.strip_prefix("Key")
+        && let [b] = c.as_bytes()
+        && b.is_ascii_uppercase()
+    {
+        return Some(Key::Char(b.to_ascii_lowercase() as char));
+    }
+    if let Some(d) = code.strip_prefix("Digit")
+        && let [b] = d.as_bytes()
+        && b.is_ascii_digit()
+    {
+        return Some(Key::Char(*b as char));
+    }
+    let punct = match code {
+        "Minus" => Some('-'),
+        "Equal" => Some('='),
+        "BracketLeft" => Some('['),
+        "BracketRight" => Some(']'),
+        "Backslash" => Some('\\'),
+        "Semicolon" => Some(';'),
+        "Quote" => Some('\''),
+        "Comma" => Some(','),
+        "Period" => Some('.'),
+        "Slash" => Some('/'),
+        "Backquote" => Some('`'),
+        "Space" => Some(' '),
+        _ => None,
+    };
+    if let Some(c) = punct {
+        return Some(Key::Char(c));
+    }
+    match code {
+        "NumpadEnter" => Some(Key::Enter),
+        // 其余命名键的 code 与 key 同名（`Enter` / `ArrowLeft` / `F5`）。
+        _ if !code.is_empty() && !code.starts_with("Numpad") => named_key(code),
+        _ => None,
+    }
+}
+
+fn key_of_name(key: &str) -> Option<nsh_core::keymap::Key> {
+    use nsh_core::keymap::Key;
+    let mut chars = key.chars();
+    if let (Some(c), None) = (chars.next(), chars.next()) {
+        return (c.is_ascii_graphic() || c == ' ').then(|| Key::Char(unshifted(c)));
+    }
+    named_key(key)
+}
+
+/// DOM 写法的命名键。
+fn named_key(name: &str) -> Option<nsh_core::keymap::Key> {
+    use nsh_core::keymap::Key;
+    Some(match name {
+        "Enter" => Key::Enter,
+        "Escape" => Key::Escape,
+        "Tab" => Key::Tab,
+        "Backspace" => Key::Backspace,
+        "Delete" => Key::Delete,
+        "Insert" => Key::Insert,
+        "ArrowUp" => Key::Up,
+        "ArrowDown" => Key::Down,
+        "ArrowLeft" => Key::Left,
+        "ArrowRight" => Key::Right,
+        "Home" => Key::Home,
+        "End" => Key::End,
+        "PageUp" => Key::PageUp,
+        "PageDown" => Key::PageDown,
+        _ => {
+            let n: u8 = name.strip_prefix('F')?.parse().ok()?;
+            return (1..=24).contains(&n).then_some(Key::F(n));
+        }
+    })
+}
+
+/// US 布局下 Shift 打出 `c` 的那个键（未按 Shift 时的字符）。
+fn unshifted(c: char) -> char {
+    const SHIFTED: &[(char, char)] = &[
+        ('~', '`'),
+        ('!', '1'),
+        ('@', '2'),
+        ('#', '3'),
+        ('$', '4'),
+        ('%', '5'),
+        ('^', '6'),
+        ('&', '7'),
+        ('*', '8'),
+        ('(', '9'),
+        (')', '0'),
+        ('_', '-'),
+        ('+', '='),
+        ('{', '['),
+        ('}', ']'),
+        ('|', '\\'),
+        (':', ';'),
+        ('"', '\''),
+        ('<', ','),
+        ('>', '.'),
+        ('?', '/'),
+    ];
+    SHIFTED
+        .iter()
+        .find(|(s, _)| *s == c)
+        .map_or(c.to_ascii_lowercase(), |(_, plain)| *plain)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nsh_core::keymap::{Key, Keystroke, Modifiers};
+
+    fn parsed(text: &str, apple: bool) -> Keystroke {
+        Keystroke::parse_with(text, apple).expect(text)
+    }
+
+    #[test]
+    fn physical_codes_win_over_the_typed_character() {
+        let m = Modifiers {
+            alt: true,
+            cmd: true,
+            ..Default::default()
+        };
+        // Option+A 在 macOS 打出 å：按物理键认成 a。
+        assert_eq!(
+            stroke_of_key_event("å", "KeyA", m),
+            Some(parsed("mod+alt+a", true))
+        );
+        assert_eq!(
+            stroke_of_key_event("ArrowLeft", "ArrowLeft", Modifiers::default()),
+            Some(parsed("left", false))
+        );
+        assert_eq!(
+            stroke_of_key_event("!", "Digit1", Modifiers::default()).map(|k| k.key),
+            Some(Key::Char('1'))
+        );
+        assert_eq!(
+            stroke_of_key_event(" ", "Space", Modifiers::default()),
+            Some(parsed("space", false))
+        );
+        assert_eq!(
+            stroke_of_key_event("F5", "F5", Modifiers::default()),
+            Some(parsed("f5", false))
+        );
+    }
+
+    #[test]
+    fn without_a_code_the_shifted_character_is_undone() {
+        let shift = Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            stroke_of_key_event("A", "", shift),
+            Some(parsed("shift+a", false))
+        );
+        assert_eq!(
+            stroke_of_key_event("?", "", shift),
+            Some(parsed("shift+/", false))
+        );
+        assert_eq!(
+            stroke_of_key_event("Escape", "", Modifiers::default()),
+            Some(parsed("escape", false))
+        );
+    }
+
+    #[test]
+    fn modifiers_alone_and_unknown_keys_are_none() {
+        for (key, code) in [
+            ("Shift", "ShiftLeft"),
+            ("Meta", "MetaLeft"),
+            ("Control", "ControlRight"),
+            ("Alt", "AltLeft"),
+            ("CapsLock", "CapsLock"),
+            ("Unidentified", ""),
+            ("é", ""),
+        ] {
+            assert_eq!(
+                stroke_of_key_event(key, code, Modifiers::default()),
+                None,
+                "{key}"
+            );
+        }
+    }
+}

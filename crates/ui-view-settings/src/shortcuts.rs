@@ -7,7 +7,8 @@
 
 use std::collections::BTreeSet;
 
-use nsh_core::keymap::When;
+use nsh_core::keyboard::{KeyCapture, KeyEvent};
+use nsh_core::keymap::{Key, Modifiers};
 use nsh_core::prelude::*;
 
 use super::search_box;
@@ -39,54 +40,75 @@ fn set_scoped_bind(scope: BindScope, action: KeyAction, key: Option<String>) {
     }
 }
 
-/// 「按键搜索」录制态的临时绑定：`When::Always` 让输入框聚焦时文本键
-/// 也被录制而不是输进框里；按下的组合键以带引号的平台标签（`"⌘→"` /
-/// `"Ctrl+→"`）写回搜索框——引号让搜索走键位的等值匹配（一次只录
-/// 一组键），Esc 取消、Backspace / Delete 清空。平台保留键（macOS 的
-/// ⌘Q / ⌘H / ⌘M / ⌃⌘F，Windows 的 Ctrl+Q / Alt+F4 / F11）`on_key`
-/// 绑定即 panic，拦不到，见 upstream.md。
-fn record_search_keys(recording: Signal<bool>, query: Signal<String>) {
-    let always = KeyOptions {
-        when: When::Always,
-        ..KeyOptions::default()
-    };
-    for key in zeo_ui_store::capture_candidates() {
-        on_key_with(&key, always, move |k| {
-            query.set(format!("\"{}\"", key_label(k)));
-            recording.set(false);
-        });
-    }
-    on_key_with("escape", always, move |_| recording.set(false));
-    for key in ["backspace", "delete"] {
-        on_key_with(key, always, move |_| {
-            query.set(String::new());
-            recording.set(false);
-        });
-    }
-}
-
-/// 捕获态注册的临时绑定：`on_key` 是最新绑定优先，这些盖过窗口内绑定
-/// （含全屏页的）；全局快捷键则由 `s.key_capture` 联动整体注销，按到
-/// 自己已注册的全局键也照常被捕获。Esc 取消、Backspace / Delete 解绑
-/// ——最后注册，优先。
-fn capture_keys(capture: Capture) {
-    for key in zeo_ui_store::capture_candidates() {
-        on_key(&key, move |k| {
-            if let Some((scope, action)) = capture.get_untracked() {
-                set_scoped_bind(scope, action, Some(k.to_owned()));
-            }
-            capture.set(None);
-        });
-    }
-    on_key("escape", move |_| capture.set(None));
-    for key in ["backspace", "delete"] {
-        on_key(key, move |_| {
-            if let Some((scope, action)) = capture.get_untracked() {
+/// 录键视图：捕获新键位或「按键搜索」录制中才挂上，挂上即取得键盘焦点，
+/// 经 NSH 的 `on_key_down` 收下一个按键（`capture_keys(All)` 让 Esc 关
+/// 弹窗、回车按焦点件这些平台默认动作不跑）。键位表里的绑定先于视图
+/// 事件，录键期间由 `keys_suspended` 整体停用。按下的键查候选表
+/// （`capture_table`，与 `capture_candidates` 同一套写法）：Esc 取消，
+/// 单按 Backspace / Delete 解绑（录制态：清空搜索框），表外的键（Tab、
+/// 平台保留键、单按修饰键）不理、继续等。平台保留键（macOS 的 ⌘Q /
+/// ⌘H / ⌘M / ⌃⌘F，Windows 的 Ctrl+Q / Alt+F4 / F11）由系统先处理，录
+/// 不到，见 upstream.md。
+fn key_recorder(capture: Capture, recording: Signal<bool>, query: Signal<String>) -> AnyElement {
+    let table = std::rc::Rc::new(zeo_ui_store::capture_table());
+    let on_key = move |e: &KeyEvent| {
+        if e.repeat {
+            return;
+        }
+        let Some(stroke) =
+            zeo_ui_store::stroke_of_key_event(e.key.as_str(), e.code.as_str(), e.modifiers)
+        else {
+            return;
+        };
+        let plain = stroke.modifiers == Modifiers::default();
+        let clear = plain && matches!(stroke.key, Key::Backspace | Key::Delete);
+        let cancel = plain && stroke.key == Key::Escape;
+        if let Some((scope, action)) = capture.get_untracked() {
+            if clear {
                 set_scoped_bind(scope, action, Some(String::new()));
+            } else if let Some(text) = table.get(&stroke).filter(|_| !cancel) {
+                set_scoped_bind(scope, action, Some(text.clone()));
+            } else if !cancel {
+                return;
             }
             capture.set(None);
+        } else if recording.get_untracked() {
+            if clear {
+                query.set(String::new());
+            } else if let Some(text) = table.get(&stroke).filter(|_| !cancel) {
+                query.set(format!("\"{}\"", key_label(text)));
+            } else if !cancel {
+                return;
+            }
+            recording.set(false);
+        }
+    };
+    let on_key = std::rc::Rc::new(on_key);
+    dynamic(move || {
+        if capture.get().is_none() && !recording.get() {
+            return view().into_element();
+        }
+        let target = element_ref();
+        let on_key = on_key.clone();
+        let el = view()
+            .absolute()
+            .w(px(1.0))
+            .h(px(1.0))
+            .opacity(0.0)
+            .focusable(true)
+            .label("录制快捷键")
+            .element_ref(&target)
+            .capture_keys(KeyCapture::All)
+            .on_key_down(move |e: &KeyEvent| on_key(e))
+            .into_element();
+        // 挂上之后再聚焦：句柄在元素落地前收到的命令不生效。
+        spawn(async move {
+            next_frame().await;
+            target.focus();
         });
-    }
+        el
+    })
+    .into_element()
 }
 
 /// 一个动作的键位胶囊：常态显示当前键位（未绑定为「未绑定」）；捕获中
@@ -320,22 +342,14 @@ pub(crate) fn shortcuts_section() -> View {
         query.get();
         capture.set(None);
     });
-    // 捕获态的临时绑定挂在读 `capture` 的 dynamic 里：进出捕获换
-    // owner，注册 / 注销都由生命周期收尾。捕获中整个界面只剩这组键。
-    let recorder = dynamic(move || {
-        if capture.get().is_some() {
-            capture_keys(capture);
-        }
-        view()
+    // 「按键搜索」录制态存在 store 上：录制中 `keys_suspended` 停用全部快捷键。
+    let recording = s.key_recording;
+    // 离开本节（关设置、换分类）时收起捕获 / 录制，不然快捷键一直停用。
+    cleanup(move || {
+        capture.set(None);
+        recording.set(false);
     });
-    // 「按键搜索」录制态同理：录制中只剩这组键，按下的组合键写回搜索框。
-    let recording = signal(false);
-    let key_recorder = dynamic(move || {
-        if recording.get() {
-            record_search_keys(recording, query);
-        }
-        view()
-    });
+    let recorder = key_recorder(capture, recording, query);
     let dirty = move || {
         s.global_keybinds
             .with(|m| m.values().any(|k| !k.is_empty()))
@@ -449,5 +463,4 @@ pub(crate) fn shortcuts_section() -> View {
         )
         .child(list)
         .child(recorder)
-        .child(key_recorder)
 }

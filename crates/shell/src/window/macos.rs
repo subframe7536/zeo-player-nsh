@@ -1,33 +1,10 @@
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use dispatch2::DispatchQueue;
+use objc2::MainThreadMarker;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, Bool, Imp, Sel};
-use objc2::{MainThreadMarker, sel};
+use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSApplication, NSWindow};
-
-/// NSH 原来的 `applicationShouldHandleReopen:hasVisibleWindows:` 实现。
-static ORIGINAL_REOPEN: OnceLock<usize> = OnceLock::new();
-
-type ShouldReopen = unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject, Bool) -> Bool;
-
-/// 点 Dock 图标：NSH 把窗口提到前面，这里先告诉界面窗口回来了。
-unsafe extern "C-unwind" fn should_reopen(
-    this: *mut AnyObject,
-    cmd: Sel,
-    app: *mut AnyObject,
-    visible: Bool,
-) -> Bool {
-    super::shown_by_system();
-    match ORIGINAL_REOPEN.get() {
-        // SAFETY: 这是被替换下来的同签名实现。
-        Some(&imp) => unsafe {
-            std::mem::transmute::<usize, ShouldReopen>(imp)(this, cmd, app, visible)
-        },
-        None => Bool::NO,
-    }
-}
 
 thread_local! {
     /// 主窗口，挂钩时记下。隐藏（`orderOut`）后它的 `canBecomeMainWindow`
@@ -49,8 +26,8 @@ fn main_window(mtm: MainThreadMarker) -> Option<Retained<NSWindow>> {
     Some(window)
 }
 
-/// 挂钩 NSH 的共享代理（Dock 重开、单实例通知）；窗口还没建好时稍
-/// 后重试。
+/// 挂钩 NSH 的共享代理（单实例通知）；窗口还没建好时稍后重试。Dock
+/// 重开由 NSH 自己显示窗口，界面侧从窗口状态的 `visible` 跳变得知。
 fn hook(attempt: u32) {
     DispatchQueue::main().exec_async(move || {
         let Some(mtm) = MainThreadMarker::new() else {
@@ -72,16 +49,6 @@ fn hook(attempt: u32) {
         // 「显示已有窗口」分布式通知：第二份实例 post 时这个对象响应
         // `zeoPlayerShow:`（`single_instance` 里说明）。
         crate::single_instance::observe(object);
-        let class = object.class();
-        // 应用代理与窗口代理是同一个对象（NSH 的 `Delegate`）。
-        if let Some(method) =
-            class.instance_method(sel!(applicationShouldHandleReopen:hasVisibleWindows:))
-        {
-            // SAFETY: 签名与 NSApplicationDelegate 的同名方法相同。
-            let imp: Imp = unsafe { std::mem::transmute::<ShouldReopen, Imp>(should_reopen) };
-            let old = unsafe { method.set_implementation(imp) };
-            let _ = ORIGINAL_REOPEN.set(old as usize);
-        }
     });
 }
 

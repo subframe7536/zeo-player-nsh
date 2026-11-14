@@ -345,3 +345,106 @@ fn lyrics_offset_global_saves() {
     assert!(saved(0), "结束时恢复 0: {:?}", saved_global_offset());
     zeo_player::engine::Player::global().pause();
 }
+
+fn saved_keybind(action: &str) -> Option<String> {
+    zeo_player::config::library_store()
+        .keybinds()
+        .get(action)
+        .cloned()
+}
+
+/// 等后台写入的快捷键覆盖落到 `want`。
+fn wait_keybind(app: &mut Headless, action: &str, want: Option<&str>) {
+    for _ in 0..40 {
+        if saved_keybind(action).as_deref() == want {
+            return;
+        }
+        app.wait(Duration::from_millis(50)).unwrap();
+    }
+    assert_eq!(saved_keybind(action).as_deref(), want, "{action}");
+}
+
+/// 录键视图挂上后下一帧才取得焦点（`shortcuts.rs` 的 `key_recorder`）。
+fn settle_focus(app: &mut Headless) {
+    app.wait(Duration::from_millis(100)).unwrap();
+}
+
+/// 设置 →「快捷键」：点键位胶囊进入捕获，下一个按键经录键视图的
+/// `on_key_down` 录成新键位——录键期间窗口快捷键整体停用，按 ⌘K / Ctrl+K
+/// 不弹命令面板而是被录下；Esc 取消不改、单按 Backspace 解绑。「按键
+/// 搜索」录下的键以带引号的平台标签写回搜索框。
+#[test]
+fn shortcut_capture_records_keys_through_key_down() {
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            zeo_player::config::library_store().set_keybind("nav_metadata", None);
+        }
+    }
+    // 无头驱动只在 Linux 环境递送 `on_key_down`；`mod` 在那里是 Ctrl。
+    let _guard = play_lock();
+    let mut app = start_on(Os::Linux, 1200.0, 800.0);
+    let _restore = Restore;
+    zeo_player::config::library_store().set_keybind("nav_metadata", None);
+    app.press("设置").unwrap();
+    app.wait_for("id:settings-content >> label:外观").unwrap();
+    app.press("id:settings-nav >> role:button[快捷键]").unwrap();
+    // 同名动作也在「全局快捷键」组里，窗口内的排在前面。
+    let pill = "label:重绑「页面：元数据」 >> nth=0";
+    app.wait_for(pill).unwrap();
+
+    // 已绑给命令面板的键也被录下，而不是触发命令面板。
+    app.press(pill).unwrap();
+    app.wait_for("按下新快捷键…").unwrap();
+    settle_focus(&mut app);
+    app.press_key("mod+k").unwrap();
+    app.wait_for_gone("按下新快捷键…", Duration::from_secs(2))
+        .unwrap();
+    assert!(!has(&app, "导航"), "录键时不该弹命令面板");
+    wait_keybind(&mut app, "nav_metadata", Some("mod+k"));
+
+    // Esc 取消：不改。
+    app.press(pill).unwrap();
+    app.wait_for("按下新快捷键…").unwrap();
+    settle_focus(&mut app);
+    app.press_key("escape").unwrap();
+    app.wait_for_gone("按下新快捷键…", Duration::from_secs(2))
+        .unwrap();
+    assert!(has(&app, "还原默认"), "Esc 只取消录键，不关设置");
+    app.wait(Duration::from_millis(200)).unwrap();
+    assert_eq!(saved_keybind("nav_metadata").as_deref(), Some("mod+k"));
+
+    // 单按 Backspace：解绑。
+    app.press(pill).unwrap();
+    app.wait_for("按下新快捷键…").unwrap();
+    settle_focus(&mut app);
+    app.press_key("backspace").unwrap();
+    app.wait_for_gone("按下新快捷键…", Duration::from_secs(2))
+        .unwrap();
+    wait_keybind(&mut app, "nav_metadata", Some(""));
+
+    // 「按键搜索」：录下的组合键写回搜索框。
+    app.press("label:按键搜索").unwrap();
+    settle_focus(&mut app);
+    app.press_key("mod+shift+y").unwrap();
+    app.wait(Duration::from_millis(200)).unwrap();
+    let query = app
+        .screen()
+        .input_text("id:settings-content >> label:搜索设置")
+        .unwrap()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        query.starts_with('"') && query.ends_with('"') && query.to_lowercase().contains('y'),
+        "{query:?}"
+    );
+
+    // 录完快捷键恢复：⌘K / Ctrl+K 又能开命令面板（设置关掉后）。
+    app.press("label:关闭设置").unwrap();
+    app.wait_for_gone("label:关闭设置", Duration::from_secs(2))
+        .unwrap();
+    app.wait(Duration::from_millis(300)).unwrap();
+    app.press_key("mod+k").unwrap();
+    app.wait_for("导航").unwrap();
+    app.press_key("escape").unwrap();
+}

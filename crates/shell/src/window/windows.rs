@@ -24,8 +24,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     PostThreadMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME,
     SW_RESTORE, SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW,
     ShowWindowAsync, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_ACTIVATE, WM_CLOSE,
-    WM_DESTROY, WM_KEYDOWN, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SHOWWINDOW,
-    WM_SYSCOMMAND, WM_SYSKEYDOWN, WNDPROC, WS_CAPTION, WS_THICKFRAME,
+    WM_DESTROY, WM_KEYDOWN, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SYSCOMMAND,
+    WM_SYSKEYDOWN, WNDPROC, WS_CAPTION, WS_THICKFRAME,
 };
 
 pub static HWND_VALUE: OnceLock<u64> = OnceLock::new();
@@ -108,8 +108,6 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
                 unsafe { PostThreadMessageW(tid, WM_REHOOK_MEDIA, 0, 0) };
             }
         }
-        // 隐藏后被重新显示（任务栏、Alt+Tab、`show`）。
-        WM_SHOWWINDOW if w != 0 => super::shown_by_system(),
         // 标题栏由应用自己画（NSH 的标题栏样式为 Default，不再处理这些）。
         WM_NCCALCSIZE if w != 0 && has_style(hwnd, WS_CAPTION) => {
             // SAFETY: w 非 0 时 l 指向本消息的 NCCALCSIZE_PARAMS。

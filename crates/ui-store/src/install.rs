@@ -116,6 +116,7 @@ pub fn install() -> Store {
         keybinds: signal(Same(Arc::new(keybinds_map()))),
         global_keybinds: signal(Same(Arc::new(global_keybinds_map()))),
         key_capture: signal(None),
+        key_recording: signal(false),
     };
     STORE.with(|cell| cell.set(Some(s)));
     let (tx, posted) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
@@ -239,12 +240,21 @@ pub fn install() -> Store {
     // 还原不会被看到。`placed`：`None` 还没还原，`Some(saved)` 已还原。
     let win = nsh_core::element::desktop::main_window();
     let placed = stored(None::<Option<nsh_core::desktop::WindowPlacement>>);
+    // 上次上报的可见性：藏在托盘时窗口由系统重新显示（macOS 点 Dock、
+    // Windows 任务栏 / Alt+Tab，NSH 自己把窗口提到前面）只表现为 visible
+    // 由假变真——按这个跳变通知 zeo-shell，界面重新装上。只认跳变：
+    // `hide()` 先记隐藏再藏窗，期间仍报 visible 的那几次不能算重新显示。
+    let was_visible = stored(false);
     effect({
         let win = win.clone();
         move || {
             let Some(state) = win.state() else {
                 return;
             };
+            let was = was_visible.replace(state.visible);
+            if state.visible && !was {
+                zeo_shell::shown_by_system();
+            }
             if placed.with(|p| p.is_none()) {
                 let saved = zeo_shell::remembered()
                     .then(|| library_store().window_placement())
@@ -288,7 +298,7 @@ pub fn install() -> Store {
     // Windows 走低级键盘钩子（`zeo-shell` 的 media_hook_thread），macOS
     // 走系统媒体会话，不在此列。
     effect(move || {
-        if s.key_capture.get().is_some() {
+        if keys_suspended() {
             return;
         }
         let conflicted = global_conflicted_actions();

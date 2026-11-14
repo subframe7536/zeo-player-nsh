@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use super::*;
 
 pub use zeo_keybinds::{
-    BindScope, GLOBAL_ACTIONS, KeyAction, Keybinds, capture_candidates, effective_global_keybinds,
-    effective_keybinds,
+    BindScope, GLOBAL_ACTIONS, KeyAction, Keybinds, capture_candidates, capture_table,
+    effective_global_keybinds, effective_keybinds, stroke_of_key_event,
 };
 
 /// 当前生效键位表（配置实时值）。
@@ -137,7 +137,20 @@ pub fn set_global_keybind(action: KeyAction, key: Option<String>) {
 /// 放在读 `s.keybinds` 的 `dynamic` 里调用——读即订阅，换绑自动重绑。
 /// 键位为空（用户解绑）或与其他动作同键（冲突）时不绑——冲突中双方
 /// 都不能触发，改掉任一方后剩余方自动恢复。
+/// 设置页正在捕获新键位或「按键搜索」录制中：应用的快捷键（窗口内、
+/// 全屏页、全局）此时全部停用——NSH 的键位表先于视图的 `on_key_down`，
+/// 不停用的话按到已绑的键会触发动作而不是被录下。读信号，响应式。
+pub fn keys_suspended() -> bool {
+    let s = store();
+    s.key_capture.with(Option::is_some) || s.key_recording.get()
+}
+
 pub fn bind_key(action: KeyAction, run: impl Fn() + 'static) {
+    // 设置页在录键：键位表里的绑定先于视图的按键事件，录制期间一概不绑
+    // （调用方都在 dynamic 里，读这里的信号即随录制开合重绑）。
+    if keys_suspended() {
+        return;
+    }
     let key = key_of(action);
     if key.is_empty() || conflicted_actions().contains(&action) {
         return;

@@ -185,6 +185,9 @@ pub struct Store {
     /// 设置页「按下新键」捕获态（`Some` = 正在捕获）：全局快捷键此时
     /// 整体注销，按下的候选键不会被已注册的全局键吃掉。
     pub key_capture: Signal<Option<(zeo_keybinds::BindScope, KeyAction)>>,
+    /// 设置页「按键搜索」录制中：与 `key_capture` 一样停用全部快捷键
+    /// （见 [`crate::keys_suspended`]），按下的键交给录制视图。
+    pub key_recording: Signal<bool>,
 }
 
 pub use zeo_types::config::SidebarSection;

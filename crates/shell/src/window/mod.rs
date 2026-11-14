@@ -13,9 +13,10 @@
 //!
 //! 余下的平台代码：
 //!
-//! - macOS：Dock 图标「重新打开」还靠替换 `applicationShouldHandleReopen:`
-//!   的实现（NSH 不上报这个事件）；显示 / 隐藏用 `makeKeyAndOrderFront` /
-//!   `orderOut`；托盘创建也挂在找到主窗口时。全部在主线程（GCD 主队列）。
+//! - macOS：找到主窗口后挂单实例的「显示已有窗口」通知（主线程，GCD
+//!   主队列）。Dock 图标「重新打开」与 Windows 任务栏 / Alt+Tab 都由 NSH
+//!   自己显示窗口，界面侧订阅窗口状态、`visible` 由假变真时调
+//!   [`shown_by_system`]。
 //! - Windows：子类化 NSH 窗口（类名 `NshWindow`）的窗口过程，接管去掉系统
 //!   标题栏的 `WM_NCCALCSIZE` 与顶边缩放的 `WM_NCHITTEST`（窗口按钮由应用
 //!   画，NSH 的标题栏样式切到 Default 后就不画它自己的了），窗口销毁后
@@ -95,13 +96,14 @@ pub(crate) fn notify() {
 }
 
 /// 窗口被系统重新显示（macOS 点 Dock 图标，Windows 任务栏 / Alt+Tab）而
-/// 不是走 [`show`]：同样算显示，界面重新装上（否则窗口是空的）。系统
-/// 事件不带实例归属，全清（真实进程只有一个实例）。
-fn shown_by_system() {
+/// 不是走 [`show`]：同样算显示，界面重新装上（否则窗口是空的）。由界面
+/// 侧订阅 NSH 窗口状态、在 `visible` 由假变真时调（`zeo-ui-store` 的
+/// `install`），按调用线程的实例清——并行宿主里别的实例的隐藏态不动。
+pub fn shown_by_system() {
     let mut hidden = HIDDEN.lock().unwrap();
-    if !hidden.is_empty() {
-        hidden.clear();
-        drop(hidden);
+    let removed = hidden.remove(&instance()) | hidden.remove(&0);
+    drop(hidden);
+    if removed {
         notify();
     }
 }
@@ -168,6 +170,15 @@ pub fn close_requested() -> bool {
             false
         }
     }
+}
+
+/// 用户要求退出（⌘Q / Ctrl+Q、应用菜单「退出」、macOS Dock 菜单「退出」；
+/// NSH 的 `on_quit_request`）：窗口在时与点关闭同样按「关闭窗口」设置
+/// 询问 / 最小化到托盘 / 退出；窗口已藏到托盘时直接退出——没有窗口可藏，
+/// 这时的退出请求只能是真想退（Dock 菜单）。系统关机 / 注销不经这里。
+/// 返回 true 表示照常退出。
+pub fn quit_requested() -> bool {
+    is_hidden() || close_requested()
 }
 
 /// 测量脚本用：像点了窗口的关闭按钮（主线程上，不经 NSH 的 `performClose`：
