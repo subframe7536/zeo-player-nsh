@@ -346,7 +346,10 @@ fn sidebar_section_select_switches_and_persists() {
 /// 行右键里有「重命名文件…」。语料是共享的，只动自己建的文件夹。
 #[test]
 fn folders_page_tree_ops() {
-    let mut app = start(1200.0, 800.0);
+    // 删除 / 改名文件夹会按本用例自己的内存副本整表重写共享的
+    // playlists.json，并行跑会盖掉别的用例刚写的歌单——全程持锁串行。
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
