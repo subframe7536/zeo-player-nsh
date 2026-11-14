@@ -8,6 +8,8 @@ Workarounds live in the app; don't patch NSH crates locally. When a limitation i
 
 同日再按 nightly `61a11d5`（0edac01 + 79 个提交）复核：**#1816 已合入**，「缩放 ≠ 100% 时 input 不显示文字」条目随之撤下（修复即本仓库上报的那行 `translation(-ox/s, -oy/s)`，此前已本地验证过）。其余条目源码级未变。顺带上游改善、与条目无关但与体验相关：#1772 macOS 隐藏全屏窗口前先退出全屏（利好藏托盘）、#1683 同排 tooltip 连续命中不再等待延迟、#1705 非整数缩放下带内边距的单行标签不再被折行、#1474 `items-baseline` 行改按首行基线对齐、#1813 无头测试宿主不再抢用户焦点。
 
+2026-11-14 再按 nightly `2d3f04b`（`61a11d5` + 116 个提交；基线版本号仍是 0.5.0，与 stable v0.5.1 分叉但领先 222 个提交，故 `update-nsh.sh` 需 `NSH_CHANNEL=nightly` 才不被误判回退到 stable）复核：**#1976 已合入**（Windows 多行 input 先用滚轮滚自己的文本、到头再交给外层滚动区），「多行 input 没有滚轮滚动通路」条目随之撤下，元数据面板的 Windows 专用 `scroll()` 包裹（`rows.rs` 的 `multi_input`）已删，两端统一用限高的单个 `input_field`——Windows 真机上需确认滚轮行为。新增 #1590 桌面硬件按键事件（`on_key` 保留键校验未见变化，「保留键」条保留）；#1938 让锚定弹层在放置区域内排版，不涉及 Select cover 重采，对应条目保留；#1881 / #1980 等与条目无关。其余条目源码级未变。
+
 ## 测试驱动（nsh-testing）
 
 - **无头 `right_click` 只发 `ContextMenu` + `MouseUp`，没有次级按压。** 0.5.0 起真机上次级点击已纳入 PressOutside（#1544），但无头驱动的 `rightClick` 不产生 `MouseDown`——开着的弹层收不到 PressOutside，「右键点空处关菜单」在无头里测不出来；测试用主按压覆盖同一条关闭路径（`tests/ui/views.rs`）。希望无头 `right_click` 补发次级按下 / 抬起，让 PressOutside 的次级路径可测。
@@ -35,7 +37,6 @@ Workarounds live in the app; don't patch NSH crates locally. When a limitation i
 - **局部重绘下背景模糊留下亮块。** 局部重绘只清空并重画变化区域，而 `backdropFilter` 按模糊半径多取一圈上一帧的像素（那里已盖着播放条自己的半透明底色），于是每次重绘都留下一块更亮的直角矩形。Windows 上播放条不加背景模糊，用不透明 card 色（`ui_store::theme::bar`、`ui-frame` 的 `player_bar`）。
 - **`window()` 报的是物理像素、渲染却按系统缩放放大（175% DPI 实测，待实机复核）。** 本机 168 DPI（175%）下 `GetClientRect`=1486 px，`window()` 也报 1486 pt（正确逻辑宽应约 849 pt），而绘制出来的 232 pt 侧栏实测约 465 px（≈2 px/pt）——布局按物理像素算、绘制按缩放点算，两边不一致，整页向右溢出约一倍，宽度断点等 `window()` 消费方全部失准。与具体页面无关（每个界面都放大），应用侧无法绕开；先记症状与测量口径，待上游统一 `env.window` / surface scale 的口径后再复核。（0.5.0 复核：`Surface::resized` 仍按 `pixels / scale` 换算 `env.window`——症状机制与代码表象对不上，需实机复核是 DPI 感知时序还是别的路径。）
 - **隐藏窗口上的 `set_placement` 丢掉最大化 / 全屏。** `nsh-platform-windows` 的 `window_state::set_placement` 对不可见窗口把 `showCmd` 设成 `SW_HIDE`，只记下普通位置，之后 `show()` 按普通窗口显示（`main_opening_mode` 也被 `SetPlacement` 清掉）。启动时主窗口隐藏着建好（nsh.json `window.defaultVisible: false`）再还原位置，所以显示之后要再套一次 placement（`ui-store/src/install.rs` 的 `reveal_when_ready`），最大化的用户会看到一次最大化动画。上游可以在隐藏时把模式记进 `main_opening_mode`，留到 `show_main` 再用。
-- **多行 input 没有滚轮滚动通路。** `nsh-platform-windows` 的 `text_input::wheel`（`EM_SETSCROLLPOS` 滚 RichEdit 文本）写了却没有任何调用方（`dead_code` 保留，注释自称留给 `crate::input` 的滚轮路由）；滚轮路由只认 `ViewKind::Scroll`，落在 input 上的滚轮直接落到外层滚动区，输入框内部的 `ES_AUTOVSCROLL` 只有键盘 / 光标能驱动。且任何 `on_wheel` 监听都吞不下这个轮（`wheel_listener` 把 `ViewKind::Input` 算作自滚件，`takes` 恒假 → 外层必滚）。应用在元数据面板把多行输入设 `h(auto)` 随内容长高、外套限高 `scroll()` 滚整个元素（`crates/ui-view-metadata/src/panel/rows.rs` 的 `multi_input`，仅 Windows；macOS 保持输入框自身限高内部滚动），滚轮 / 滚动条 / 拖滚动全有；代价是光标在视口外续输时不跟随。已提 #1945 请上游把滚轮接到 input 的内部滚动上（修复后可恢复单个 `input_field`）。
 
 ## 第三方依赖
 

@@ -229,12 +229,11 @@ pub(crate) fn multi_row(
         }))
 }
 
-/// 多行输入本体（macOS）：输入框自身限高、内部原生滚动。文本超过上限时
+/// 多行输入本体：输入框自身限高、内部原生滚动。文本超过上限时
 /// 锁成固定高：h(auto) 的输入框 intrinsic 高度随内容长，max_h 只裁元素框，
 /// 宿主编辑器仍按内容高开视口——内部永远没有可滚范围（overflow_hidden 再
 /// 裁一下只是看不见溢出）。固定到 max_height 后编辑器视口被框住，原生滚动
 /// 恢复；未超限时仍 auto 随文生长。22 = py(10)×2 + border_1×2。
-#[cfg(not(target_os = "windows"))]
 fn multi_input(
     label: &'static str,
     field: TagField,
@@ -270,62 +269,6 @@ fn multi_input(
         })
         .min_h(px(min_height))
         .max_h(px(max_height))
-        .into_element()
-}
-
-/// 多行输入本体（Windows）：宿主编辑器（无窗口 RichEdit）没有滚轮通路：
-/// 上游 `nsh-platform-windows` 的 `text_input::wheel` 存在但没有调用方，
-/// 限高视口换来的内部滚动只能靠键盘走（见 upstream.md）。改成输入框
-/// h(auto) 随内容长高、外面套 max_height 的 scroll 滚整个元素——滚轮 /
-/// 滚动条 / 拖滚动都按普通滚动区来，滚到界自然落回面板。字段外观（边框、
-/// 聚焦 ring）搬到 scroll 上，输入框自身不画 chrome。编辑器视口随全文高、
-/// 不做内部滚动，光标滚出视口后续输不跟随（原限高方案滚轮本来就不通）。
-#[cfg(target_os = "windows")]
-fn multi_input(
-    label: &'static str,
-    field: TagField,
-    draft: Signal<SingleDraft>,
-    initial: String,
-    min_height: f32,
-    max_height: f32,
-) -> AnyElement {
-    let t = nsh_base::theme();
-    let (input_c, ring) = (t.input, t.ring);
-    scroll()
-        .flex_1()
-        .min_w(px(0.0))
-        .min_h(px(min_height))
-        .max_h(px(max_height))
-        .rounded(px(RADIUS_MD))
-        .border_1()
-        .border_color(input_c)
-        .shadow_xs()
-        .bg(t.card)
-        .focus_within(move |st| {
-            st.border_color(ring)
-                .ring(px(3.0))
-                .ring_color(ring.opacity(0.5))
-        })
-        .child(
-            nsh_base::input()
-                .w(relative(1.0))
-                .min_h(px(min_height - 2.0))
-                .px(px(8.0))
-                .py(px(10.0))
-                .multiline(true)
-                .scrollbar(false)
-                .text_size(px(14.0))
-                .text_color(fg())
-                .label(label)
-                .default_value(initial)
-                .readonly(move || draft.with(|d| d.saving))
-                .on_change(move |t: &str| {
-                    draft.update(|d| {
-                        d.values.insert(field, t.to_owned());
-                        d.saved = false;
-                    })
-                }),
-        )
         .into_element()
 }
 

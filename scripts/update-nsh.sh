@@ -6,6 +6,8 @@
 # 频道选择：先 `nsh update nightly`；若 nightly 的基线版本落后于最新 stable
 # tag（nightly 冻结在发布点之前、没跟上），改 `nsh update stable`。
 # 未安装 nsh 时用官方脚本装 nightly，装完仍走同一套频道判断。
+# nightly 的基线版本号可能低于 stable（发布分支分叉，nightly 实际领先），
+# 此时设 NSH_CHANNEL=nightly 跳过回退判断。
 #
 # nightly 不发 crates.io，依赖走 git rev；stable 走 crates.io 版本号。
 # 最后同步 Cargo.toml 依赖说明符、AGENTS.md 的 nsh-pin 段、Cargo.lock，
@@ -50,7 +52,7 @@ latest_stable="$(git ls-remote --tags "$GIT_URL" | sed -nE 's|.*refs/tags/v([0-9
 
 echo "==> nsh update nightly"
 nsh update nightly
-if [ -n "$latest_stable" ] && version_lt "$(cli_version)" "$latest_stable"; then
+if [ "${NSH_CHANNEL:-}" != "nightly" ] && [ -n "$latest_stable" ] && version_lt "$(cli_version)" "$latest_stable"; then
   echo "==> nightly 停在 $(cli_version)，落后 stable v$latest_stable，改跟 stable"
   nsh update stable
 fi
