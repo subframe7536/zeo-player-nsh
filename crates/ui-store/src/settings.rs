@@ -104,6 +104,12 @@ pub fn finish_welcome() {
     std::thread::spawn(move || library_store().set_welcome_done(true));
 }
 
+/// 「元数据」表格的显示列（立即生效并保存）。
+pub fn set_metadata_columns(cols: std::collections::BTreeSet<String>) {
+    update_config(|c| c.metadata_columns = Some(cols.clone()));
+    std::thread::spawn(move || library_store().set_metadata_columns(cols));
+}
+
 /// 侧栏下半部当前显示的视图（歌单 / 标签 / 文件夹），立即生效并保存。
 pub fn set_sidebar_section(section: SidebarSection) {
     let s = store();

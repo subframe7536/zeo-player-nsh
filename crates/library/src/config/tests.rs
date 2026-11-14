@@ -160,6 +160,18 @@ fn welcome_done_defaults_to_false_and_roundtrips() {
 }
 
 #[test]
+fn metadata_columns_default_to_none_and_roundtrip() {
+    let old: LibraryConfig = serde_json::from_str(r#"{"roots":[]}"#).unwrap();
+    assert!(old.metadata_columns.is_none(), "旧文件没有此字段：用默认列");
+    let json = serde_json::to_string(&old).unwrap();
+    assert!(!json.contains("metadata_columns"), "{json}");
+    let saved: LibraryConfig =
+        serde_json::from_str(r#"{"roots":[],"metadata_columns":["title","artist"]}"#).unwrap();
+    let cols = saved.metadata_columns.as_ref().unwrap();
+    assert!(cols.contains("title") && cols.contains("artist") && cols.len() == 2);
+}
+
+#[test]
 fn theme_color_serde_roundtrip() {
     assert_eq!(
         serde_json::from_str::<ThemeColor>(r#""neutral""#).unwrap(),

@@ -43,8 +43,25 @@ pub fn page() -> View {
     let filter = signal(String::new());
     let sort = signal(Option::<DataTableSort>::None);
     let rename_open = signal(false);
-    let visible_cols = signal(default_columns());
+    let visible_cols = signal(untracked(|| {
+        s.library
+            .with(|l| l.config.metadata_columns.clone())
+            .map(|saved| {
+                let known = all_columns();
+                saved.into_iter().filter(|k| known.contains(k)).collect()
+            })
+            .unwrap_or_else(default_columns)
+    }));
     let col_widths = signal(HashMap::<String, f32>::new());
+    // 列选择变化即落盘（首轮是读出来的值本身，跳过）。
+    let first = std::cell::Cell::new(true);
+    effect(move || {
+        let cols = visible_cols.get();
+        if first.replace(false) {
+            return;
+        }
+        zeo_ui_store::set_metadata_columns(cols);
+    });
 
     // 同步修剪：清掉离开曲库的路径与选中集。曲目元数据直接由 SQLite / 索引条目供给，
     // 无需后台再逐曲扫描磁盘标签。

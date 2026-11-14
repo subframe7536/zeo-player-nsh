@@ -152,6 +152,11 @@ impl LibraryStore {
         self.update_config(|c| c.welcome_done = done);
     }
 
+    /// 「元数据」表格显示的列（持久化）。
+    pub fn set_metadata_columns(&self, cols: std::collections::BTreeSet<String>) {
+        self.update_config(|c| c.metadata_columns = Some(cols));
+    }
+
     pub fn set_delete_permanently(&self, on: bool) {
         self.update_config(|c| c.delete_permanently = on);
     }

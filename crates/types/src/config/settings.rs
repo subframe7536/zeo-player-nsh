@@ -107,6 +107,9 @@ pub struct LibraryConfig {
     /// 界面侧另有「已有文件夹的老用户不弹」的判断，见 `Store::welcome`）。
     #[serde(default)]
     pub welcome_done: bool,
+    /// 「元数据」表格「显示列」选中的列 key；`None` = 默认列（旧版文件没有此字段）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_columns: Option<std::collections::BTreeSet<String>>,
 }
 
 fn default_fade_ms() -> u32 {
@@ -168,6 +171,7 @@ impl Default for LibraryConfig {
             keybinds: std::collections::BTreeMap::new(),
             global_keybinds: std::collections::BTreeMap::new(),
             welcome_done: false,
+            metadata_columns: None,
         }
     }
 }
