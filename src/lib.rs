@@ -45,19 +45,13 @@ pub fn App() -> impl IntoElement {
         px(zeo_shell::MIN_HEIGHT),
     )));
     // 点关闭不直接关窗：先到 `close_requested`（询问 / 最小化到托盘时窗口
-    // 留着），真要退出经 `zeo_shell::quit`（`desktop::quit` 不再回到这里，
-    // 也不再触发下面的退出请求）。
+    // 留着），真要退出经 `zeo_shell::quit`（`desktop::quit` 不再回到这里）。
+    // ⌘Q / Ctrl+Q / 退出菜单平台直接退、不经 `close_requested`——0.5.x 没
+    // 有 `on_quit_request`（#1768 在 main / 0.6，见 upstream.md）。
     attributes.close_on_press = Some(false);
     current_window().set(attributes);
     main_window().on_close_press(|_| {
         if zeo_shell::close_requested() {
-            zeo_shell::quit();
-        }
-    });
-    // ⌘Q / Ctrl+Q / 退出菜单：挂着监听时平台不直接退，交给「关闭窗口」设置
-    // （窗口已藏到托盘时直接退，见 `quit_requested`）。
-    nsh_core::element::desktop::on_quit_request(|| {
-        if zeo_shell::quit_requested() {
             zeo_shell::quit();
         }
     });

@@ -138,15 +138,16 @@ pub fn set_global_keybind(action: KeyAction, key: Option<String>) {
 /// 键位为空（用户解绑）或与其他动作同键（冲突）时不绑——冲突中双方
 /// 都不能触发，改掉任一方后剩余方自动恢复。
 /// 设置页正在捕获新键位或「按键搜索」录制中：应用的快捷键（窗口内、
-/// 全屏页、全局）此时全部停用——NSH 的键位表先于视图的 `on_key_down`，
-/// 不停用的话按到已绑的键会触发动作而不是被录下。读信号，响应式。
+/// 全屏页、全局）此时全部停用——录键的临时 `on_key` 绑定虽是「最新
+/// 优先」，停用能免掉录键开合时的大批重绑，平台级全局键也要整体注
+/// 销才吃不到候选键。读信号，响应式。
 pub fn keys_suspended() -> bool {
     let s = store();
     s.key_capture.with(Option::is_some) || s.key_recording.get()
 }
 
 pub fn bind_key(action: KeyAction, run: impl Fn() + 'static) {
-    // 设置页在录键：键位表里的绑定先于视图的按键事件，录制期间一概不绑
+    // 设置页在录键：录制期间一概不绑，按下的键只被录键的临时绑定接走
     // （调用方都在 dynamic 里，读这里的信号即随录制开合重绑）。
     if keys_suspended() {
         return;

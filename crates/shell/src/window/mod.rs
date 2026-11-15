@@ -172,15 +172,6 @@ pub fn close_requested() -> bool {
     }
 }
 
-/// 用户要求退出（⌘Q / Ctrl+Q、应用菜单「退出」、macOS Dock 菜单「退出」；
-/// NSH 的 `on_quit_request`）：窗口在时与点关闭同样按「关闭窗口」设置
-/// 询问 / 最小化到托盘 / 退出；窗口已藏到托盘时直接退出——没有窗口可藏，
-/// 这时的退出请求只能是真想退（Dock 菜单）。系统关机 / 注销不经这里。
-/// 返回 true 表示照常退出。
-pub fn quit_requested() -> bool {
-    is_hidden() || close_requested()
-}
-
 /// 测量脚本用：像点了窗口的关闭按钮（主线程上，不经 NSH 的 `performClose`：
 /// 那会在 NSH 应用界面变更的途中跑嵌套的事件循环）。
 #[cfg(any(debug_assertions, test))]

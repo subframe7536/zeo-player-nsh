@@ -1395,15 +1395,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_filter"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "900d271a03799a1ee8d1ca9b19893b48ca674a9284fefcfb85f05e74ed314217"
-dependencies = [
- "log",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2809,8 +2800,9 @@ dependencies = [
 
 [[package]]
 name = "nsh-base"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=2d3f04b42777f247de2ba0155c651f555c1e1dc9#2d3f04b42777f247de2ba0155c651f555c1e1dc9"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cadcf71a3a758271ee9ab5d4768de9054d1a97091eece01fa1a174b394ef53e"
 dependencies = [
  "chrono",
  "html5ever",
@@ -2833,8 +2825,9 @@ dependencies = [
 
 [[package]]
 name = "nsh-core"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=2d3f04b42777f247de2ba0155c651f555c1e1dc9#2d3f04b42777f247de2ba0155c651f555c1e1dc9"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7283cdcd0a6703ecdcd2fc9f621705a3f4efbd3c88376219a6194a2f126b7573"
 dependencies = [
  "cap-std",
  "crc32fast",
@@ -2865,7 +2858,6 @@ dependencies = [
  "ttf-parser",
  "unicode-linebreak",
  "unicode-properties",
- "ureq",
  "url",
  "webpki-roots 1.0.11",
  "windows-sys 0.61.2",
@@ -2874,11 +2866,11 @@ dependencies = [
 
 [[package]]
 name = "nsh-engine"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=2d3f04b42777f247de2ba0155c651f555c1e1dc9#2d3f04b42777f247de2ba0155c651f555c1e1dc9"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24a7d05151d74e2c1c24800c009016ea17d82268c5ccb821118a06188456db89"
 dependencies = [
  "crossbeam-channel",
- "env_filter",
  "libc",
  "log",
  "nsh-core",
@@ -2890,19 +2882,20 @@ dependencies = [
  "rustc-hash 2.1.3",
  "serde_json",
  "tokio",
- "ureq",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "nsh-i18n"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=2d3f04b42777f247de2ba0155c651f555c1e1dc9#2d3f04b42777f247de2ba0155c651f555c1e1dc9"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8452a60c20035f87e8003cb6daf98c01294b8d886e9a90503669a0c67e19ca9"
 
 [[package]]
 name = "nsh-js"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=2d3f04b42777f247de2ba0155c651f555c1e1dc9#2d3f04b42777f247de2ba0155c651f555c1e1dc9"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b10bc11cccccc4dc5d1be5f853e927bb5326028f2bd53c5a805d42178cc0b2d8"
 dependencies = [
  "futures-util",
  "getrandom 0.4.3",
@@ -2924,8 +2917,9 @@ dependencies = [
 
 [[package]]
 name = "nsh-macros"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=2d3f04b42777f247de2ba0155c651f555c1e1dc9#2d3f04b42777f247de2ba0155c651f555c1e1dc9"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db9d9d6eaf1942d10ccb5e328cbff1aeb7f0e27f945d3d0226c5943714a2e50e"
 dependencies = [
  "imagesize 0.15.0",
  "proc-macro2",
@@ -2937,8 +2931,9 @@ dependencies = [
 
 [[package]]
 name = "nsh-package"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=2d3f04b42777f247de2ba0155c651f555c1e1dc9#2d3f04b42777f247de2ba0155c651f555c1e1dc9"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "612a2e3e9811992a5671443cbeeef7cfaac3e5530f5a6da40a8be19827215fda"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -2952,21 +2947,22 @@ dependencies = [
 
 [[package]]
 name = "nsh-testing"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=2d3f04b42777f247de2ba0155c651f555c1e1dc9#2d3f04b42777f247de2ba0155c651f555c1e1dc9"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef76812dd35b2020574b8ef0f74835984329e758c37ed1f6f40db5f11f1bb441"
 dependencies = [
  "crossbeam-channel",
  "log",
  "nsh-core",
  "nsh-engine",
  "regex",
- "url",
 ]
 
 [[package]]
 name = "nsh-updater"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=2d3f04b42777f247de2ba0155c651f555c1e1dc9#2d3f04b42777f247de2ba0155c651f555c1e1dc9"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a3598aa7721a64222c75d6c5948e720595d11916ec28a620e5ccec175221334"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -5612,7 +5608,6 @@ dependencies = [
  "percent-encoding",
  "rustls",
  "rustls-pki-types",
- "rustls-platform-verifier",
  "ureq-proto",
  "utf8-zero",
  "webpki-roots 1.0.11",
