@@ -17,10 +17,10 @@
 //!   主队列）。Dock 图标「重新打开」与 Windows 任务栏 / Alt+Tab 都由 NSH
 //!   自己显示窗口，界面侧订阅窗口状态、`visible` 由假变真时调
 //!   [`shown_by_system`]。
-//! - Windows：子类化 NSH 窗口（类名 `NshWindow`）的窗口过程，接管去掉系统
-//!   标题栏的 `WM_NCCALCSIZE` 与顶边缩放的 `WM_NCHITTEST`（窗口按钮由应用
-//!   画，NSH 的标题栏样式切到 Default 后就不画它自己的了），窗口销毁后
-//!   直接结束进程（见 `exit_now`）；托盘在自己的线程上，带消息循环。
+//! - Windows：子类化 NSH 窗口（类名 `NshWindow`）的窗口过程——激活时把
+//!   媒体键钩子挪回链首，窗口销毁后直接结束进程（见 `exit_now`），句柄
+//!   交给引擎的 SMTC 缩略图（`zeo_engine::set_hwnd`）；托盘在自己的
+//!   线程上，带消息循环。
 
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 
@@ -238,22 +238,12 @@ pub fn trim_memory() {
     platform::trim_memory();
 }
 
-/// Windows 的窗口句柄（系统媒体控件要用）；找到窗口前为 `None`。
-#[cfg(target_os = "windows")]
-pub fn hwnd() -> Option<u64> {
-    platform::HWND_VALUE.get().copied()
-}
-
 /// 进程内存采样，测量脚本用：macOS 是（物理足迹, 驻留大小），Windows
 /// 是（私有字节, 工作集）；其它平台未实现，返回 (0, 0)。
 #[cfg(any(debug_assertions, test))]
 pub fn memory_usage() -> (u64, u64) {
     platform::memory_usage()
 }
-
-/// Windows 的窗口按钮由应用画（`ui::caption`），这里是它们的操作与状态。
-#[cfg(target_os = "windows")]
-pub use platform::{caption_ready, close, is_full_screen, is_maximized, minimize, toggle_maximize};
 
 pub use crate::tray::{TrayAction, TrayState, take_tray_actions};
 

@@ -55,8 +55,6 @@ pub fn App() -> impl IntoElement {
             zeo_shell::quit();
         }
     });
-    #[cfg(target_os = "windows")]
-    zeo_ui_frame::caption::install();
 
     let full_open = signal(false);
     // 正在收起（淡出动画中）；收起途中再打开会取消它。
@@ -193,9 +191,6 @@ pub fn App() -> impl IntoElement {
             close_prompt,
         ))
         .child(keys());
-    // Windows 的窗口按钮在最上层（盖过全屏播放与弹窗，和系统按钮一样）。
-    #[cfg(target_os = "windows")]
-    let root = root.child(zeo_ui_frame::caption::buttons(move || full_open.get()));
     root
 }
 

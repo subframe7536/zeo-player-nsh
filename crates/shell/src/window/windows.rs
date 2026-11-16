@@ -1,34 +1,23 @@
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::time::Duration;
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows_sys::Win32::Graphics::Dwm::{
-    DWMWA_VISIBLE_FRAME_BORDER_THICKNESS, DwmGetWindowAttribute,
-};
-use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::Memory::{GetProcessHeap, HeapCompact};
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId, SetProcessWorkingSetSize,
     TerminateProcess,
 };
-use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, CallWindowProcW, DefWindowProcW, DispatchMessageW, EnumWindows, GW_OWNER,
-    GWL_STYLE, GWLP_WNDPROC, GetClassNameW, GetClientRect, GetMessageW, GetWindow,
-    GetWindowLongPtrW, GetWindowThreadProcessId, HTTOP, HTTOPLEFT, HTTOPRIGHT, IsIconic, IsZoomed,
-    KBDLLHOOKSTRUCT, MSG, NCCALCSIZE_PARAMS, PM_REMOVE, PeekMessageW, PostMessageW,
-    PostThreadMessageW, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SM_CXPADDEDBORDER, SM_CYFRAME,
-    SW_RESTORE, SW_SHOW, SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW,
-    ShowWindowAsync, TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_ACTIVATE, WM_CLOSE,
-    WM_DESTROY, WM_KEYDOWN, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_SYSCOMMAND,
-    WM_SYSKEYDOWN, WNDPROC, WS_CAPTION, WS_THICKFRAME,
+    CallNextHookEx, CallWindowProcW, DispatchMessageW, EnumWindows, GW_OWNER, GWLP_WNDPROC,
+    GetClassNameW, GetMessageW, GetWindow, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, MSG,
+    PostThreadMessageW, SetWindowLongPtrW, SetWindowsHookExW, TranslateMessage,
+    UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_ACTIVATE, WM_DESTROY, WM_KEYDOWN, WM_SYSKEYDOWN,
+    WNDPROC,
 };
 
-pub static HWND_VALUE: OnceLock<u64> = OnceLock::new();
 static OLD_PROC: AtomicIsize = AtomicIsize::new(0);
 
 /// 让钩子线程重挂低级键盘钩子（钩子链后装先调：窗口每次激活都
@@ -36,10 +25,6 @@ static OLD_PROC: AtomicIsize = AtomicIsize::new(0);
 const WM_REHOOK_MEDIA: u32 = 0x8000 + 0x5A; // WM_APP + 0x5A
 /// 键盘钩子线程的线程 id（PostThreadMessage 重挂用）。
 static HOOK_TID: AtomicU32 = AtomicU32::new(0);
-
-fn hwnd() -> Option<HWND> {
-    HWND_VALUE.get().map(|h| *h as usize as HWND)
-}
 
 /// 低级键盘钩子：截下 4 个媒体键转成引擎命令并吞掉（issue #11 的
 /// 成因是别的播放器用同类钩子抢走了按键；RegisterHotKey 争不过吞
@@ -98,29 +83,13 @@ fn media_hook_thread() {
 }
 
 unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
-    let mut l = l;
-    match msg {
-        // 窗口激活：把键盘钩子挪回链首（后装先调，抢回媒体键）。
-        WM_ACTIVATE if w != 0 => {
-            let tid = HOOK_TID.load(Ordering::Relaxed);
-            if tid != 0 {
-                // SAFETY: 给本进程钩子线程投私有消息。
-                unsafe { PostThreadMessageW(tid, WM_REHOOK_MEDIA, 0, 0) };
-            }
+    // 窗口激活：把键盘钩子挪回链首（后装先调，抢回媒体键）。
+    if msg == WM_ACTIVATE && w != 0 {
+        let tid = HOOK_TID.load(Ordering::Relaxed);
+        if tid != 0 {
+            // SAFETY: 给本进程钩子线程投私有消息。
+            unsafe { PostThreadMessageW(tid, WM_REHOOK_MEDIA, 0, 0) };
         }
-        // 标题栏由应用自己画（NSH 的标题栏样式为 Default，不再处理这些）。
-        WM_NCCALCSIZE if w != 0 && has_style(hwnd, WS_CAPTION) => {
-            // SAFETY: w 非 0 时 l 指向本消息的 NCCALCSIZE_PARAMS。
-            return unsafe { nc_calc_size(hwnd, w, l) };
-        }
-        WM_NCHITTEST => {
-            if let Some(code) = top_edge(hwnd, l) {
-                return code as LRESULT;
-            }
-        }
-        // 不让系统在应用顶部重画旧式标题栏（`lparam` -1）。
-        WM_NCACTIVATE => l = -1,
-        _ => {}
     }
     // SAFETY: 原窗口过程，在子类化时保存。
     let result = unsafe {
@@ -131,137 +100,6 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         exit_now();
     }
     result
-}
-
-fn has_style(hwnd: HWND, style: u32) -> bool {
-    // SAFETY: 读本进程窗口的样式。
-    let current = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32;
-    current & style == style
-}
-
-fn zoomed(hwnd: HWND) -> bool {
-    // SAFETY: 普通查询。
-    unsafe { IsZoomed(hwnd) != 0 }
-}
-
-/// 缩放边框的厚度（像素）；最大化窗口也正好超出显示器这么多。
-fn frame_thickness(hwnd: HWND) -> i32 {
-    // SAFETY: 普通查询。
-    unsafe {
-        let dpi = GetDpiForWindow(hwnd);
-        GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
-    }
-}
-
-/// Windows 11 沿窗口顶边画的那条可见边框（像素；没有时为 0）。
-fn top_border(hwnd: HWND) -> i32 {
-    let mut thickness: u32 = 0;
-    // SAFETY: 该属性的值是一个 u32。
-    let hr = unsafe {
-        DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_VISIBLE_FRAME_BORDER_THICKNESS as _,
-            &mut thickness as *mut u32 as *mut _,
-            std::mem::size_of::<u32>() as u32,
-        )
-    };
-    if hr >= 0 { thickness.min(8) as i32 } else { 0 }
-}
-
-/// `WM_NCCALCSIZE`：去掉系统标题栏，客户区铺到窗口顶边；两侧与底部的
-/// 缩放边框照旧（在 Windows 10 / 11 上不可见）。与 NSH 隐藏标题栏时
-/// 的算法相同。
-unsafe fn nc_calc_size(hwnd: HWND, w: WPARAM, l: LPARAM) -> LRESULT {
-    unsafe {
-        let params = &mut *(l as *mut NCCALCSIZE_PARAMS);
-        let top = params.rgrc[0].top;
-        DefWindowProcW(hwnd, WM_NCCALCSIZE, w, l);
-        // 最大化时窗口超出显示器一个边框厚度；否则让出 Windows 11 顶边
-        // 那条边框，应用的标题栏完整可见。
-        params.rgrc[0].top = top
-            + if zoomed(hwnd) {
-                frame_thickness(hwnd)
-            } else {
-                top_border(hwnd)
-            };
-    }
-    0
-}
-
-/// `WM_NCHITTEST`：客户区顶边一个边框厚度内可以拖动改变窗口高度。
-fn top_edge(hwnd: HWND, l: LPARAM) -> Option<u32> {
-    if !has_style(hwnd, WS_CAPTION | WS_THICKFRAME) || zoomed(hwnd) {
-        return None;
-    }
-    let mut p = POINT {
-        x: (l & 0xFFFF) as i16 as i32,
-        y: ((l >> 16) & 0xFFFF) as i16 as i32,
-    };
-    let mut client = RECT {
-        left: 0,
-        top: 0,
-        right: 0,
-        bottom: 0,
-    };
-    // SAFETY: 本地结构上的普通调用。
-    unsafe {
-        ScreenToClient(hwnd, &mut p);
-        GetClientRect(hwnd, &mut client);
-    }
-    let border = frame_thickness(hwnd);
-    if p.y < 0 || p.y >= border {
-        return None;
-    }
-    Some(if p.x < border * 2 {
-        HTTOPLEFT
-    } else if p.x >= client.right - border * 2 {
-        HTTOPRIGHT
-    } else {
-        HTTOP
-    })
-}
-
-/// 已找到并子类化窗口：可以由应用画窗口按钮了。
-pub fn caption_ready() -> bool {
-    HWND_VALUE.get().is_some()
-}
-
-pub fn is_maximized() -> bool {
-    hwnd().is_some_and(zoomed)
-}
-
-/// NSH 的全屏去掉了窗口边框与标题栏样式。
-pub fn is_full_screen() -> bool {
-    hwnd().is_some_and(|h| !has_style(h, WS_CAPTION))
-}
-
-/// 异步发系统命令：在点击处理里同步改窗口大小会重入 NSH 的事件分发。
-fn sys_command(command: u32) {
-    if let Some(h) = hwnd() {
-        // SAFETY: 投递到本进程窗口的消息队列。
-        unsafe { PostMessageW(h, WM_SYSCOMMAND, command as WPARAM, 0) };
-    }
-}
-
-pub fn minimize() {
-    sys_command(SC_MINIMIZE);
-}
-
-pub fn toggle_maximize() {
-    sys_command(if is_maximized() {
-        SC_RESTORE
-    } else {
-        SC_MAXIMIZE
-    });
-}
-
-/// 与点系统关闭按钮相同（`WM_CLOSE` 经 NSH 报成 close 按压，由
-/// `App()` 的 `on_close_press` 走询问 / 托盘 / 退出）。
-pub fn close() {
-    if let Some(h) = hwnd() {
-        // SAFETY: 同上。
-        unsafe { PostMessageW(h, WM_CLOSE, 0, 0) };
-    }
 }
 
 /// 主窗口已销毁：直接结束进程。
@@ -305,7 +143,6 @@ fn hook() -> bool {
     let old =
         unsafe { SetWindowLongPtrW(found, GWLP_WNDPROC, proc as *const () as usize as isize) };
     OLD_PROC.store(old, Ordering::Relaxed);
-    let _ = HWND_VALUE.set(found as usize as u64);
     // 引擎的系统媒体会话也要挂这个窗口（zeo_engine::media::smtc_thumbnail）。
     zeo_engine::set_hwnd(found as usize as u64);
     true
@@ -318,9 +155,9 @@ pub fn start() {
         .name("zeo-player-kbhook".into())
         .spawn(media_hook_thread)
         .ok();
-    // 根组件挂载时窗口通常已建好（runner 先建窗口再装应用）：当场子类化，
-    // 自绘窗口按钮（`zeo_ui_frame::caption`）赶得上首帧，不会在显示后
-    // 再切一次标题栏样式引起布局跳动。没找到再交给线程轮询。
+    // 根组件挂载时窗口通常已建好（runner 先建窗口再装应用）：当场子类化
+    // 接管 `WM_DESTROY` 的硬退出（`exit_now`）与媒体键重挂，引擎的
+    // SMTC 缩略图也要这个句柄。没找到再交给线程轮询。
     if hook() {
         return;
     }

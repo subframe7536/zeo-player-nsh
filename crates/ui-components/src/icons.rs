@@ -1,6 +1,5 @@
 //! 线条图标（24 × 24 SVG，data: URI）：基础图标用 Lucide（见 `Icon::body`），
-//! 播放 / 暂停键是自己画的形变图标（`play_pause`），Windows 窗口按钮按系统
-//! 按钮的尺寸画。颜色写进 SVG，按（图标, 尺寸, 颜色）
+//! 播放 / 暂停键是自己画的形变图标（`play_pause`）。颜色写进 SVG，按（图标, 尺寸, 颜色）
 //! 缓存；绑定读当前外观，切换深浅色时换图。SVG 声明的宽高就是显示尺寸：
 //! 光栅化按自然尺寸出图再缩放会糊边、粗细不匀（Windows 上尤其明显）。
 
@@ -61,16 +60,6 @@ pub enum Icon {
     /// 关于页的「i」圆标。
     Info,
     Keyboard,
-    /// Windows 窗口按钮（`ui::caption`）：字形占 24 格里的 4.5–19.5，按
-    /// 16 pt 显示时为 10 pt 见方、线宽 1 pt，与系统按钮一致。
-    #[cfg(target_os = "windows")]
-    WinMinimize,
-    #[cfg(target_os = "windows")]
-    WinMaximize,
-    #[cfg(target_os = "windows")]
-    WinRestore,
-    #[cfg(target_os = "windows")]
-    WinClose,
 }
 
 impl Icon {
@@ -222,23 +211,6 @@ impl Icon {
             }
             // check
             Icon::Check => r#"<path d="M20 6 9 17l-5-5"/>"#,
-            // Windows 窗口按钮：不是 Lucide，按系统按钮的尺寸画（见上）。
-            #[cfg(target_os = "windows")]
-            Icon::WinMinimize => {
-                r#"<path d="M4.5 12h15" stroke-width="1.5" stroke-linecap="butt"/>"#
-            }
-            #[cfg(target_os = "windows")]
-            Icon::WinMaximize => {
-                r#"<rect x="5.25" y="5.25" width="13.5" height="13.5" rx="1.5" stroke-width="1.5"/>"#
-            }
-            #[cfg(target_os = "windows")]
-            Icon::WinRestore => {
-                r#"<rect x="5.25" y="8.25" width="10.5" height="10.5" rx="1.5" stroke-width="1.5"/><path d="M8.25 5.25h9a1.5 1.5 0 0 1 1.5 1.5v9" stroke-width="1.5"/>"#
-            }
-            #[cfg(target_os = "windows")]
-            Icon::WinClose => {
-                r#"<path d="M5.25 5.25l13.5 13.5M18.75 5.25l-13.5 13.5" stroke-width="1.5"/>"#
-            }
         }
     }
 }

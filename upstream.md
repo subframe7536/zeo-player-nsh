@@ -32,7 +32,7 @@ Workarounds live in the app; don't patch NSH crates locally. When a limitation i
 
 ## Windows
 
-- **标题栏按钮画得发虚。** 隐藏标题栏时 NSH 用 Direct2D 画 1 设备像素宽的线（发虚）且总叠在应用之上。应用自己画（`crates/ui-frame/src/caption.rs`）：子类化后把标题栏样式切到 Default，NSH 就不再画。代价是没有 Snap 布局（Win + Z 仍可用），失焦时按钮不变淡。已提 [longbridge/nsh#1469](https://github.com/longbridge/nsh/issues/1469)（维护者已 Triage 并排期修复）。
+- **标题栏按钮画得发虚。** 隐藏标题栏时 NSH 自己画最小化 / 最大化 / 关闭按钮：Direct2D 画 1 设备像素宽的线（发虚）且总叠在应用之上；nightly（`61a11d5`）补了悬停 / 按下 / 失焦变淡的状态，字形画法未变。已提 [longbridge/nsh#1469](https://github.com/longbridge/nsh/issues/1469)（维护者已 Triage 并排期修复）。
 - **`image().blur_radius(..)` 画不满视图框。** `nsh-platform-windows` 的 `src/image.rs` `draw_one` 走 `with_effects` 分支时把 `DrawImage` 画在缩放变换里，实测位图落成视图中央一小块自然尺寸的方块而不是铺满 `objectFit` 算出的矩形。0.5.0 重写了该分支的缩放口径（`effect_scale` / `effect_blur_sigma` 按 frame·bitmap·DPI 换算），症状可能已变，待实机复核。Windows 的全屏播放背景暂仍不用 `blur_radius`，模糊挂回容器 view 的 `st.blur()`（该路径走 `decor::draw_layered` 离屏合成，正常）。
 - **不画 `maskImage`。** macOS 会画了（#930，`visual.rs` 的 `set_mask_image`），`nsh-platform-windows` 仍不读 `mask_images`（0.5.0 复核：全 crate 无 `mask_images` 引用）。歌词边缘淡出两端统一用每行按视口位置算透明度（`crates/ui-now-playing/src/lyrics/anim.rs` 的 `edge_fade`），只能整行淡、做不到行内渐隐；Windows 也画了之后可换成滚动容器上的渐变 `maskImage`。
 - **局部重绘下背景模糊留下亮块。** 局部重绘只清空并重画变化区域，而 `backdropFilter` 按模糊半径多取一圈上一帧的像素（那里已盖着播放条自己的半透明底色），于是每次重绘都留下一块更亮的直角矩形。（`2d3f04b` 复核：`render.rs` 的 `with_backdrops` 会把「读背后内容」的视图整框并进重绘区，但读者只来自 `shader::backdrop_areas`——仅 `ShaderInput::Backdrop` 的 shader 视图，CSS `backdropFilter` 不算；#1993 修的是透明窗口多区域清除与摘除子树的旧区域，不涉及此处。上游把 `backdrop_filters` 视图也登记为 backdrop reader 即可修。）Windows 上播放条不加背景模糊，用不透明 card 色（`ui_store::theme::bar`、`ui-frame` 的 `player_bar`）。
