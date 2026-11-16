@@ -19,10 +19,12 @@ runs:
         "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
 
     # stable 频道：Cargo.toml 的 nsh-* 按 crates.io 版本号走（见 AGENTS.md
-    # 的 nsh-pin 段——pin 回 nightly 时 macOS 步加回 --nightly、Windows 步
-    # 设 $env:NSH_VERSION = 'nightly'）。
-    - name: Install nsh (macOS)
-      if: runner.os == 'macOS'
+    # 的 nsh-pin 段——pin 回 nightly 时 Unix 步加回 --nightly、Windows 步
+    # 设 $env:NSH_VERSION = 'nightly'）。release 的发布 job 在 ubuntu 上
+    # 跑 nsh update-manifest，所以 Linux 也要装（install.sh 有
+    # linux-x86_64 预编译包；GTK 警告只影响运行 app，CLI 不需要）。
+    - name: Install nsh (macOS / Linux)
+      if: runner.os != 'Windows'
       shell: bash
       run: |
         curl -fsSL https://nsh.dev/install.sh | sh
