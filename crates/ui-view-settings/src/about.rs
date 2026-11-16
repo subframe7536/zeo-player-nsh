@@ -42,7 +42,7 @@ pub(crate) fn app_section() -> View {
             .child(
                 text(format!(
                     "构建 {} · {}",
-                    env!("CARGO_PKG_VERSION"),
+                    zeo_updater::app_version(),
                     zeo_updater::app_id()
                 ))
                 .text_size(px(12.0))

@@ -6403,7 +6403,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-db"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "rusqlite",
  "serde",
@@ -6413,7 +6413,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-engine"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "cpal",
  "playwire",
@@ -6429,18 +6429,18 @@ dependencies = [
 
 [[package]]
 name = "zeo-icons"
-version = "0.1.0"
+version = "0.0.0"
 
 [[package]]
 name = "zeo-keybinds"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-core",
 ]
 
 [[package]]
 name = "zeo-library"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "dirs",
  "dunce",
@@ -6457,7 +6457,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-metadata"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "color-thief",
  "dirs",
@@ -6471,7 +6471,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-player"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "dunce",
  "nsh-base",
@@ -6495,7 +6495,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-playlists"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -6504,7 +6504,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-shell"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "dispatch2",
  "nsh-core",
@@ -6520,7 +6520,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-types"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "dirs",
  "nsh-core",
@@ -6531,7 +6531,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-components"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6542,7 +6542,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-frame"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6556,7 +6556,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-now-playing"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6572,7 +6572,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-store"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "dirs",
  "font-enumeration",
@@ -6594,7 +6594,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-view-browse"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6607,7 +6607,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-view-command-palette"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6618,7 +6618,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-view-edit-info"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6632,7 +6632,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-view-folders"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6649,7 +6649,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-view-home"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6663,7 +6663,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-view-metadata"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6685,7 +6685,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-view-playlists"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6699,7 +6699,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-view-settings"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
@@ -6717,7 +6717,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-view-welcome"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-core",
  "zeo-library",
@@ -6729,7 +6729,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-views"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-core",
  "zeo-ui-components",
@@ -6748,7 +6748,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-ui-views-base"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "dunce",
  "nsh-base",
@@ -6763,7 +6763,7 @@ dependencies = [
 
 [[package]]
 name = "zeo-updater"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "nsh-updater",
  "serde_json",
