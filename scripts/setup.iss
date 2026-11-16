@@ -27,6 +27,10 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\ZeoPlayer.exe
+; 安装器自身的 exe 图标（Setup/Uninstall 共用）：相对路径按脚本所在目录
+; 解析，用 SourcePath 指到仓库根的 resources/；.ico 由 icon-windows.png
+; 转出（Pillow: Image.save(..., sizes=[16..256])）。
+SetupIconFile={#SourcePath}\..\resources\icon-windows.ico
 
 [Files]
 ; nsh package 的整目录（exe + nsh/ 资源含更新配置），结构原样保留。
