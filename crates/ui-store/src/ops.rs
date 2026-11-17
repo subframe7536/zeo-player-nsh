@@ -103,7 +103,7 @@ pub fn move_playlist_paths(src: &str, dest: &str) {
             if let Kind::Manual { tracks } = &mut p.kind {
                 for t in tracks.iter_mut() {
                     if *t == src {
-                        *t = dest.clone();
+                        t.clone_from(&dest);
                     } else if let Some(rest) = t.strip_prefix(&under) {
                         *t = format!("{dest}{sep}{rest}");
                     }
@@ -126,12 +126,6 @@ pub fn remove_playlist_paths_under(path: &str) {
             }
         }
     });
-}
-
-/// 「删除文件…」菜单项：打开确认弹窗（回收站 / 直接删按当前设置）。
-#[allow(dead_code)]
-pub fn ask_delete_file(path: &str) {
-    ask_delete_files(vec![path.to_owned()]);
 }
 
 /// 批量「删除文件…」菜单项：打开确认弹窗。

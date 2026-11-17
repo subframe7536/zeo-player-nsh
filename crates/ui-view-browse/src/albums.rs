@@ -33,7 +33,7 @@ pub fn Albums() -> impl IntoElement {
                 });
                 let cover_path = group.cover.clone();
                 let cover_src =
-                    computed(move || cover_path.as_deref().and_then(|p| cover_for(&p, 200.0)));
+                    computed(move || cover_path.as_deref().and_then(|p| cover_for(p, 200.0)));
                 let meta = [
                     group.year.map(|y| y.to_string()),
                     Some(format!("{} 首", group.tracks.len())),
@@ -63,7 +63,7 @@ pub fn Albums() -> impl IntoElement {
                         .shadow_xl()
                     }),
                     group.title.clone(),
-                    group.subtitle.clone(),
+                    group.subtitle,
                     meta,
                     Rc::new(move || selected.set(None)),
                     move || items.with_untracked(|v| play_list(v, 0)),

@@ -134,7 +134,6 @@ pub(crate) fn lyrics_scroller() -> View {
     // 时间推进：行变化或 seek 跳变时滚动跟随。
     {
         let last_followed = last_followed.clone();
-        let prev_time = prev_time.clone();
         let pending = pending.clone();
         let scroll_to_line = scroll_to_line.clone();
         effect(move || {
@@ -174,7 +173,6 @@ pub(crate) fn lyrics_scroller() -> View {
         let resume = resume.clone();
         let pending = pending.clone();
         let target = target.clone();
-        let offset_of = offset_of.clone();
         let reveal = global::<Reveal>();
         let first = std::cell::Cell::new(true);
         effect(move || {
@@ -419,7 +417,7 @@ pub(crate) fn lyrics_scroller() -> View {
     });
 
     let user_scroll = interrupt.clone();
-    let drag = interrupt.clone();
+    let drag = interrupt;
     let (blur_in, blur_out) = (fade_blur.clone(), fade_blur);
     view()
         .flex_1()

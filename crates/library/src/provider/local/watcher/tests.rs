@@ -66,12 +66,15 @@ fn file_move_pairs_by_size_and_mtime() {
     let to = write_file(&dir, "b.flac", 1234, 1700000000);
     let tracks = vec![track("/m/a.flac", 1234, 1700000000)];
     assert_eq!(
-        find_dest("/m/a.flac", &[to.clone()], &[], &tracks).as_deref(),
+        find_dest("/m/a.flac", std::slice::from_ref(&to), &[], &tracks).as_deref(),
         Some(to.as_str())
     );
     // 大小或修改时间对不上 = 不是同一个文件。
     let tracks = vec![track("/m/a.flac", 1234, 1)];
-    assert_eq!(find_dest("/m/a.flac", &[to.clone()], &[], &tracks), None);
+    assert_eq!(
+        find_dest("/m/a.flac", std::slice::from_ref(&to), &[], &tracks),
+        None
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -105,7 +108,7 @@ fn folder_move_pairs_when_children_match() {
     assert_eq!(
         find_dest(
             &format!("{sep}m{sep}album"),
-            &[to_str.clone()],
+            std::slice::from_ref(&to_str),
             &[],
             &tracks
         )
@@ -136,7 +139,7 @@ fn pair_moves_covers_subtree_and_reports_leftovers() {
     let tracks = vec![track(&format!("{from_dir}{sep}a.flac"), 10, 1700000000)];
     // 文件夹 + 子项各自一条 Any 事件；外加一条「到达」的新文件。
     let mut gones = vec![from_dir.clone(), format!("{from_dir}{sep}a.flac")];
-    let presents = vec![to_str.clone(), to_a, stray.clone()];
+    let presents = vec![to_str.clone(), to_a, stray];
     let (pairs, dirty) = pair_moves(&mut gones, &presents, &tracks);
     assert_eq!(pairs, vec![(from_dir, to_str)]);
     assert!(dirty, "没配走的新文件要重扫");

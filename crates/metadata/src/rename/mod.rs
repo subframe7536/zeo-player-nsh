@@ -22,7 +22,6 @@ pub const SEPARATOR_ERROR: &str = "仅支持重命名文件名，不能包含目
 pub(crate) const MAX_NAME_BYTES: usize = 255;
 
 /// 解析好的重命名模板（字面文本与占位符按序排列）。
-#[allow(dead_code, reason = "元数据视图接入用（metadata_view_plan 阶段三）")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Template(Vec<Part>);
 
@@ -46,7 +45,6 @@ enum FieldKind {
     Filename,
 }
 
-#[allow(dead_code, reason = "元数据视图接入用（metadata_view_plan 阶段三）")]
 impl Template {
     /// 解析模板：先拦目录分隔符，再逐段解析 `{name}` / `{name:N}` /
     /// `{name:0N}` / `{name:0Nd}` 占位符与 `{{` `}}` 字面大括号。

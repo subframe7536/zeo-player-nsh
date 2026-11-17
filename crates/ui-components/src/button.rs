@@ -10,7 +10,6 @@ use super::icons::{Icon, icon_dyn};
 use zeo_ui_store::theme::*;
 
 /// shadcn 的 `variant`。
-#[allow(dead_code, reason = "shadcn 的完整变体集，部分暂未用到")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Variant {
     /// 主色底（`bg-primary`）。
@@ -26,7 +25,6 @@ pub enum Variant {
 }
 
 /// shadcn 的 `size`。
-#[allow(dead_code, reason = "shadcn 的完整尺寸集，部分暂未用到")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Size {
     /// `h-6 px-2 gap-1 text-xs`。

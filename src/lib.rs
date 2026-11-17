@@ -116,7 +116,6 @@ pub fn App() -> impl IntoElement {
         let (open, close) = (open.clone(), close.clone());
         effect(move || if s.full_screen.get() { open() } else { close() });
     }
-    let _ = s;
     #[cfg(any(debug_assertions, test))]
     bench(open.clone());
 

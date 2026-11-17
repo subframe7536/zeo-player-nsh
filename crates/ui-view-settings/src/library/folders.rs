@@ -106,7 +106,7 @@ pub(crate) fn folders_section() -> View {
                                     .text_color(fg()),
                             )
                             .child(
-                                text(root.clone())
+                                text(root)
                                     .number_of_lines(1)
                                     .text_size(px(12.0))
                                     .line_height(px(12.0))

@@ -37,12 +37,9 @@ pub fn library() -> View {
         if s.tracks.with(|t| t.is_empty()) {
             return no_library().into_element();
         }
-        let play_all = {
-            let items = items.clone();
-            pill_button(Icon::Play, "播放全部", move || {
-                items.with_untracked(|v| play_list(v, 0));
-            })
-        };
+        let play_all = pill_button(Icon::Play, "播放全部", move || {
+            items.with_untracked(|v| play_list(v, 0));
+        });
         let header = view()
             .child(page_header(
                 || "音乐库".into(),

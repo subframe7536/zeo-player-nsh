@@ -80,7 +80,7 @@ pub(crate) fn sidebar_row(p: &Playlist) -> AnyElement {
         .window_drag(false)
         .child(zeo_ui_components::nav::nav_row(
             glyph,
-            name.clone().into(),
+            name.into(),
             active,
             move || {
                 store().search.set(String::new());

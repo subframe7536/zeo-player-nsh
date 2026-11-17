@@ -159,7 +159,7 @@ pub fn install() -> Store {
             }
             player().remember(&snap);
             if snap.track.path != accent_track {
-                accent_track = snap.track.path.clone();
+                accent_track.clone_from(&snap.track.path);
                 request_accent(&s, snap.track.path.as_deref());
             }
             drain_covers();
@@ -364,7 +364,7 @@ pub fn install() -> Store {
             zeo_metadata::waveform::BARS
         ]))));
         let still = move |stamp: &str| untracked(|| path.with(|p| p.as_deref() == Some(stamp)));
-        let p = stamp.clone();
+        let p = stamp;
         spawn(async move {
             let meta = blocking({
                 let p = p.clone();

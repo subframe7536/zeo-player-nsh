@@ -103,8 +103,8 @@ pub fn drag_ghost() -> impl IntoElement {
     let ui = folder_ui();
     let active = ui.ctx.active;
     let anchor = ui.ctx.anchor;
-    let gx = ui.ctx.gx.clone();
-    let gy = ui.ctx.gy.clone();
+    let gx = ui.ctx.gx;
+    let gy = ui.ctx.gy;
     when(
         move || active.with(|a| a.is_some()),
         move || {
@@ -290,7 +290,7 @@ pub(crate) fn tree_cell(
                 let ctx = ctx.clone();
                 move |_: &ResponderEvent| {
                     if let Some(r) = row.get_untracked() {
-                        ctx.begin(vec![r.path.clone()], true, r.name.clone());
+                        ctx.begin(vec![r.path.clone()], true, r.name);
                     }
                 }
             })

@@ -68,7 +68,6 @@ pub fn file_stamp(meta: &std::fs::Metadata) -> u64 {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos() as u64)
     };
-    #[allow(unused_mut)]
     let mut parts = vec![nanos(meta.modified()), meta.len()];
     #[cfg(windows)]
     {

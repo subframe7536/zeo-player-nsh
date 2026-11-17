@@ -83,7 +83,7 @@ impl LibraryStore {
             for root in config.roots.iter_mut() {
                 let trimmed = root.trim_end_matches(sep).to_owned();
                 if trimmed == src {
-                    *root = dest.clone();
+                    root.clone_from(&dest);
                     touched = true;
                 } else if let Some(rest) = trimmed.strip_prefix(&under) {
                     *root = format!("{dest}{sep}{rest}");
@@ -223,7 +223,7 @@ impl LibraryStore {
     /// 改流派分隔符：保存，并用已缓存的标签重新拆分（不重读文件）。
     pub fn set_separators(&self, separators: &[String]) -> Vec<String> {
         let clean = clean_separators(separators);
-        self.update_config(|c| c.genre_separators = clean.clone());
+        self.update_config(|c| c.genre_separators.clone_from(&clean));
         let current = self.tracks();
         let updated: Vec<TrackEntry> = current
             .iter()
@@ -244,7 +244,7 @@ impl LibraryStore {
     /// 改艺术家分隔符：保存。
     pub fn set_artist_separators(&self, separators: &[String]) -> Vec<String> {
         let clean = clean_separators(separators);
-        self.update_config(|c| c.artist_separators = clean.clone());
+        self.update_config(|c| c.artist_separators.clone_from(&clean));
         clean
     }
 

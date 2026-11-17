@@ -138,8 +138,8 @@ pub(crate) fn folder_page(
     let here = ui.here;
     let files = ui.files;
     let message = s.folder_message;
-    let list_ctx = ctx.clone();
-    let list_ops = ops.clone();
+    let list_ctx = ctx;
+    let list_ops = ops;
     let subtitle = move || {
         let note = message.get();
         if !note.is_empty() {

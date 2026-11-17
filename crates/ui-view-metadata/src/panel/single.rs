@@ -111,7 +111,7 @@ pub(crate) fn single_panel(
                         d.values.insert(*f, v.clone());
                     }
                 }
-                d.original = fields.clone();
+                d.original.clone_from(&fields);
             });
             full.set(Some((fields, tag_type, added)));
         });
@@ -132,7 +132,7 @@ pub(crate) fn single_panel(
             full,
             rows,
             selected,
-            alive.clone(),
+            alive,
             close,
         ))
         .child(

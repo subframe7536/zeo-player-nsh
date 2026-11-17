@@ -107,7 +107,7 @@ pub(crate) fn batch_panel(
                         .label("编号起始")
                         .value(move || draft.with(|d| d.num_start.clone()))
                         .readonly(busy)
-                        .on_change(move |t: &str| draft.update(|d| d.num_start = t.to_owned())),
+                        .on_change(move |t: &str| draft.update(|d| t.clone_into(&mut d.num_start))),
                 )
                 .child(checkbox(
                     move || draft.with(|d| d.num_total),
@@ -294,18 +294,14 @@ pub(crate) fn batch_panel(
                     Size::Xs,
                     None,
                     format!("应用到 {m} 首"),
-                    {
-                        let paths = paths.clone();
-                        let selected_entries = selected_entries.clone();
-                        move || {
-                            apply_batch(
-                                paths.clone(),
-                                selected_entries.clone(),
-                                displayed,
-                                rows,
-                                draft,
-                            )
-                        }
+                    move || {
+                        apply_batch(
+                            paths.clone(),
+                            selected_entries.clone(),
+                            displayed,
+                            rows,
+                            draft,
+                        )
                     },
                 )
                 .disabled(move || draft.with(|d| d.applying))

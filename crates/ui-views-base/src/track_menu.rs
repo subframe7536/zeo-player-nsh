@@ -95,7 +95,6 @@ pub fn track_menu_selectable(
     let menu = context_menu().trigger(row);
     let single_items = {
         let multi_paths = multi_paths.clone();
-        let single_path = single_path.clone();
         let rename = rename.clone();
         dynamic(move || {
             if multi_paths().len() > 1 {
@@ -103,25 +102,22 @@ pub fn track_menu_selectable(
             }
             let mut list = Vec::new();
             list.push(separator());
-            list.push(item("编辑元数据…", Some(Icon::Edit), {
-                let single_path = single_path.clone();
-                move || {
-                    if let Some(p) = single_path() {
-                        store::open_edit_info(&p);
-                    }
+            list.push(item("编辑元数据…", Some(Icon::Edit), move || {
+                if let Some(p) = single_path() {
+                    store::open_edit_info(&p);
                 }
             }));
-            list.push(item(zeo_shell::REVEAL_LABEL, Some(Icon::Reveal), {
-                let single_path = single_path.clone();
+            list.push(item(
+                zeo_shell::REVEAL_LABEL,
+                Some(Icon::Reveal),
                 move || {
                     if let Some(p) = single_path() {
                         zeo_shell::reveal(&p);
                     }
-                }
-            }));
+                },
+            ));
             if let Some(rename) = &rename {
                 let rename = rename.clone();
-                let single_path = single_path.clone();
                 list.push(item("重命名文件…", Some(Icon::Edit), move || {
                     if let Some(p) = single_path() {
                         rename(&p);

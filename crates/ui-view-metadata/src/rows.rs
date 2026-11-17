@@ -8,52 +8,9 @@ pub(crate) struct MetaRow {
     pub fields: HashMap<TagField, String>,
     /// 有歌词：内嵌非空或同名 `.lrc` / `.LRC` 存在。
     pub has_lyrics: bool,
-    pub cover: CoverState,
     /// 读取来源的标签类型显示名（文件无标签为 `None`）。
     pub tag_type: Option<&'static str>,
     pub stamp: u64,
-}
-
-/// 表格「封面状态」列的三种来源。
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum CoverState {
-    Embedded,
-    File,
-    None,
-}
-
-/// 后台线程读一行（读不出返回 `None`，单元格回落 `TrackEntry` 值）。
-#[allow(dead_code)]
-pub(crate) fn build_row(path: &Path, stamp: u64, has_art: bool) -> Option<MetaRow> {
-    let (mut fields, tag_type) = zeo_metadata::write::read_row(path).ok()?;
-    let embedded = fields
-        .get(&TagField::Lyrics)
-        .is_some_and(|s| !s.trim().is_empty());
-    // 与 engine::Meta::external_lrc 同一组候选（纯文件检查，线程安全）。
-    let has_lyrics =
-        embedded || zeo_engine::Meta::external_lrc(path.to_string_lossy().into_owned()).is_some();
-    let preview = fields
-        .get(&TagField::Lyrics)
-        .map(|s| lyrics_preview(s))
-        .unwrap_or_default();
-    fields.insert(TagField::Lyrics, preview);
-    if let Some(comment) = fields.get_mut(&TagField::Comment) {
-        *comment = comment.chars().take(120).collect();
-    }
-    let cover = if zeo_metadata::covers::find_sidecar(path).is_some() {
-        CoverState::File
-    } else if has_art {
-        CoverState::Embedded
-    } else {
-        CoverState::None
-    };
-    Some(MetaRow {
-        fields,
-        has_lyrics,
-        cover,
-        tag_type,
-        stamp,
-    })
 }
 
 /// 歌词预览：第一条非空行，剥掉行首 `[..]`（LRC 时间戳与标记段），截 40 字。

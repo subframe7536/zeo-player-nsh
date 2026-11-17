@@ -12,72 +12,65 @@ pub(crate) fn table(
     visible_cols: Signal<BTreeSet<String>>,
     col_widths: Signal<HashMap<String, f32>>,
 ) -> impl IntoElement {
-    let defs = {
-        let visible_cols = visible_cols.clone();
-        let col_widths = col_widths.clone();
-        move || {
-            let active = visible_cols.get();
-            let widths = col_widths.get();
-            let mut defs = Vec::with_capacity(COLUMNS.len());
-            for (key, title, width, align, _) in COLUMNS {
-                if !active.contains(*key) {
-                    continue;
-                }
-                let mut c = DataTableColumn::default();
-                c.key = SharedString::from(*key);
-                c.title = Some(SharedString::from(*title));
-                let cur_w = widths.get(*key).copied().unwrap_or(*width);
-                c.width = Some(px(cur_w));
-                c.align = *align;
-                c.sortable = false;
-                c.resizable = Some(false);
-                c.fixed = (*key == "file_name").into();
-                if *key == "file_name" {
-                    // sticky 固定文件名列：全表唯一的竖线，横向滚动时标出
-                    // 固定区边界。其余列不画竖线，只靠行分隔与留白分列。
-                    c.header_class = Some(SharedString::from("bg-card border-r border-border"));
-                    c.cell_class = Some(SharedString::from("border-r border-border"));
-                }
-                // 其余列保持 None，不设多余列级覆盖，消除拖拽改列宽时逐格的字串拼接与堆分配开销。
-                defs.push(c);
+    let defs = move || {
+        let active = visible_cols.get();
+        let widths = col_widths.get();
+        let mut defs = Vec::with_capacity(COLUMNS.len());
+        for (key, title, width, align, _) in COLUMNS {
+            if !active.contains(*key) {
+                continue;
             }
-            defs
+            let mut c = DataTableColumn::default();
+            c.key = SharedString::from(*key);
+            c.title = Some(SharedString::from(*title));
+            let cur_w = widths.get(*key).copied().unwrap_or(*width);
+            c.width = Some(px(cur_w));
+            c.align = *align;
+            c.sortable = false;
+            c.resizable = Some(false);
+            c.fixed = (*key == "file_name").into();
+            if *key == "file_name" {
+                // sticky 固定文件名列：全表唯一的竖线，横向滚动时标出
+                // 固定区边界。其余列不画竖线，只靠行分隔与留白分列。
+                c.header_class = Some(SharedString::from("bg-card border-r border-border"));
+                c.cell_class = Some(SharedString::from("border-r border-border"));
+            }
+            // 其余列保持 None，不设多余列级覆盖，消除拖拽改列宽时逐格的字串拼接与堆分配开销。
+            defs.push(c);
         }
+        defs
     };
 
     let visible_window = signal((0usize, 120usize));
 
-    let data = computed({
-        let displayed = displayed.clone();
-        move || -> DataTableRows {
-            let list = displayed.get();
-            let total = list.len();
-            let (win_start, win_end) = visible_window.get();
-            let start = win_start.min(total);
-            let end = win_end.min(total).max(start);
-            let slice = &list[start..end];
-            let map = rows.get();
-            let active = visible_cols.get();
-            let mut data = DataTableRows::new(slice.len());
-            // 仅对当前可见窗口切片查表与生成文本，避免全库数万行全量物化
-            let row_ptrs: Vec<Option<&MetaRow>> = slice
-                .iter()
-                .map(|t| map.get(t.path.as_str()).map(|r| r.as_ref()))
-                .collect();
-            for &(key, ..) in COLUMNS {
-                if !active.contains(key) {
-                    continue;
-                }
-                data = data.texts(
-                    key,
-                    slice
-                        .iter()
-                        .zip(row_ptrs.iter())
-                        .map(|(t, row)| cell_value(key, t, *row)),
-                );
+    let data = computed(move || -> DataTableRows {
+        let list = displayed.get();
+        let total = list.len();
+        let (win_start, win_end) = visible_window.get();
+        let start = win_start.min(total);
+        let end = win_end.min(total).max(start);
+        let slice = &list[start..end];
+        let map = rows.get();
+        let active = visible_cols.get();
+        let mut data = DataTableRows::new(slice.len());
+        // 仅对当前可见窗口切片查表与生成文本，避免全库数万行全量物化
+        let row_ptrs: Vec<Option<&MetaRow>> = slice
+            .iter()
+            .map(|t| map.get(t.path.as_str()).map(|r| r.as_ref()))
+            .collect();
+        for &(key, ..) in COLUMNS {
+            if !active.contains(key) {
+                continue;
             }
-            data
+            data = data.texts(
+                key,
+                slice
+                    .iter()
+                    .zip(row_ptrs.iter())
+                    .map(|(t, row)| cell_value(key, t, *row)),
+            );
         }
+        data
     });
 
     let row_classes = move || -> Vec<SharedString> {
@@ -125,222 +118,200 @@ pub(crate) fn table(
 
     let guide_line_x = signal(Option::<f32>::None);
 
-    let head_cell = {
-        let sort = sort.clone();
-        let col_widths = col_widths.clone();
-        let guide_line_x = guide_line_x.clone();
-        move |key: String, title: SharedString| -> AnyElement {
-            let align = COLUMNS
-                .iter()
-                .find(|(k, ..)| *k == key)
-                .map(|(.., a, _)| *a)
-                .unwrap_or(DataTableAlign::Start);
+    let head_cell = move |key: String, title: SharedString| -> AnyElement {
+        let align = COLUMNS
+            .iter()
+            .find(|(k, ..)| *k == key)
+            .map(|(.., a, _)| *a)
+            .unwrap_or(DataTableAlign::Start);
 
-            let is_hovered = signal(false);
-            let is_dragging = signal(false);
-            let drag_origin = Rc::new(Cell::new(None::<(f32, f32, f32)>));
-            let last_tap = Rc::new(Cell::new(None::<Instant>));
+        let is_hovered = signal(false);
+        let is_dragging = signal(false);
+        let drag_origin = Rc::new(Cell::new(None::<(f32, f32, f32)>));
+        let last_tap = Rc::new(Cell::new(None::<Instant>));
 
-            let sort_key = key.clone();
-            let sort_toggle = {
-                let sort = sort.clone();
-                move || {
-                    let next = match sort.get() {
-                        Some(s) if s.key.as_str() == sort_key.as_str() => match s.direction {
-                            nsh_base::DataTableSortDirection::Ascending => {
-                                let mut s = DataTableSort::default();
-                                s.key = sort_key.clone().into();
-                                s.direction = nsh_base::DataTableSortDirection::Descending;
-                                Some(s)
+        let sort_key = key.clone();
+        let sort_toggle = move || {
+            let next = match sort.get() {
+                Some(s) if s.key.as_str() == sort_key.as_str() => match s.direction {
+                    nsh_base::DataTableSortDirection::Ascending => {
+                        let mut s = DataTableSort::default();
+                        s.key = sort_key.clone().into();
+                        s.direction = nsh_base::DataTableSortDirection::Descending;
+                        Some(s)
+                    }
+                    nsh_base::DataTableSortDirection::Descending => None,
+                },
+                _ => {
+                    let mut s = DataTableSort::default();
+                    s.key = sort_key.clone().into();
+                    s.direction = nsh_base::DataTableSortDirection::Ascending;
+                    Some(s)
+                }
+            };
+            sort.set(next);
+        };
+
+        let drag_key = key.clone();
+
+        let handle_start = {
+            let drag_origin = drag_origin.clone();
+            let key = drag_key.clone();
+            move |e: &ResponderEvent| {
+                is_dragging.set(true);
+                let default_w = COLUMNS
+                    .iter()
+                    .find(|(k, ..)| *k == key)
+                    .map(|(.., w, _, _)| *w)
+                    .unwrap_or(120.0);
+                let cur_w = col_widths
+                    .with(|m| m.get(&key).copied())
+                    .unwrap_or(default_w);
+                let start_mouse_x = e.page.x.0;
+                let pad_x = zeo_ui_store::theme::PAGE_X;
+                // 把手 14pt 宽、贴表头单元格右缘（即列线所在）；`location`
+                // 是落点在把手内的坐标，随抓握点变。列线页面 x = 落点 +
+                // 落点到把手右缘的距离，与抓在把手哪里无关。
+                let to_right = (14.0 - e.location.x.0).clamp(0.0, 14.0);
+                // 表格容器在页面里的左缘：侧栏 + 页边距 + 卡片 1pt 边框。
+                let table_left = zeo_ui_store::theme::SIDEBAR + pad_x + 1.0;
+                let start_guide_x = e.page.x.0 + to_right - table_left - 2.0;
+                drag_origin.set(Some((start_mouse_x, cur_w, start_guide_x)));
+                guide_line_x.set(Some(start_guide_x));
+            }
+        };
+
+        let handle_move = {
+            let drag_origin = drag_origin.clone();
+            move |e: &ResponderEvent| {
+                if let Some((start_mouse_x, cur_w, start_guide_x)) = drag_origin.get() {
+                    let delta = e.page.x.0 - start_mouse_x;
+                    let min_delta = 50.0 - cur_w;
+                    let clamped_delta = delta.max(min_delta);
+                    guide_line_x.set(Some(start_guide_x + clamped_delta));
+                }
+            }
+        };
+
+        let handle_end = {
+            let key = drag_key;
+            move |e: &ResponderEvent| {
+                is_dragging.set(false);
+                if let Some((start_mouse_x, cur_w, _)) = drag_origin.take() {
+                    guide_line_x.set(None);
+                    let delta = e.page.x.0 - start_mouse_x;
+                    if delta.abs() < 2.0 {
+                        let now = Instant::now();
+                        if let Some(prev) = last_tap.get() {
+                            if now.duration_since(prev).as_millis() < 350 {
+                                let def_w = COLUMNS
+                                    .iter()
+                                    .find(|(k, ..)| *k == key)
+                                    .map(|(.., w, _, _)| *w)
+                                    .unwrap_or(120.0);
+                                col_widths.update(|m| {
+                                    m.insert(key.clone(), def_w);
+                                });
+                                last_tap.set(None);
+                                return;
                             }
-                            nsh_base::DataTableSortDirection::Descending => None,
-                        },
-                        _ => {
-                            let mut s = DataTableSort::default();
-                            s.key = sort_key.clone().into();
-                            s.direction = nsh_base::DataTableSortDirection::Ascending;
-                            Some(s)
                         }
+                        last_tap.set(Some(now));
+                    }
+                    let final_w = (cur_w + delta).max(50.0);
+                    col_widths.update(|m| {
+                        m.insert(key.clone(), final_w);
+                    });
+                }
+            }
+        };
+
+        let sort_indicator = {
+            let key = key.clone();
+            dynamic(move || match sort.get() {
+                Some(s) if s.key.as_str() == key.as_str() => {
+                    let arrow = match s.direction {
+                        nsh_base::DataTableSortDirection::Ascending => "▲",
+                        nsh_base::DataTableSortDirection::Descending => "▼",
                     };
-                    sort.set(next);
+                    text(arrow)
+                        .text_size(px(9.0))
+                        .line_height(px(9.0))
+                        .text_color(primary())
+                        .ml(px(4.0))
+                        .into_element()
                 }
-            };
+                _ => view().w(px(0.0)).into_element(),
+            })
+        };
 
-            let drag_key = key.clone();
-            let drag_widths = col_widths.clone();
-            let drag_guide = guide_line_x.clone();
-            let drag_hovered = is_hovered.clone();
-            let drag_dragging = is_dragging.clone();
-
-            let handle_start = {
-                let drag_origin = drag_origin.clone();
-                let col_widths = drag_widths.clone();
-                let guide_line_x = drag_guide.clone();
-                let is_dragging = drag_dragging.clone();
-                let key = drag_key.clone();
-                move |e: &ResponderEvent| {
-                    is_dragging.set(true);
-                    let default_w = COLUMNS
-                        .iter()
-                        .find(|(k, ..)| *k == key)
-                        .map(|(.., w, _, _)| *w)
-                        .unwrap_or(120.0);
-                    let cur_w = col_widths
-                        .with(|m| m.get(&key).copied())
-                        .unwrap_or(default_w);
-                    let start_mouse_x = e.page.x.0;
-                    let pad_x = zeo_ui_store::theme::PAGE_X;
-                    // 把手 14pt 宽、贴表头单元格右缘（即列线所在）；`location`
-                    // 是落点在把手内的坐标，随抓握点变。列线页面 x = 落点 +
-                    // 落点到把手右缘的距离，与抓在把手哪里无关。
-                    let to_right = (14.0 - e.location.x.0).clamp(0.0, 14.0);
-                    // 表格容器在页面里的左缘：侧栏 + 页边距 + 卡片 1pt 边框。
-                    let table_left = zeo_ui_store::theme::SIDEBAR + pad_x + 1.0;
-                    let start_guide_x = e.page.x.0 + to_right - table_left - 2.0;
-                    drag_origin.set(Some((start_mouse_x, cur_w, start_guide_x)));
-                    guide_line_x.set(Some(start_guide_x));
-                }
-            };
-
-            let handle_move = {
-                let drag_origin = drag_origin.clone();
-                let guide_line_x = drag_guide.clone();
-                move |e: &ResponderEvent| {
-                    if let Some((start_mouse_x, cur_w, start_guide_x)) = drag_origin.get() {
-                        let delta = e.page.x.0 - start_mouse_x;
-                        let min_delta = 50.0 - cur_w;
-                        let clamped_delta = delta.max(min_delta);
-                        guide_line_x.set(Some(start_guide_x + clamped_delta));
-                    }
-                }
-            };
-
-            let handle_end = {
-                let drag_origin = drag_origin.clone();
-                let col_widths = drag_widths.clone();
-                let guide_line_x = drag_guide.clone();
-                let is_dragging = drag_dragging.clone();
-                let last_tap = last_tap.clone();
-                let key = drag_key.clone();
-                move |e: &ResponderEvent| {
-                    is_dragging.set(false);
-                    if let Some((start_mouse_x, cur_w, _)) = drag_origin.take() {
-                        guide_line_x.set(None);
-                        let delta = e.page.x.0 - start_mouse_x;
-                        if delta.abs() < 2.0 {
-                            let now = Instant::now();
-                            if let Some(prev) = last_tap.get() {
-                                if now.duration_since(prev).as_millis() < 350 {
-                                    let def_w = COLUMNS
-                                        .iter()
-                                        .find(|(k, ..)| *k == key)
-                                        .map(|(.., w, _, _)| *w)
-                                        .unwrap_or(120.0);
-                                    col_widths.update(|m| {
-                                        m.insert(key.clone(), def_w);
-                                    });
-                                    last_tap.set(None);
-                                    return;
-                                }
-                            }
-                            last_tap.set(Some(now));
+        let handle_view = view()
+            .test_id(&format!("resize:{key}"))
+            .absolute()
+            .right_0()
+            .top_0()
+            .bottom_0()
+            .w(px(14.0))
+            .cursor(Cursor::ColResize)
+            .on_mouse_enter(move |_: &nsh_core::MouseEvent| is_hovered.set(true))
+            .on_mouse_leave(move |_: &nsh_core::MouseEvent| is_hovered.set(false))
+            .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {
+                request.claim();
+            }))
+            .keep_touches(true)
+            .on_responder_grant(handle_start)
+            .on_responder_move(handle_move)
+            .on_responder_release(handle_end.clone())
+            .on_responder_terminate(handle_end)
+            .child(
+                view()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right_0()
+                    .w(px(2.0))
+                    .bg(primary())
+                    // 不吃命中：触摸落点的 target 恒为把手自身，
+                    // `e.location` 才是把手内坐标，列线位置才好换算。
+                    .pointer_events(PointerEvents::None)
+                    .opacity(move || {
+                        if is_hovered.get() || is_dragging.get() {
+                            1.0_f32
+                        } else {
+                            0.0_f32
                         }
-                        let final_w = (cur_w + delta).max(50.0);
-                        col_widths.update(|m| {
-                            m.insert(key.clone(), final_w);
-                        });
-                    }
-                }
-            };
+                    }),
+            );
 
-            let sort_indicator = {
-                let sort = sort.clone();
-                let key = key.clone();
-                dynamic(move || match sort.get() {
-                    Some(s) if s.key.as_str() == key.as_str() => {
-                        let arrow = match s.direction {
-                            nsh_base::DataTableSortDirection::Ascending => "▲",
-                            nsh_base::DataTableSortDirection::Descending => "▼",
-                        };
-                        text(arrow)
-                            .text_size(px(9.0))
-                            .line_height(px(9.0))
-                            .text_color(primary())
-                            .ml(px(4.0))
-                            .into_element()
-                    }
-                    _ => view().w(px(0.0)).into_element(),
-                })
-            };
-
-            let handle_view = view()
-                .test_id(&format!("resize:{key}"))
-                .absolute()
-                .right_0()
-                .top_0()
-                .bottom_0()
-                .w(px(14.0))
-                .cursor(Cursor::ColResize)
-                .on_mouse_enter(move |_: &nsh_core::MouseEvent| drag_hovered.set(true))
-                .on_mouse_leave(move |_: &nsh_core::MouseEvent| drag_hovered.set(false))
-                .claim_touches(TouchClaim::on_start().ask(move |request: &ClaimRequest| {
-                    request.claim();
-                }))
-                .keep_touches(true)
-                .on_responder_grant(handle_start)
-                .on_responder_move(handle_move)
-                .on_responder_release(handle_end.clone())
-                .on_responder_terminate(handle_end)
-                .child(
-                    view()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .right_0()
-                        .w(px(2.0))
-                        .bg(primary())
-                        // 不吃命中：触摸落点的 target 恒为把手自身，
-                        // `e.location` 才是把手内坐标，列线位置才好换算。
-                        .pointer_events(PointerEvents::None)
-                        .opacity(move || {
-                            if is_hovered.get() || is_dragging.get() {
-                                1.0_f32
-                            } else {
-                                0.0_f32
-                            }
-                        }),
-                );
-
-            view()
-                .w_full()
-                .h(px(36.0))
-                .flex_row()
-                .items_center()
-                .relative()
-                .map(move |v| match align {
-                    DataTableAlign::Start => v.justify_start(),
-                    DataTableAlign::Center => v.justify_center(),
-                    DataTableAlign::End => v.justify_end(),
-                })
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .px(px(12.0))
-                        .cursor_pointer()
-                        .on_press(sort_toggle)
-                        .child(
-                            text(title)
-                                .text_size(px(12.0))
-                                .line_height(px(12.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(muted_fg()),
-                        )
-                        .child(sort_indicator),
-                )
-                .child(handle_view)
-                .into_element()
-        }
+        view()
+            .w_full()
+            .h(px(36.0))
+            .flex_row()
+            .items_center()
+            .relative()
+            .map(move |v| match align {
+                DataTableAlign::Start => v.justify_start(),
+                DataTableAlign::Center => v.justify_center(),
+                DataTableAlign::End => v.justify_end(),
+            })
+            .child(
+                view()
+                    .flex_row()
+                    .items_center()
+                    .px(px(12.0))
+                    .cursor_pointer()
+                    .on_press(sort_toggle)
+                    .child(
+                        text(title)
+                            .text_size(px(12.0))
+                            .line_height(px(12.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(muted_fg()),
+                    )
+                    .child(sort_indicator),
+            )
+            .child(handle_view)
+            .into_element()
     };
 
     // 表头格按位置取列：上游自定义表头只在渲染器 / 排序 / 选中变化时重跑，
@@ -366,7 +337,7 @@ pub(crate) fn table(
 
     // 不设 `render_cell`：它是全局开关，一设整表体就走逐格 dynamic +
     // Renderer 的自绘路径（nsh-base data_table/view.rs），列窗口每平移
-    // 一次可见格全部重建——横向滚动卡。全文本格走原生 `text(cell_text)` 绑定。
+    // 一次可见格全部重建——横向滚动卡。全文本格走原生 `text(cell_value)` 绑定。
     let dt = data_table()
         .flex_1()
         .accessibility_label(Some(SharedString::from("元数据表")))

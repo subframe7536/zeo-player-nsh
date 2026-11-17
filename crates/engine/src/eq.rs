@@ -409,7 +409,7 @@ mod tests {
     fn eq_reconfigure_does_not_click() {
         let rate = 48_000;
         let input = sine(1000.0, rate, 0.2, 2);
-        let mut data = input.clone();
+        let mut data = input;
         let mut eq = Equalizer::new();
         let mut bands = [0.0; 10];
         bands[5] = 6.0;
@@ -450,7 +450,7 @@ mod tests {
         let rate = 48_000;
         let input = sine(31.0, rate, 1.0, 2);
         let in_peak = input.iter().fold(0.0f32, |m, x| m.max(x.abs()));
-        let mut data = input.clone();
+        let mut data = input;
         let mut eq = Equalizer::new();
         let mut bands = [0.0; 10];
         bands[0] = 12.0;

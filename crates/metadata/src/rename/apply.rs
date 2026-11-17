@@ -9,7 +9,6 @@ use std::time::Duration;
 /// 前列出的侧车逐个换到新主干。返回全部已发生的 `(旧, 新)` 移动与
 /// 可选错误——音频已移走而侧车失败时，调用方仍能拿到前半的移动
 /// 记录去刷新曲库索引。
-#[allow(dead_code, reason = "元数据视图接入用（metadata_view_plan 阶段三）")]
 pub fn apply(item: &Planned) -> (Vec<(String, String)>, Option<String>) {
     match &item.status {
         Status::Unchanged => return (Vec::new(), None),

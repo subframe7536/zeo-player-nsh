@@ -68,7 +68,7 @@ pub(crate) fn scan(store: &LibraryStore) -> usize {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut dirs: Vec<String> = Vec::new();
     for root in &config.roots {
-        *store.current.lock().unwrap() = root.clone();
+        (*store.current.lock().unwrap()).clone_from(root);
         collect_audio_and_dirs(Path::new(root), &mut files, &mut dirs);
     }
     dirs.sort_unstable();

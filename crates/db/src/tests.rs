@@ -109,7 +109,7 @@ fn extended_meta_db_roundtrip() {
         stamp: 10,
         size: 2048,
         modified: 100,
-        value: Arc::new(meta.clone()),
+        value: Arc::new(meta),
     };
     save_meta_to(&mut conn, &[("track.flac".to_owned(), entry)]).unwrap();
     let rows = load_meta_from(&conn).unwrap();

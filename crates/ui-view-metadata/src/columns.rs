@@ -217,11 +217,8 @@ pub(crate) fn column_selector(visible_cols: Signal<BTreeSet<String>>) -> AnyElem
                 .child(view().p(px(6.0)).gap(px(2.0)).children(items)),
         );
 
-    let close = {
-        let open = open.clone();
-        move || {
-            open.set(false);
-        }
+    let close = move || {
+        open.set(false);
     };
 
     let selector = popover()
@@ -246,14 +243,8 @@ pub(crate) fn column_selector(visible_cols: Signal<BTreeSet<String>>) -> AnyElem
                     .test_id("column_selector_overlay")
                     .absolute()
                     .inset_0()
-                    .on_press({
-                        let close = close.clone();
-                        move || close()
-                    })
-                    .on_context_menu({
-                        let close = close.clone();
-                        move |_: &nsh_core::ContextMenuEvent| close()
-                    })
+                    .on_press(close)
+                    .on_context_menu(move |_: &nsh_core::ContextMenuEvent| close())
             },
         ))
         .child(selector)

@@ -224,7 +224,7 @@ pub fn track_row_selectable(
     let last = Rc::new(RefCell::new(None::<(String, Instant)>));
     let sel_bg = selected.clone();
     let sel_hover = selected.clone();
-    let sel_state = selected.clone();
+    let sel_state = selected;
     view()
         .h(px(ROW))
         .flex_row()

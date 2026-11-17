@@ -72,13 +72,6 @@ pub(crate) const NUMERIC: &[&str] = &[
     "album_replay_peak",
 ];
 
-/// 一个单元格的显示文本：行已加载用标签值（增益补 ` dB`、评分画星、
-/// 封面状态译名），未加载回落 `TrackEntry` 索引值（多余列为空）。
-#[allow(dead_code)]
-pub(crate) fn cell_text(key: &str, track: &TrackEntry, row: Option<&MetaRow>) -> String {
-    cell_value(key, track, row).into_owned()
-}
-
 pub(crate) fn field_str(row: &MetaRow, f: TagField) -> &str {
     row.fields.get(&f).map(|s| s.as_str()).unwrap_or("")
 }
@@ -139,11 +132,7 @@ pub(crate) fn loaded_cell_cow<'a>(
                 _ => Cow::Borrowed(""),
             },
         },
-        "pictures" => match row.cover {
-            CoverState::Embedded => Cow::Borrowed("内嵌"),
-            CoverState::File => Cow::Borrowed("文件"),
-            CoverState::None => Cow::Borrowed("无"),
-        },
+        "pictures" => entry_cell_cow(key, track),
         "track_replay_gain" => gain(TagField::TrackGain),
         "track_replay_peak" => Cow::Borrowed(field_str(row, TagField::TrackPeak)),
         "album_replay_gain" => gain(TagField::AlbumGain),
@@ -234,7 +223,7 @@ pub(crate) fn entry_cell_cow<'a>(key: &str, t: &'a TrackEntry) -> Cow<'a, str> {
 /// 单元格比较（`displayed` 排序用，纯函数）：空值恒排最后（与方向
 /// 无关）；数值列按数字（增益剥 ` dB`，非数字回落文本序）；文本列
 /// 不分大小写。
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn compare_cells(key: &str, a: &str, b: &str, ascending: bool) -> Ordering {
     match (a.is_empty(), b.is_empty()) {
         (true, true) => return Ordering::Equal,
@@ -254,6 +243,7 @@ pub(crate) fn compare_cells(key: &str, a: &str, b: &str, ascending: bool) -> Ord
     if ascending { ord } else { ord.reverse() }
 }
 
+#[cfg(test)]
 pub(crate) fn compare_text(a: &str, b: &str) -> Ordering {
     if a.is_ascii() && b.is_ascii() {
         for (ca, cb) in a.bytes().zip(b.bytes()) {

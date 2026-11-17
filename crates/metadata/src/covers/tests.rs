@@ -111,7 +111,7 @@ fn thumbnails_are_small_jpegs() {
     assert!(img.width() <= THUMB && img.height() <= THUMB);
     let size = std::fs::metadata(&thumb).unwrap().len();
     let again = std::time::Instant::now();
-    assert_eq!(cover_file(&file, THUMB), Some(thumb.clone()));
+    assert_eq!(cover_file(&file, THUMB), Some(thumb));
     eprintln!(
         "{} → {}×{} {size} B，首次 {first:?}，缓存 {:?}",
         file.display(),

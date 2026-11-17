@@ -10,7 +10,7 @@ pub(crate) fn tag_sidebar_row(
     let sel_bg = selected.clone();
     let sel_state = selected.clone();
     let sel_icon = selected.clone();
-    let sel_text = selected.clone();
+    let sel_text = selected;
     view()
         .w_full()
         .h(px(34.0))

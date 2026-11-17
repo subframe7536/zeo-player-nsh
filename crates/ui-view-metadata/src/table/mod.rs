@@ -24,7 +24,7 @@ pub(crate) use nsh_core::prelude::*;
 
 pub(crate) use nsh_core::{Cursor, PointerEvents};
 
-pub(crate) use super::{CoverState, MetaRow};
+pub(crate) use super::MetaRow;
 
 pub(crate) use zeo_metadata::write::TagField;
 

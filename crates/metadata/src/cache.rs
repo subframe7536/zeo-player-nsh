@@ -117,7 +117,7 @@ impl MetaCache {
         for (old, new, stamp, modified) in rows {
             for (p, e) in pending.iter_mut() {
                 if p == old {
-                    *p = new.clone();
+                    p.clone_from(new);
                     e.stamp = *stamp;
                     e.modified = *modified;
                 }

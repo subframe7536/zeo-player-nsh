@@ -248,7 +248,7 @@ fn fader(
         .bottom(move || relative(pos()))
         .mb(px(-style.thumb_d / 2.0));
     let on_move = Rc::new(on_move);
-    let m = on_move.clone();
+    let m = on_move;
     view().items_center().child(rail).child(knob).child(
         overlay_slider(
             true,

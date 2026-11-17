@@ -21,13 +21,12 @@ impl MediaSession {
         std::thread::Builder::new()
             .name("zeo-player-media".into())
             .spawn(move || {
-                #[allow(unused_mut)]
-                let mut config = PlayerConfig::new("Zeo Player")
+                let config = PlayerConfig::new("Zeo Player")
                     .desktop_entry("dev.subf.zeo-player")
                     .track_id_prefix("/dev/subf/zeo_player/track");
                 // Windows 的系统媒体控件要挂在窗口上：等 window.rs 找到窗口。
                 #[cfg(target_os = "windows")]
-                let mut thumbnail = {
+                let (config, mut thumbnail) = {
                     let mut waited = 0;
                     let hwnd = loop {
                         if let Some(hwnd) = crate::hwnd() {
@@ -40,8 +39,10 @@ impl MediaSession {
                         std::thread::sleep(Duration::from_millis(100));
                         waited += 1;
                     };
-                    config = config.hwnd(hwnd).app_media_id("dev.subf.zeo-player");
-                    smtc_thumbnail::Thumbnail::new(hwnd)
+                    (
+                        config.hwnd(hwnd).app_media_id("dev.subf.zeo-player"),
+                        smtc_thumbnail::Thumbnail::new(hwnd),
+                    )
                 };
                 let mut controls = match MediaControls::new(config, move |event: Event| {
                     // OS 回调线程：只做转发，不阻塞。

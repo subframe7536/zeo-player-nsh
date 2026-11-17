@@ -20,7 +20,6 @@ mod table;
 use nsh_base::{DataTableSort, h_resizable, popover, resizable_panel};
 use nsh_core::prelude::*;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -208,48 +207,37 @@ pub fn page() -> View {
                         .child(column_selector(visible_cols))
                         .child(view().flex_1().min_w(px(0.0)).window_drag(true))
                         .child({
-                            let displayed = displayed.clone();
-                            let selected = selected.clone();
-                            let anchor = anchor.clone();
                             // 「全选」不放表头格：上游自定义表头对滚动区列
                             // 不落渲染内容（见 upstream.md），工具栏的 nsh_base
                             // 复选框在真机 / headless 都稳。
                             let mark = checkbox(
-                                {
-                                    let displayed = displayed.clone();
-                                    let selected = selected.clone();
-                                    move || {
-                                        selected.with(|s| {
-                                            if s.is_empty() {
-                                                return false;
-                                            }
-                                            displayed.with(|v| {
-                                                !v.is_empty()
-                                                    && s.len() >= v.len()
-                                                    && v.iter().all(|t| s.contains(&t.path))
-                                            })
+                                move || {
+                                    selected.with(|s| {
+                                        if s.is_empty() {
+                                            return false;
+                                        }
+                                        displayed.with(|v| {
+                                            !v.is_empty()
+                                                && s.len() >= v.len()
+                                                && v.iter().all(|t| s.contains(&t.path))
                                         })
-                                    }
+                                    })
                                 },
-                                {
-                                    let displayed = displayed.clone();
-                                    let selected = selected.clone();
-                                    move || {
-                                        selected.with(|s| {
-                                            if s.is_empty() {
+                                move || {
+                                    selected.with(|s| {
+                                        if s.is_empty() {
+                                            return false;
+                                        }
+                                        displayed.with(|v| {
+                                            if v.is_empty() {
                                                 return false;
                                             }
-                                            displayed.with(|v| {
-                                                if v.is_empty() {
-                                                    return false;
-                                                }
-                                                let any = v.iter().any(|t| s.contains(&t.path));
-                                                let all = s.len() >= v.len()
-                                                    && v.iter().all(|t| s.contains(&t.path));
-                                                any && !all
-                                            })
+                                            let any = v.iter().any(|t| s.contains(&t.path));
+                                            let all = s.len() >= v.len()
+                                                && v.iter().all(|t| s.contains(&t.path));
+                                            any && !all
                                         })
-                                    }
+                                    })
                                 },
                                 "全选",
                                 move |next| {

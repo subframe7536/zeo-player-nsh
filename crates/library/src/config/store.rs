@@ -83,11 +83,6 @@ impl LibraryStore {
         self.update_config(|c| c.appearance = appearance);
     }
 
-    #[allow(dead_code)]
-    pub fn sidebar_section(&self) -> SidebarSection {
-        self.config().sidebar_section
-    }
-
     /// 设置侧栏下半部显示的视图（保存）。
     pub fn set_sidebar_section(&self, section: SidebarSection) {
         self.update_config(|c| c.sidebar_section = section);

@@ -5,7 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// 单条计划的状态。
-#[allow(dead_code, reason = "元数据视图接入用（metadata_view_plan 阶段三）")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
     /// 可以改名。
@@ -19,7 +18,6 @@ pub enum Status {
 }
 
 /// 一条改名计划：`src` → `dest`（同一父目录）。
-#[allow(dead_code, reason = "元数据视图接入用（metadata_view_plan 阶段三）")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Planned {
     pub src: String,
@@ -29,7 +27,6 @@ pub struct Planned {
 
 /// 一批曲目的改名计划：目标一律落在源文件原父目录里，扩展名原样
 /// 保留；状态含批次内冲突与磁盘冲突预检。
-#[allow(dead_code, reason = "元数据视图接入用（metadata_view_plan 阶段三）")]
 pub fn plan(items: &[(String, HashMap<TagField, String>)], template: &Template) -> Vec<Planned> {
     let mut planned: Vec<Planned> = items
         .iter()

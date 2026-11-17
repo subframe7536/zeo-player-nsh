@@ -9,7 +9,7 @@ pub(crate) fn update_config(f: impl FnOnce(&mut zeo_types::config::LibraryConfig
 
 /// 界面字体（`None`：系统字体）。立即生效并保存。
 pub fn set_font(font: Option<String>) {
-    update_config(|c| c.font = font.clone());
+    update_config(|c| c.font.clone_from(&font));
     std::thread::spawn(move || library_store().set_font(font));
 }
 

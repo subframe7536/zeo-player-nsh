@@ -69,7 +69,7 @@ pub(crate) fn lyrics_area(draft: Signal<TagDraft>, file: bool) -> Input {
         .on_change(move |t: &str| {
             draft.update(|d| {
                 if file {
-                    d.lrc_text = t.to_owned();
+                    t.clone_into(&mut d.lrc_text);
                 } else {
                     d.values.insert(TagField::Lyrics, t.to_owned());
                 }

@@ -163,7 +163,7 @@ pub(crate) fn apply_move(
     let mut cache = full_cache().lock().unwrap();
     if let Some(pos) = cache.iter().position(|(p, _)| p == src) {
         let mut entry = cache.remove(pos);
-        entry.0 = dest.to_owned();
+        dest.clone_into(&mut entry.0);
         cache.push(entry);
     }
     rows.update(|r| {

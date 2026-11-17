@@ -22,13 +22,10 @@ pub(crate) fn name_dialog(
     };
     let draft = signal(default);
     let err = signal(String::new());
-    let submit = Rc::new({
-        let ops = ops.clone();
-        move || {
-            let name = draft.get_untracked();
-            if let Err(e) = ops.submit_name(&name) {
-                err.set(e);
-            }
+    let submit = Rc::new(move || {
+        let name = draft.get_untracked();
+        if let Err(e) = ops.submit_name(&name) {
+            err.set(e);
         }
     });
     let content = dialog_content(425.0)
@@ -154,12 +151,9 @@ pub(crate) fn tree_menu(trigger: View, row: Memo<Option<TreeRow>>, ops: Rc<Ops>)
                 open(|p| FileOp::Rename { path: p, dir: true }),
             )
         }))
-        .child(item(REVEAL_LABEL, Some(Icon::Reveal), {
-            let path = path;
-            move || {
-                if let Some(p) = path() {
-                    reveal(&p);
-                }
+        .child(item(REVEAL_LABEL, Some(Icon::Reveal), move || {
+            if let Some(p) = path() {
+                reveal(&p);
             }
         }))
         .child(separator())
