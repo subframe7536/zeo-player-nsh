@@ -7,16 +7,14 @@ pub fn Artists() -> impl IntoElement {
     let selected = s.artist_sel;
     let groups = computed(move || {
         let tracks = s.tracks.get();
-        let seps = s.library.with(|l| l.config.artist_separators.clone());
         Rc::new(group_by(&tracks, move |t| {
-            let artist = t.display_artist();
-            let parts = zeo_library::config::split_artists(artist, &seps);
-            if parts.is_empty() {
+            if t.artists.is_empty() {
+                let artist = t.display_artist();
                 vec![(artist.to_owned(), artist.to_owned(), String::new())]
             } else {
-                parts
-                    .into_iter()
-                    .map(|a| (a.clone(), a, String::new()))
+                t.artists
+                    .iter()
+                    .map(|a| (a.clone(), a.clone(), String::new()))
                     .collect()
             }
         }))
@@ -32,7 +30,7 @@ pub fn Artists() -> impl IntoElement {
                         g.iter()
                             .find(|g| g.key == key)
                             .or_else(|| {
-                                let seps = s.library.with(|l| l.config.artist_separators.clone());
+                                let seps = s.artist_seps.get();
                                 let parts = zeo_library::config::split_artists(&key, &seps);
                                 parts
                                     .into_iter()
@@ -57,7 +55,7 @@ pub fn Artists() -> impl IntoElement {
                         avatar(
                             move || cover_path.get(),
                             move || art_name.get(),
-                            Some(168.0),
+                            Some(200.0),
                         )
                         .shadow_xl()
                     }),
@@ -75,10 +73,6 @@ pub fn Artists() -> impl IntoElement {
             }
             None => {
                 let count = computed(move || groups.with(|g| g.len()));
-                let columns = move || {
-                    let width = content_break() - 80.0;
-                    ((width + 8.0) / (184.0 + 8.0)).floor().clamp(2.0, 10.0) as u32
-                };
                 let grid = virtual_list(count, move |at| {
                     let group = computed(move || groups.with(|g| g.get(at.index()).cloned()));
                     let cover = move || group.with(|g| g.as_ref().and_then(|g| g.cover.clone()));
@@ -86,9 +80,9 @@ pub fn Artists() -> impl IntoElement {
                         group.with(|g| g.as_ref().map(|g| g.title.clone()).unwrap_or_default())
                     };
                     nsh_base::button()
-                        .p(px(8.0))
-                        .gap(px(10.0))
-                        .rounded(px(14.0))
+                        .p(px(CARD_PAD))
+                        .gap(px(CARD_ART_GAP))
+                        .rounded(px(CARD_RADIUS))
                         .accessibility_label(move || SharedString::from(name()))
                         .hover(|st| st.bg(hover()))
                         .active(|st| st.opacity(0.75))
@@ -96,13 +90,13 @@ pub fn Artists() -> impl IntoElement {
                         .child(when(covers_on, move || avatar(cover, name, None)))
                         .child(
                             view()
-                                .gap(px(2.0))
+                                .gap(px(STACK_GAP))
                                 .px(px(2.0))
                                 .child(
                                     text(name)
                                         .number_of_lines(1)
-                                        .text_size(px(15.0))
-                                        .line_height(px(15.0))
+                                        .text_size(px(14.0))
+                                        .line_height(px(14.0))
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(fg()),
                                 )
@@ -121,19 +115,20 @@ pub fn Artists() -> impl IntoElement {
                                         })
                                     })
                                     .number_of_lines(1)
-                                    .text_size(px(13.0))
-                                    .line_height(px(13.0))
+                                    .text_size(px(12.0))
+                                    .line_height(px(12.0))
                                     .text_color(muted_fg()),
                                 ),
                         )
                 })
-                .columns(columns)
+                .columns(grid_columns)
                 .estimated_item_size(px(240.0))
-                .content_padding_x(px(40.0))
+                .content_padding_x(px(PAGE_X - CARD_PAD))
                 .content_padding_bottom(px(BAR_SPACE))
                 .flex_1();
                 view()
                     .flex_1()
+                    .test_id("artist-grid")
                     .child(page_header(
                         || "艺术家".into(),
                         move || format!("{} 位艺术家", count.get()),

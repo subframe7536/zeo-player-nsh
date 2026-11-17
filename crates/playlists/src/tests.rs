@@ -20,6 +20,7 @@ fn track(
             .into_owned(),
         album_artist: String::new(),
         genres: genres.iter().map(|g| (*g).to_owned()).collect(),
+        artists: Vec::new(),
         size_bytes: 8_000_000,
         modified: 1_000_000,
         stamp: 0,

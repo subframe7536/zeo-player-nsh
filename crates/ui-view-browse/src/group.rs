@@ -9,6 +9,15 @@ pub(crate) const ALBUM_COLS: Columns = Columns {
     format: false,
 };
 
+/// 艺术家 / 专辑网格共用的列数：内容两侧各让 `PAGE_X - CARD_PAD`
+///（封面与页标题同一条内容线），卡宽节奏 184、卡间按 `CARD_PAD` 计。
+pub(crate) fn grid_columns() -> u32 {
+    let width = content_break() - 2.0 * (PAGE_X - CARD_PAD);
+    ((width + CARD_PAD) / (184.0 + CARD_PAD))
+        .floor()
+        .clamp(2.0, 10.0) as u32
+}
+
 // --- 艺术家 ---------------------------------------------------------------------
 
 #[derive(Clone, PartialEq)]

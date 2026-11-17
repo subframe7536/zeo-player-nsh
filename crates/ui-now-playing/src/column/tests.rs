@@ -43,28 +43,4 @@ mod tests {
         };
         assert_eq!(audio_line(&hires), "24-bit / 96kHz / 2304kbps / Stereo");
     }
-
-    #[test]
-    pub(crate) fn quality_tags() {
-        assert_eq!(quality_tag(&meta()), None, "160 kbps 有损不标");
-        assert_eq!(
-            quality_tag(&MetaInfo {
-                bit_rate: Some(320),
-                ..meta()
-            })
-            .as_deref(),
-            Some("HQ")
-        );
-        let flac = MetaInfo {
-            quality: Some("Lossless".into()),
-            bit_depth: Some(16),
-            ..meta()
-        };
-        assert_eq!(quality_tag(&flac).as_deref(), Some("Lossless"));
-        let hires = MetaInfo {
-            bit_depth: Some(24),
-            ..flac
-        };
-        assert_eq!(quality_tag(&hires).as_deref(), Some("Hi-Res"));
-    }
 }

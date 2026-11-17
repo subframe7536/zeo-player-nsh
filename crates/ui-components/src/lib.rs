@@ -2,6 +2,7 @@
 //! `icons` 图标、`cover` 封面、`slider` 拖动条、`tracks` 曲目表套件、
 //! `page` 页面脚手架。
 
+pub mod artists;
 pub mod button;
 pub mod checkbox;
 pub mod cover;

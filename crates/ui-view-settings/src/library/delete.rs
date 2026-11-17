@@ -51,7 +51,7 @@ pub(crate) fn watch_row() -> View {
             view()
                 .flex_1()
                 .min_w(px(200.0))
-                .gap(px(2.0))
+                .gap(px(6.0))
                 .child(
                     text("监视文件夹变化")
                         .text_size(px(14.0))
@@ -59,20 +59,15 @@ pub(crate) fn watch_row() -> View {
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(fg()),
                 )
-                .child(
-                    text(status)
-                        .text_size(px(12.0))
-                        .line_height(px(12.0))
-                        .text_color(move || {
-                            if s.library
-                                .with(|l| l.config.watch && l.watcher.error.is_some())
-                            {
-                                nsh_base::theme().destructive
-                            } else {
-                                muted_fg()
-                            }
-                        }),
-                ),
+                .child(text(status).text_size(px(12.0)).text_color(move || {
+                    if s.library
+                        .with(|l| l.config.watch && l.watcher.error.is_some())
+                    {
+                        nsh_base::theme().destructive
+                    } else {
+                        muted_fg()
+                    }
+                })),
         )
         .child(toggle)
 }

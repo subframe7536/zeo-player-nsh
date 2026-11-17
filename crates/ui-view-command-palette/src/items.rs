@@ -61,7 +61,7 @@ pub(crate) fn command_item_view(entry: &CommandEntry) -> View {
             (false, false) => String::new(),
         };
 
-        let mut info = view().flex_1().min_w(px(0.0)).gap(px(2.0)).child(
+        let mut info = view().flex_1().min_w(px(0.0)).gap(px(STACK_GAP)).child(
             text(label)
                 .number_of_lines(1)
                 .text_size(px(13.0))
@@ -127,13 +127,14 @@ pub(crate) fn command_item_view(entry: &CommandEntry) -> View {
             "action:fullscreen" => Icon::Expand,
             "action:scan" => Icon::Refresh,
             "action:welcome" => Icon::Info,
+            _ if id.starts_with("artist:") => Icon::Mic,
             _ => Icon::Search,
         };
 
-        let badge_text = if group == "页面" {
-            "页面"
-        } else {
-            "操作"
+        let badge_text = match group {
+            "页面" => "页面",
+            "艺术家" => "艺术家",
+            _ => "操作",
         };
 
         view()

@@ -6657,6 +6657,7 @@ dependencies = [
  "nsh-base",
  "nsh-core",
  "zeo-db",
+ "zeo-library",
  "zeo-types",
  "zeo-ui-components",
  "zeo-ui-store",

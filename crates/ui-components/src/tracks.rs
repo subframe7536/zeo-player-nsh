@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use nsh_core::prelude::*;
 
+use super::artists::artist_links;
 use super::cover::{cover_initial, initial_letter};
 use super::icons::{Icon, icon_dyn};
 use zeo_types::config::TrackEntry;
@@ -93,6 +94,28 @@ pub fn format_cell(value: impl Fn() -> String + Copy + 'static) -> View {
                 )
         },
     ))
+}
+
+/// 音质小徽章：歌手名前的彩色描边小标（HQ 绿 / SQ 蓝 / Hi-Res 黄，
+/// 见 [`quality_color`]），9pt 粗体、无底色；放不下时不收缩。
+pub fn quality_badge(tag: &'static str) -> View {
+    let color = quality_color(tag);
+    view()
+        .h(px(14.0))
+        .px(px(4.0))
+        .flex_shrink_0()
+        .justify_center()
+        .rounded(px(3.0))
+        .border_1()
+        .border_color(color)
+        .child(
+            text(tag)
+                .text_size(px(9.0))
+                .line_height(px(9.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .letter_spacing(px(0.3))
+                .text_color(color),
+        )
 }
 
 /// 字节数 → 1.2 GB / 34.5 MB / 820 KB。
@@ -320,7 +343,7 @@ pub fn track_row_selectable(
             view()
                 .flex_1()
                 .min_w(px(0.0))
-                .gap(px(2.0))
+                .gap(px(STACK_GAP))
                 .child(
                     text(field(|t| t.display_title().to_owned()))
                         .number_of_lines(1)
@@ -332,11 +355,41 @@ pub fn track_row_selectable(
                         .duration(300.0),
                 )
                 .child(
-                    text(field(|t| t.display_artist().to_owned()))
-                        .number_of_lines(1)
-                        .text_size(px(12.0))
-                        .line_height(px(12.0))
-                        .text_color(muted_fg()),
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(6.0))
+                        .min_w(px(0.0))
+                        .child(when(
+                            move || {
+                                track
+                                    .with(|t| t.as_ref().and_then(|t| t.meta.quality_tag()))
+                                    .is_some()
+                            },
+                            move || {
+                                dynamic(move || {
+                                    track
+                                        .with(|t| t.as_ref().and_then(|t| t.meta.quality_tag()))
+                                        .map(quality_badge)
+                                })
+                            },
+                        ))
+                        .child(artist_links(
+                            move || {
+                                track.with(|t| {
+                                    t.as_ref()
+                                        .map(|t| {
+                                            if t.artists.is_empty() {
+                                                vec![t.display_artist().to_owned()]
+                                            } else {
+                                                t.artists.clone()
+                                            }
+                                        })
+                                        .unwrap_or_default()
+                                })
+                            },
+                            12.0,
+                        )),
                 ),
         )
         .child(cols.album.then(|| {

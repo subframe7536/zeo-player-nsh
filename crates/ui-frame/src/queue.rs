@@ -141,12 +141,12 @@ fn queue_panel(open: Signal<bool>) -> View {
                 view()
                     .flex_1()
                     .min_w(px(0.0))
-                    .gap(px(3.0))
+                    .gap(px(STACK_GAP))
                     .child(
                         text(title)
                             .number_of_lines(1)
                             .text_size(px(13.0))
-                            .line_height(px(16.0))
+                            .line_height(px(13.0))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(move || if is_current() { primary() } else { fg() })
                             .transition_colors()
@@ -162,7 +162,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                         })
                         .number_of_lines(1)
                         .text_size(px(12.0))
-                        .line_height(px(15.0))
+                        .line_height(px(12.0))
                         .text_color(muted_fg()),
                     ),
             )
@@ -221,7 +221,7 @@ fn queue_panel(open: Signal<bool>) -> View {
                 .child(
                     view()
                         .flex_1()
-                        .gap(px(2.0))
+                        .gap(px(STACK_GAP))
                         .child(
                             text("播放队列")
                                 .text_size(px(14.0))

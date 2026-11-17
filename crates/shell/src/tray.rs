@@ -72,10 +72,13 @@ fn tray_icon(state: &TrayState, scale: f32) -> Option<ImageSrc> {
         }
         Some(ImageSrc::rgba(64, 64, rgba))
     } else {
+        // macOS 菜单栏：字形比标题文字的视觉中心低约 0.75pt，有标题时上移 1pt
+        // 对齐；没标题（无曲目）与 Windows 保持 0。
+        let dy = if state.has_track { -1.0 } else { 0.0 };
         Some(ImageSrc::svg_markup(&zeo_icons::play_pause_svg(
             state.playing,
             false,
-            0.0,
+            dy,
             scale,
         )))
     }

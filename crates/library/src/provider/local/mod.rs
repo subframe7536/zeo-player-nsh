@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use crate::config::{
-    LibraryConfig, LibraryStore, ProviderId, TrackEntry, TrackShared, split_genres,
+    LibraryConfig, LibraryStore, ProviderId, TrackEntry, TrackShared, split_artists, split_genres,
 };
 use zeo_metadata::{CacheEntry, MetaCache};
 
@@ -30,7 +30,7 @@ pub(crate) fn initial_index(config: &LibraryConfig) -> Vec<TrackEntry> {
                 .any(|root| Path::new(path).starts_with(root))
         })
         .filter(|(_, entry)| passes(entry.value.duration, entry.size, config))
-        .map(|(path, entry)| track_entry(path, &entry, &config.genre_separators))
+        .map(|(path, entry)| track_entry(path, &entry, config))
         .collect();
     sort_tracks(&mut tracks);
     tracks
@@ -82,7 +82,7 @@ pub(crate) fn scan(store: &LibraryStore) -> usize {
         if let Some(name) = path.file_name() {
             *store.current.lock().unwrap() = name.to_string_lossy().into_owned();
         }
-        if let Some(entry) = read_entry(path, &config.genre_separators)
+        if let Some(entry) = read_entry(path, &config)
             && passes(entry.duration, entry.size_bytes, &config)
         {
             // 封面缩略图交给后台线程池预生成（低优先级，界面可见的请求
@@ -158,17 +158,17 @@ fn passes(duration: f64, size_bytes: u64, config: &LibraryConfig) -> bool {
 }
 
 /// 读一个文件的索引条目；读不出标签/属性的文件跳过。
-pub(crate) fn read_entry(path: &Path, separators: &[String]) -> Option<TrackEntry> {
+pub(crate) fn read_entry(path: &Path, config: &LibraryConfig) -> Option<TrackEntry> {
     let entry = MetaCache::global().entry(path).ok()?;
     Some(track_entry(
         path.to_string_lossy().into_owned(),
         &entry,
-        separators,
+        config,
     ))
 }
 
 /// 缓存条目 → 索引条目：标签 `Arc` 与元数据缓存共享，不复制字符串。
-fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> TrackEntry {
+fn track_entry(path: String, entry: &CacheEntry, config: &LibraryConfig) -> TrackEntry {
     let meta = &entry.value;
     TrackEntry(Arc::new(TrackShared {
         provider: ProviderId::Local,
@@ -190,7 +190,8 @@ fn track_entry(path: String, entry: &CacheEntry, separators: &[String]) -> Track
                 aa.to_owned()
             }
         },
-        genres: split_genres(&meta.genres, separators),
+        genres: split_genres(&meta.genres, &config.genre_separators),
+        artists: split_artists(&meta.artist, &config.artist_separators),
         size_bytes: entry.size,
         modified: entry.modified,
         stamp: entry.stamp,

@@ -97,3 +97,28 @@ pub fn open_settings(pane: Pane) {
     global::<Pane>().set(pane);
     store().settings.set(true);
 }
+
+/// 打开「艺术家」页并选中 `name`（首页热门艺术家卡、`artist_links`、
+/// 命令面板共用）。先退出全屏：全屏播放页里的歌手链接也能直接用。
+pub fn open_artist(name: &str) {
+    let s = store();
+    s.artist_sel.set(Some(name.to_owned()));
+    s.full_screen.set(false);
+    navigate(Nav::Artists);
+}
+
+/// 当前曲目的歌手名列表：`NowPlaying.artist`（引擎已回落
+/// "Unknown Artist"）按设置的艺术家分隔符拆开；拆不出时整串当一个名。
+pub fn artist_names() -> Vec<String> {
+    let artist = store().track.with(|t| t.artist.clone());
+    if artist.trim().is_empty() {
+        return Vec::new();
+    }
+    let seps = store().artist_seps.get();
+    let parts = zeo_library::config::split_artists(&artist, &seps);
+    if parts.is_empty() {
+        vec![artist]
+    } else {
+        parts
+    }
+}

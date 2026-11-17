@@ -177,6 +177,48 @@ fn lyric_offset_removed_under_folder() {
     assert_eq!(lyrics_offset_on(&conn, &outside).unwrap(), 400);
 }
 
+/// 波形缓存：写入读回；指纹不符读不到。
+#[test]
+fn waveform_roundtrip() {
+    let conn = Connection::open_in_memory().unwrap();
+    migrate(&conn).unwrap();
+    let bars = [0.1_f32, 0.5, 0.9];
+    set_waveform_bars_on(&conn, "/m/a.flac", 7, &bars).unwrap();
+    assert_eq!(
+        waveform_bars_on(&conn, "/m/a.flac", 7).unwrap(),
+        Some(bars.to_vec())
+    );
+    assert_eq!(waveform_bars_on(&conn, "/m/a.flac", 8).unwrap(), None);
+}
+
+/// 文件移动 / 改名把波形换到新路径。
+#[test]
+fn waveform_follows_move() {
+    let conn = Connection::open_in_memory().unwrap();
+    migrate(&conn).unwrap();
+    set_waveform_bars_on(&conn, "/m/a.flac", 7, &[0.2]).unwrap();
+    move_meta_on(
+        &conn,
+        &[("/m/a.flac".to_owned(), "/n/a.flac".to_owned(), 1, 1)],
+    )
+    .unwrap();
+    assert_eq!(waveform_bars_on(&conn, "/m/a.flac", 7).unwrap(), None);
+    assert_eq!(
+        waveform_bars_on(&conn, "/n/a.flac", 7).unwrap(),
+        Some(vec![0.2])
+    );
+}
+
+/// 删掉文件的元数据时波形行一并清掉。
+#[test]
+fn waveform_removed_with_file() {
+    let conn = Connection::open_in_memory().unwrap();
+    migrate(&conn).unwrap();
+    set_waveform_bars_on(&conn, "/m/a.flac", 7, &[0.2]).unwrap();
+    remove_meta_on(&conn, "/m/a.flac").unwrap();
+    assert_eq!(waveform_bars_on(&conn, "/m/a.flac", 7).unwrap(), None);
+}
+
 /// v4 库迁到 v5：lyrics_offsets 表出现、老行还在。
 #[test]
 fn migrate_from_v4_keeps_tracks() {
@@ -262,13 +304,14 @@ fn play_stats_counts_and_orders() {
             ("d".to_owned(), 0)
         ]
     );
-    // 歌手排行把孤儿排除：X = a×3 + b×1；零播放的 Z 计 0 排末位。
+    // 歌手播放明细按标签原文分组（不截断）：X = a×3 + b×1、最近 6；
+    // Y = c×2、最近 5；零播放的 Z 计 0、最近 0 排末位。
     assert_eq!(
-        s.top_artists,
+        s.artist_plays,
         vec![
-            ("X".to_owned(), 4),
-            ("Y".to_owned(), 2),
-            ("Z".to_owned(), 0)
+            ("X".to_owned(), 4, 6),
+            ("Y".to_owned(), 2, 5),
+            ("Z".to_owned(), 0, 0)
         ]
     );
     // 去重，最新在前；零播放的 d 排在最后。

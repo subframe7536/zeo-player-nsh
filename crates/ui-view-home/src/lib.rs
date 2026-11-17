@@ -28,8 +28,6 @@ pub(crate) use zeo_ui_components::page::empty_state;
 
 pub(crate) use zeo_ui_components::tracks::{Columns, content_break, track_columns, track_row};
 
-pub(crate) use zeo_ui_store::Nav;
-
 pub(crate) use zeo_ui_store::theme::*;
 
 pub(crate) use zeo_ui_store::{cover_for, covers_on, play_list, player, queue_add, store};

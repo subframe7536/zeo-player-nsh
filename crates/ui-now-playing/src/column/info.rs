@@ -16,20 +16,6 @@ pub(crate) fn column_size() -> f32 {
         .clamp(140.0, COLUMN)
 }
 
-/// 质量标签：Hi-Res（无损且高于 16-bit / 48 kHz）、Lossless、HQ（有损 ≥ 256 kbps）。
-pub(crate) fn quality_tag(m: &MetaInfo) -> Option<String> {
-    match m.quality.as_deref() {
-        Some("Lossless")
-            if m.bit_depth.unwrap_or(16) > 16 || m.sample_rate.unwrap_or(44_100) > 48_000 =>
-        {
-            Some("Hi-Res".into())
-        }
-        Some("Lossless") => Some("Lossless".into()),
-        Some(_) if m.bit_rate.unwrap_or(0) >= 256 => Some("HQ".into()),
-        _ => None,
-    }
-}
-
 /// 进度条下方的小字：24-bit / 96kHz / 2304kbps / Stereo。
 pub(crate) fn audio_line(m: &MetaInfo) -> String {
     let mut parts = Vec::new();

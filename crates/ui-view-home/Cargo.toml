@@ -12,4 +12,5 @@ zeo-ui-store.workspace = true
 zeo-ui-components.workspace = true
 zeo-types.workspace = true
 zeo-db.workspace = true
+zeo-library.workspace = true
 zeo-ui-view-browse.workspace = true

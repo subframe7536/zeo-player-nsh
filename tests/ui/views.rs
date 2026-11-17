@@ -202,8 +202,11 @@ fn number_column_only_in_album_detail() {
     assert!(!has(&app, "#"), "{:?}", texts(&app));
     // 艺术家详情：也没有。
     app.press("label:艺术家").unwrap();
-    app.wait_for("role:button[测试歌手 A]").unwrap();
-    app.press("role:button[测试歌手 A]").unwrap();
+    // 歌手名同时是行内 / 播放条的链接钮，限定在艺术家网格里点卡片。
+    app.wait_for("id:artist-grid >> role:button[测试歌手 A]")
+        .unwrap();
+    app.press("id:artist-grid >> role:button[测试歌手 A]")
+        .unwrap();
     app.wait_for("label:返回").unwrap();
     assert!(!has(&app, "#"), "歌手详情: {:?}", texts(&app));
     app.press("label:返回").unwrap();

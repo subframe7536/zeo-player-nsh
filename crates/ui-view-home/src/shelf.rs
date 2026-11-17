@@ -37,6 +37,8 @@ impl Shelf {
         view()
             .flex_row()
             .items_center()
+            // 固定行高：翻页钮随滚动需要出现 / 消失时内容不跳。
+            .h(px(28.0))
             .child(section_title(title))
             .child(view().flex_1())
             .child(when(
@@ -101,10 +103,10 @@ pub(crate) fn card_shell(label: String) -> ButtonElement {
     button()
         .w(px(STRIP_MIN_W))
         .flex_shrink_0()
-        .gap(px(10.0))
+        .gap(px(CARD_ART_GAP))
         .items_start()
         .p(px(CARD_PAD))
-        .rounded(px(12.0))
+        .rounded(px(CARD_RADIUS))
         .accessibility_label(SharedString::from(label))
         .hover(|st| st.bg(hover()))
         .active(|st| st.opacity(0.75))
@@ -120,19 +122,19 @@ pub(crate) fn card(t: &TrackEntry, index: usize, five: Rc<Vec<TrackEntry>>) -> B
     card_shell(t.display_title().to_owned())
         .on_press(move |_: &()| play_list(&five, index))
         .child(when(covers_on, move || {
-            cover_initial(src, letter, Some(CARD_ART), 8.0)
+            cover_initial(src, letter, Some(CARD_ART), CARD_ART_RADIUS)
         }))
         .child(
             view()
                 .w_full()
                 .px(px(2.0))
-                .gap(px(6.0))
+                .gap(px(STACK_GAP))
                 .child(
                     text(t.display_title().to_owned())
                         .number_of_lines(1)
                         .text_size(px(14.0))
                         .line_height(px(14.0))
-                        .font_weight(FontWeight::MEDIUM)
+                        .font_weight(FontWeight::SEMIBOLD)
                         .text_color(fg()),
                 )
                 .child(

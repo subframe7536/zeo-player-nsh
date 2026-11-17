@@ -27,6 +27,8 @@ pub struct TrackShared {
     pub album_artist: String,
     /// 按流派分隔符拆好的流派列表（`split_genres`，设置改了会重算）。
     pub genres: Vec<String>,
+    /// 按艺术家分隔符拆好的歌手列表（`split_artists`，设置改了会重算）。
+    pub artists: Vec<String>,
     pub size_bytes: u64,
     pub modified: u64,
     /// 文件指纹（[`crate::meta::file_stamp`]），内容一变就变。

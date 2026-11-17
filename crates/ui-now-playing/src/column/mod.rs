@@ -13,6 +13,7 @@ pub(crate) use zeo_metadata::MetaInfo;
 
 pub(crate) use zeo_shell::{REVEAL_LABEL, reveal};
 
+pub(crate) use zeo_ui_components::artists::artist_links_colored;
 pub(crate) use zeo_ui_components::button::{on_dark, tipped};
 
 pub(crate) use zeo_ui_components::icons::{Icon, icon, icon_dyn};

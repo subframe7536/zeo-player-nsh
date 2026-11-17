@@ -1,41 +1,66 @@
 use super::*;
 
-/// 热门艺术家：播放次数前 8 的歌手，大圆头像 + 名；固定宽卡单行横排、
-/// 放不下横向滚动；点到「歌手」页详情。
+/// `artist_plays`（歌手标签原文、播放次数、最近播放时间）按艺术家分隔符
+/// 拆开合并：同名累计次数、取最近时间，按次数降序、时间降序、名字升序
+/// 取前 `n` 个名。
+pub(crate) fn rank_artists(
+    rows: &[(String, u64, u64)],
+    separators: &[String],
+    n: usize,
+) -> Vec<String> {
+    let mut map: HashMap<String, (u64, u64)> = HashMap::new();
+    for (raw, plays, last) in rows {
+        for name in zeo_library::config::split_artists(raw, separators) {
+            let e = map.entry(name).or_insert((0, 0));
+            e.0 += plays;
+            e.1 = e.1.max(*last);
+        }
+    }
+    let mut out: Vec<(String, u64, u64)> = map
+        .into_iter()
+        .map(|(name, (plays, last))| (name, plays, last))
+        .collect();
+    out.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| b.2.cmp(&a.2))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    out.truncate(n);
+    out.into_iter().map(|(name, _, _)| name).collect()
+}
+
+/// 热门艺术家：`artist_plays` 拆分合并后播放多的前 8，卡上是居中头像 +
+/// 名 +「N 首」（含该歌手的曲目数）；固定宽卡单行横排、放不下横向滚动；
+/// 点卡进「艺术家」详情。
 pub(crate) fn hot_artists(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
     let s = store();
     dynamic(move || {
-        let names: Vec<String> = stats.with(|v| {
-            v.top_artists
-                .iter()
-                .map(|(n, _)| n.clone())
-                .take(8)
-                .collect()
+        let names = stats.with(|v| {
+            let seps = s.artist_seps.get();
+            rank_artists(&v.artist_plays, &seps, 8)
         });
         if names.is_empty() {
             return view().into_element();
         }
         let tracks = s.tracks.get();
-        let sel = s.artist_sel;
         let shelf = Shelf::new("home-artists-shelf", names.len());
         let strip = shelf.strip(|mut strip| {
             for name in names {
-                // 头像取该歌手第一张有封面的曲目（没有则首字占位）。
+                let mine = |t: &&TrackEntry| t.artists.contains(&name);
+                // 头像取含该歌手且有封面的第一首曲目（没有则首字占位）。
                 let cover_path = stored(
                     tracks
                         .iter()
-                        .find(|t| t.artist == name && t.has_art)
+                        .find(|t| mine(t) && t.has_art)
                         .map(|t| t.path.clone()),
                 );
+                let count = tracks.iter().filter(|t| mine(t)).count();
                 let art_name = stored(name.clone());
+                let press_name = name.clone();
                 strip = strip.child(
                     card_shell(name.clone())
                         .items_center()
-                        .on_press(move |_: &()| {
-                            // 深链进「歌手」详情：选好后切导航，Artists 直接开详情。
-                            sel.set(Some(art_name.get()));
-                            zeo_ui_store::navigate(Nav::Artists);
-                        })
+                        .on_press(move |_: &()| zeo_ui_store::open_artist(&press_name))
                         .child(when(covers_on, move || {
                             avatar(
                                 move || cover_path.get(),
@@ -44,12 +69,24 @@ pub(crate) fn hot_artists(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
                             )
                         }))
                         .child(
-                            text(name.clone())
-                                .number_of_lines(1)
-                                .text_size(px(14.0))
-                                .line_height(px(14.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(fg()),
+                            view()
+                                .items_center()
+                                .gap(px(STACK_GAP))
+                                .child(
+                                    text(name.clone())
+                                        .number_of_lines(1)
+                                        .text_size(px(14.0))
+                                        .line_height(px(14.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(fg()),
+                                )
+                                .child(
+                                    text(format!("{count} 首"))
+                                        .number_of_lines(1)
+                                        .text_size(px(12.0))
+                                        .line_height(px(12.0))
+                                        .text_color(muted_fg()),
+                                ),
                         ),
                 );
             }
@@ -154,4 +191,38 @@ pub(crate) fn recent(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
             .into_element()
     })
     .into_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rows(v: &[(&str, u64, u64)]) -> Vec<(String, u64, u64)> {
+        v.iter()
+            .map(|(a, c, l)| ((*a).to_owned(), *c, *l))
+            .collect()
+    }
+
+    #[test]
+    fn rank_artists_merges_split_names() {
+        let seps = vec![";".to_owned()];
+        // "A; B" 的两次播放同时计给 A 与 B；"A" 再加 2 次、最近 20。
+        let r = rows(&[("A; B", 3, 10), ("A", 2, 20), ("B", 1, 5)]);
+        assert_eq!(rank_artists(&r, &seps, 8), vec!["A", "B"]);
+    }
+
+    #[test]
+    fn rank_artists_tie_breaks() {
+        // 次数相同比最近时间，再比名字。
+        let r = rows(&[("B", 2, 5), ("A", 2, 5), ("C", 2, 9)]);
+        assert_eq!(rank_artists(&r, &[], 8), vec!["C", "A", "B"]);
+    }
+
+    #[test]
+    fn rank_artists_skips_empty_and_limits() {
+        let seps = vec![";".to_owned()];
+        let r = rows(&[("", 5, 3), (" ; ", 4, 2), ("A", 1, 1), ("B", 1, 2)]);
+        assert_eq!(rank_artists(&r, &seps, 1), vec!["B"]);
+        assert_eq!(rank_artists(&r, &seps, 8), vec!["B", "A"]);
+    }
 }

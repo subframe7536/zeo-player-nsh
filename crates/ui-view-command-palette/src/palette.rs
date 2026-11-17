@@ -164,7 +164,25 @@ pub(crate) fn palette_content(close: impl Fn() + Copy + 'static) -> CommandEleme
                 }
             }
 
-            // 3. 曲目搜索
+            // 3. 艺术家（仅查询非空）：各曲目 `artists` 去重名，
+            //    小写包含查询、按名排序取前 5。
+            if !q_trimmed.is_empty() {
+                let all = s.tracks.get();
+                let names: Vec<String> = all
+                    .iter()
+                    .flat_map(|t| t.artists.iter())
+                    .filter(|a| a.to_lowercase().contains(q_lower.as_str()))
+                    .cloned()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .take(5)
+                    .collect();
+                for name in names {
+                    list.push(CommandItem::new(format!("artist:{name}"), name).group("艺术家"));
+                }
+            }
+
+            // 4. 曲目搜索
             let tracks = matching_tracks.get();
             for t in tracks.iter() {
                 let title = if t.title.is_empty() {
@@ -276,6 +294,9 @@ pub(crate) fn palette_content(close: impl Fn() + Copy + 'static) -> CommandEleme
                     "welcome" => store::open_welcome(),
                     _ => {}
                 }
+                close();
+            } else if let Some(name) = id_str.strip_prefix("artist:") {
+                store::open_artist(name);
                 close();
             } else if let Some(path_str) = id_str.strip_prefix("track:") {
                 let list = matching_tracks.get();

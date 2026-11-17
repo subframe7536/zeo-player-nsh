@@ -47,6 +47,16 @@ fn track_row_double_click_like_and_menu() {
     // 还原：取消喜欢，别让喜欢状态漏给别的用例。
     app.press("role:button[测试歌曲] >> role:button[取消喜欢]")
         .unwrap();
+
+    // 艺术家链接：行内歌手名单独可点，进艺术家详情而不触发行选中/播放。
+    app.press("role:button[测试歌曲] >> role:button[测试歌手 A]")
+        .unwrap();
+    app.wait_for("label:返回").unwrap();
+    assert!(
+        app.screen().selected("role:link[艺术家]").unwrap_or(false),
+        "点歌手链接应落在艺术家页: {:?}",
+        texts(&app)
+    );
 }
 
 /// 首页是默认页：侧栏「首页」选中；有语料时随机推荐（「随机翻到了」
@@ -133,10 +143,13 @@ fn home_counts_a_play() {
     assert!(has(&app, "热门艺术家"), "{:?}", texts(&app));
     assert!(has(&app, "测试歌曲"), "{:?}", texts(&app));
 
-    // 「热门艺术家」深链：点歌手圆钮直接落进「歌手」详情（复用 Artists）。
+    // 「热门艺术家」深链：点歌手卡直接落进「歌手」详情（复用 Artists）。
+    // 多歌手已按分隔符拆开（「测试歌手 A; 测试歌手 B」→ A、B 两张卡），
+    // 歌手名同时是行内 / 播放条的链接钮，限定在卡条里点。
     // 首页长页面下滚一段，避开底部浮动播放条。
     let _ = app.scroll("text:热门艺术家", px(480.0));
-    app.press("role:button[测试歌手 A; 测试歌手 B]").unwrap();
+    app.press("id:home-artists-shelf >> role:button[测试歌手 A]")
+        .unwrap();
     app.wait_for("label:返回").unwrap();
     // 回网格并把选中复位，别留给后面的侧栏用例。
     app.press("label:返回").unwrap();

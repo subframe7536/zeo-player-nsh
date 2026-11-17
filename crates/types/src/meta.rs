@@ -61,6 +61,24 @@ pub struct MetaInfo {
     pub replaygain: ReplayGain,
 }
 
+impl MetaInfo {
+    /// 音质小标签：无损且高于 CD 规格（>16-bit 或 >48 kHz）是「Hi-Res」，
+    /// 其余无损「SQ」，有损 ≥256 kbps「HQ」；没有判据为 `None`。
+    pub fn quality_tag(&self) -> Option<&'static str> {
+        match self.quality.as_deref() {
+            Some("Lossless")
+                if self.bit_depth.unwrap_or(16) > 16
+                    || self.sample_rate.unwrap_or(44_100) > 48_000 =>
+            {
+                Some("Hi-Res")
+            }
+            Some("Lossless") => Some("SQ"),
+            Some(_) if self.bit_rate.unwrap_or(0) >= 256 => Some("HQ"),
+            _ => None,
+        }
+    }
+}
+
 /// 资源管理器）改不了 ctime / 新文件的创建时间，所以内容换了总能发现。
 pub fn file_stamp(meta: &std::fs::Metadata) -> u64 {
     let nanos = |t: std::io::Result<std::time::SystemTime>| {
@@ -103,4 +121,42 @@ pub struct CacheEntry {
     /// 修改时间（Unix 秒）。
     pub modified: u64,
     pub value: Arc<MetaInfo>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn meta() -> MetaInfo {
+        MetaInfo {
+            bit_rate: Some(160),
+            sample_rate: Some(44_100),
+            quality: Some("Lossy".into()),
+            ..MetaInfo::default()
+        }
+    }
+
+    #[test]
+    fn quality_tags() {
+        assert_eq!(meta().quality_tag(), None, "160 kbps 有损不标");
+        assert_eq!(
+            MetaInfo {
+                bit_rate: Some(320),
+                ..meta()
+            }
+            .quality_tag(),
+            Some("HQ")
+        );
+        let flac = MetaInfo {
+            quality: Some("Lossless".into()),
+            bit_depth: Some(16),
+            ..meta()
+        };
+        assert_eq!(flac.quality_tag(), Some("SQ"));
+        let hires = MetaInfo {
+            bit_depth: Some(24),
+            ..flac
+        };
+        assert_eq!(hires.quality_tag(), Some("Hi-Res"));
+    }
 }

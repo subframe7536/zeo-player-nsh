@@ -160,6 +160,10 @@ pub struct Store {
     /// 「歌手」页当前点开的歌手（分组 key，即歌手标签原文）；首页
     /// 「热门艺术家」深链进详情也写它。
     pub artist_sel: Signal<Option<String>>,
+    /// 艺术家分隔符（`config.artist_separators` 的 memo）：拆歌手名的
+    /// 各处（链接、热门艺术家、深链回落）读它而不是整个 `library`，
+    /// memo 相等性让无关配置写不往下传。
+    pub artist_seps: Memo<Vec<String>>,
     /// 侧栏下半部当前显示的视图（歌单 / 标签 / 文件夹）。
     pub sidebar_section: Signal<SidebarSection>,
     /// 「标签」页当前选中的流派（分组 key）；侧栏与主视图共用。

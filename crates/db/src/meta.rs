@@ -209,6 +209,7 @@ pub fn retain_meta(keep: &HashSet<String>) {
 pub(crate) fn remove_meta_on(conn: &Connection, path: &str) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM tracks WHERE path = ?1", [path])?;
     conn.execute("DELETE FROM lyrics_offsets WHERE path = ?1", [path])?;
+    conn.execute("DELETE FROM waveforms WHERE path = ?1", [path])?;
     conn.execute("DELETE FROM added WHERE path = ?1", [path])?;
     Ok(())
 }
@@ -217,7 +218,7 @@ pub(crate) fn remove_meta_under_on(conn: &Connection, path: &str) -> rusqlite::R
     let sep = std::path::MAIN_SEPARATOR;
     let trimmed = path.trim_end_matches(sep);
     let under = format!("{trimmed}{sep}");
-    for table in ["tracks", "lyrics_offsets", "added"] {
+    for table in ["tracks", "lyrics_offsets", "waveforms", "added"] {
         conn.execute(
             &format!("DELETE FROM {table} WHERE path = ?1 OR substr(path, 1, ?2) = ?3"),
             params![trimmed, under.len() as i64, under],
@@ -252,6 +253,13 @@ pub(crate) fn move_meta_on(
         // 每曲歌词偏移跟随文件移动 / 改名。
         let mut stmt =
             conn.prepare_cached("UPDATE lyrics_offsets SET path = ?1 WHERE path = ?2")?;
+        for (old, new, ..) in rows {
+            stmt.execute(params![new, old])?;
+        }
+    }
+    {
+        // 波形缓存同样跟随（指纹不变才命中，换路径不浪费重算）。
+        let mut stmt = conn.prepare_cached("UPDATE waveforms SET path = ?1 WHERE path = ?2")?;
         for (old, new, ..) in rows {
             stmt.execute(params![new, old])?;
         }

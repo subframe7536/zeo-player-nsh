@@ -187,10 +187,7 @@ impl LibraryStore {
             if !tracks.iter().any(|t| t.path == *path) {
                 continue;
             }
-            match crate::provider::local::read_entry(
-                std::path::Path::new(path),
-                &self.config().genre_separators,
-            ) {
+            match crate::provider::local::read_entry(std::path::Path::new(path), &self.config()) {
                 Some(entry) => {
                     if let Some(slot) = tracks.iter_mut().find(|t| t.path == *path) {
                         *slot = entry;
@@ -241,10 +238,24 @@ impl LibraryStore {
         clean
     }
 
-    /// 改艺术家分隔符：保存。
+    /// 改艺术家分隔符：保存，并用已缓存的标签重新拆分（不重读文件）。
     pub fn set_artist_separators(&self, separators: &[String]) -> Vec<String> {
         let clean = clean_separators(separators);
         self.update_config(|c| c.artist_separators.clone_from(&clean));
+        let current = self.tracks();
+        let updated: Vec<TrackEntry> = current
+            .iter()
+            .map(|t| {
+                if let Ok(meta) = MetaCache::global().get(Path::new(&t.path)) {
+                    let mut shared = (*t.0).clone();
+                    shared.artists = split_artists(&meta.artist, &clean);
+                    TrackEntry(Arc::new(shared))
+                } else {
+                    t.clone()
+                }
+            })
+            .collect();
+        *self.tracks.write().unwrap() = Arc::new(updated);
         clean
     }
 

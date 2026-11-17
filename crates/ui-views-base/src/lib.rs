@@ -232,7 +232,6 @@ pub fn hero(
                     view()
                         .flex_1()
                         .min_w(px(0.0))
-                        .gap(px(6.0))
                         .child(
                             text(eyebrow)
                                 .text_size(px(11.0))
@@ -248,7 +247,8 @@ pub fn hero(
                                 .number_of_lines(2)
                                 .text_size(px(32.0))
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(fg()),
+                                .text_color(fg())
+                                .mt(px(8.0)),
                         )
                         .child(
                             text(subtitle)
@@ -256,20 +256,22 @@ pub fn hero(
                                 .text_size(px(15.0))
                                 .line_height(px(15.0))
                                 .font_weight(FontWeight::MEDIUM)
-                                .text_color(fg()),
+                                .text_color(fg())
+                                .mt(px(8.0)),
                         )
                         .child(
                             text(meta)
                                 .number_of_lines(1)
                                 .text_size(px(13.0))
                                 .line_height(px(13.0))
-                                .text_color(muted_fg()),
+                                .text_color(muted_fg())
+                                .mt(px(6.0)),
                         )
                         .child(
                             view()
                                 .flex_row()
                                 .gap(px(10.0))
-                                .mt(px(10.0))
+                                .mt(px(16.0))
                                 .window_drag(false)
                                 .child(pill_button(Icon::Play, "播放", play)),
                         ),

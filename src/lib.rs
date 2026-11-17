@@ -38,6 +38,12 @@ pub fn App() -> impl IntoElement {
     let mut title_bar = TitleBarOptions::default();
     title_bar.style = TitleBarStyle::Hidden;
     title_bar.height = Some(px(TITLE_BAR));
+    // 交通灯按钮高 14pt：NSH 默认只在栏内居中、x 仍贴 AppKit 的 8pt，
+    // 看着偏左；左边距给成与上下相同的内边距，圆心到窗口边等距。
+    #[cfg(target_os = "macos")]
+    {
+        title_bar.controls_offset = Some(point(px(TRAFFIC_LIGHTS_INSET), px(TRAFFIC_LIGHTS_INSET)));
+    }
     let mut attributes = WindowAttributes::default();
     attributes.title_bar = Some(title_bar);
     attributes.min_size = Some(Some(size(

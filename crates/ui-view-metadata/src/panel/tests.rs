@@ -148,6 +148,7 @@ mod tests {
             file_name: "mock.flac".to_owned(),
             album_artist: "Mock Artist".to_owned(),
             genres: vec!["二次元".to_owned(), "JPOP".to_owned()],
+            artists: Vec::new(),
             size_bytes: 1024,
             modified: 0,
             stamp: 1,

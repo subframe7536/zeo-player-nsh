@@ -96,7 +96,7 @@ pub(crate) fn folders_section() -> View {
                         view()
                             .flex_1()
                             .min_w(px(0.0))
-                            .gap(px(2.0))
+                            .gap(px(6.0))
                             .child(
                                 text(name)
                                     .number_of_lines(1)
@@ -109,7 +109,6 @@ pub(crate) fn folders_section() -> View {
                                 text(root)
                                     .number_of_lines(1)
                                     .text_size(px(12.0))
-                                    .line_height(px(12.0))
                                     .text_color(muted_fg()),
                             ),
                     )

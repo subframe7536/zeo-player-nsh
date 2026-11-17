@@ -5,7 +5,7 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 /// 当前表结构版本（`PRAGMA user_version`）。改表时加一，并在 [`migrate`] 里迁移。
-pub(crate) const SCHEMA_VERSION: i32 = 8;
+pub(crate) const SCHEMA_VERSION: i32 = 9;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS tracks (
@@ -153,6 +153,17 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
              ALTER TABLE tracks ADD COLUMN copyright TEXT;
              ALTER TABLE tracks ADD COLUMN comment TEXT;
              ALTER TABLE tracks ADD COLUMN rating INTEGER;",
+        )?;
+    }
+    if version < 9 {
+        // 波形竖条缓存：按路径 + 文件指纹存，指纹变了自动失效；
+        // 跟随文件移动 / 改名，删除文件清掉；重建曲库不清（同歌词偏移）。
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS waveforms (
+                path TEXT PRIMARY KEY,
+                stamp INTEGER NOT NULL,
+                bars BLOB NOT NULL
+            );",
         )?;
     }
     if version < SCHEMA_VERSION {

@@ -18,6 +18,9 @@ pub fn layout_width() -> f32 {
 }
 /// 自绘标题栏高度（交通灯居中其中）。
 pub const TITLE_BAR: f32 = 40.0;
+/// macOS 交通灯按钮（14pt 高）的上 / 左内边距：与窗口上下边视觉等距，
+/// 写进窗口的 `title_bar.controls_offset`。
+pub const TRAFFIC_LIGHTS_INSET: f32 = (TITLE_BAR - 14.0) / 2.0;
 /// 底部播放条高度（含外边距），列表据此留出底部空间。
 pub const BAR_SPACE: f32 = 104.0;
 /// 各页内容的左右边距（页头、首页、元数据表等共用，内容线对齐）。
@@ -27,6 +30,15 @@ pub const PAGE_X: f32 = 32.0;
 pub const PAGE_TITLE: f32 = 28.0;
 /// 页头到正文的间距。
 pub const PAGE_HEADER_PB: f32 = 20.0;
+/// 标题与副标题（歌手 / 说明）之间的竖向间距。
+pub const STACK_GAP: f32 = 4.0;
+/// 浮动播放条的最大宽度：窗口更宽时栏体居中、两侧留白。
+pub const BAR_MAX_W: f32 = 1100.0;
+/// 卡片内边距、圆角、封面圆角与封面到文字的间距（首页卡与分组网格共用）。
+pub const CARD_PAD: f32 = 8.0;
+pub const CARD_RADIUS: f32 = 12.0;
+pub const CARD_ART_RADIUS: f32 = 8.0;
+pub const CARD_ART_GAP: f32 = 10.0;
 
 /// 主体界面底色：同侧栏一样的饱和加值，但提亮度成粉彩（更亮的有色底）。
 pub fn bg() -> AdaptiveColor {
@@ -171,6 +183,16 @@ pub fn hover() -> AdaptiveColor {
 /// 「喜欢」的红色（心形的描边与填充）。
 pub fn like_red() -> AdaptiveColor {
     AdaptiveColor::rgb(0xe5484d, 0xf2555a)
+}
+
+/// 音质徽章的颜色：HQ 绿、SQ 蓝、Hi-Res 黄，其它标签回落 muted。
+pub fn quality_color(tag: &str) -> AdaptiveColor {
+    match tag {
+        "HQ" => AdaptiveColor::rgb(0x16a34a, 0x4ade80),
+        "SQ" => AdaptiveColor::rgb(0x2563eb, 0x60a5fa),
+        "Hi-Res" => AdaptiveColor::rgb(0xca8a04, 0xfacc15),
+        _ => muted_fg(),
+    }
 }
 
 /// 全屏页上的白色（`alpha` 透明度）。

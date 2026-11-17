@@ -61,7 +61,7 @@ pub fn Genres() -> impl IntoElement {
                     .into_element(),
                 ),
             ))
-            .child(track_columns(Columns::ALL));
+            .child(track_columns(Columns::ALL).mx(px(-12.0)));
         view()
             .flex_1()
             .child(track_list(items, Columns::ALL, header.into_element()))

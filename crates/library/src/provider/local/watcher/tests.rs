@@ -13,6 +13,7 @@ fn track(path: &str, size: u64, modified: u64) -> TrackEntry {
             .into_owned(),
         album_artist: String::new(),
         genres: Vec::new(),
+        artists: Vec::new(),
         size_bytes: size,
         modified,
         stamp: 0,

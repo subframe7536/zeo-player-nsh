@@ -113,7 +113,7 @@ pub(crate) fn lyrics_offset_section() -> View {
                 view()
                     .flex_1()
                     .min_w(px(200.0))
-                    .gap(px(2.0))
+                    .gap(px(6.0))
                     .child(
                         text("全局歌词偏移")
                             .text_size(px(14.0))
@@ -124,7 +124,6 @@ pub(crate) fn lyrics_offset_section() -> View {
                     .child(
                         text("毫秒，±30000 内；正值让歌词提前。")
                             .text_size(px(12.0))
-                            .line_height(px(12.0))
                             .text_color(muted_fg()),
                     ),
             )

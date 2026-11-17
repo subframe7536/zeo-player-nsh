@@ -50,12 +50,24 @@ fn cache() -> &'static WaveCache {
 }
 
 /// 清空波形 LRU（隐藏到托盘时调）：重算要解码整个文件，但界面已拆，
-/// 显示后当前曲目按需重算。
+/// 显示后当前曲目按需重算。SQLite 里的持久缓存不动，下次直接命中。
 pub fn clear() {
     cache().lock().unwrap().clear();
 }
 
-/// 一个文件的 56 根波形条（按文件指纹缓存，上限 [`WAVE_CAP`] 条）。
+/// 回填 LRU：同键先删、推到队尾（最近用），超 [`WAVE_CAP`] 淘汰最旧。
+fn remember(key: String, stamp: u64, bars: Arc<Vec<f64>>) -> Arc<Vec<f64>> {
+    let mut cache = cache().lock().unwrap();
+    cache.retain(|(p, _, _)| p != &key);
+    cache.push((key, stamp, bars.clone()));
+    while cache.len() > WAVE_CAP {
+        cache.remove(0);
+    }
+    bars
+}
+
+/// 一个文件的 56 根波形条：内存 LRU → SQLite 持久缓存（路径 + 指纹）
+/// → 重算（解码整个文件，最贵）。算出来的写回两级缓存。
 pub fn waveform(path: &Path) -> Result<Arc<Vec<f64>>, String> {
     let key = path.to_string_lossy().into_owned();
     let stamp = std::fs::metadata(path)
@@ -70,14 +82,17 @@ pub fn waveform(path: &Path) -> Result<Arc<Vec<f64>>, String> {
             return Ok(bars);
         }
     }
-    let bars = Arc::new(compute(path, WaveformOptions::default())?);
-    let mut cache = cache().lock().unwrap();
-    cache.retain(|(p, _, _)| p != &key);
-    cache.push((key, stamp, bars.clone()));
-    while cache.len() > WAVE_CAP {
-        cache.remove(0);
+    // SQLite 命中（f32 → f64）直接用并回填 LRU；库不可用、没行、
+    // 长度不是 BARS 都静默落到重算。
+    if let Some(f32s) = zeo_db::waveform_bars(&key, stamp).filter(|v| v.len() == BARS) {
+        let bars = Arc::new(f32s.into_iter().map(|v| v as f64).collect::<Vec<f64>>());
+        return Ok(remember(key, stamp, bars));
     }
-    Ok(bars)
+    let bars = Arc::new(compute(path, WaveformOptions::default())?);
+    // f64 → f32 写库（DB 写失败 `with` 内已打日志，这里不再管）。
+    let f32s: Vec<f32> = bars.iter().map(|v| *v as f32).collect();
+    zeo_db::set_waveform_bars(&key, stamp, &f32s);
+    Ok(remember(key, stamp, bars))
 }
 
 /// 解码，累加第一声道每 [`GRAIN`] 个样本的平方和，然后算 RMS 块与波形。

@@ -1,4 +1,24 @@
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::Instant;
+
 use super::*;
+
+/// 竖条长高补间的时长（秒）。
+const GROW_SECS: f32 = 0.45;
+
+/// 排一帧长高补间：`grow` 按 ease-out-cubic 0→1；`generation` 代次不
+/// 等了（有更新的波形变化）旧补间就停手。`Spawned` 丢弃不取消任务
+///（`spawn_future` 本就 detach），任务随 owner 结束。
+fn schedule_grow(grow: Signal<f32>, generation: Rc<Cell<u64>>, my: u64, start: Instant) {
+    request_animation_frame(move |now: Instant| {
+        let t = (now.duration_since(start).as_secs_f32() / GROW_SECS).min(1.0);
+        grow.set(1.0 - (1.0 - t).powi(3));
+        if t < 1.0 && generation.get() == my {
+            schedule_grow(grow, generation, my, start);
+        }
+    });
+}
 
 /// 细波形进度：[`zeo_metadata::waveform::BARS`] 根圆头竖条，已播亮、未播暗；
 /// 播放头所在的那根和进度条一样只亮到播放头为止。可点可拖，抬起 seek。
@@ -6,10 +26,22 @@ use super::*;
 pub(crate) fn waveform_seek() -> View {
     let s = store();
     let width = signal(0.0_f32);
+    // 竖条从下限高度长到目标：进页与每次 `s.waveform` 变化（换曲、波形
+    // 载入）都重播 ~450ms ease-out；代次号让新变化顶掉还在跑的旧补间。
+    let grow = signal(0.0_f32);
+    let grow_gen = Rc::new(Cell::new(0u64));
+    effect(move || {
+        let _ = s.waveform.get();
+        let my = grow_gen.get() + 1;
+        grow_gen.set(my);
+        grow.set(0.0);
+        schedule_grow(grow, grow_gen.clone(), my, Instant::now());
+    });
     let duration = move || s.playback.with(|p| p.duration);
     const H: f32 = 26.0;
     let painter = move || {
         let w = width.get();
+        let grow_v = grow.get();
         let head = progress_fraction() as f32 * w;
         let mut p = Painter::new();
         s.waveform.with(|bars| {
@@ -25,9 +57,13 @@ pub(crate) fn waveform_seek() -> View {
             let bar = (step * 0.45).clamp(1.5, 3.5);
             let dim = color(white_a(0.35));
             let lit = color(white_a(0.95));
+            // 下限是归一化的 `WaveformOptions::min`：grow=0 时全部贴
+            // 下限（即最小条高），grow=1 时回到目标高度。
+            let floor = zeo_metadata::waveform::WaveformOptions::default().min as f32;
             for (i, amp) in bars.iter().enumerate() {
-                // 已归一化到 0.1..0.9（waveform.rs）：直接按比例画。
-                let bh = ((*amp as f32).clamp(0.0, 1.0) * H).max(bar);
+                // 已归一化到 0.1..0.9（waveform.rs）：floor→amp 按 grow 插值。
+                let a = floor + ((*amp as f32).clamp(0.0, 1.0) - floor) * grow_v;
+                let bh = (a * H).max(bar);
                 let x = i as f32 * step + (step - bar) / 2.0;
                 let rect = Bounds::new(point(px(x), px((H - bh) / 2.0)), size(px(bar), px(bh)));
                 let radius = px(bar / 2.0);

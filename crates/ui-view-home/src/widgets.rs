@@ -146,8 +146,8 @@ pub(crate) fn hero(stats: Signal<zeo_db::PlayStats>, now: Signal<u64>) -> View {
 /// 节标题。
 pub(crate) fn section_title(title: &'static str) -> Text {
     text(title)
-        .text_size(px(18.0))
-        .line_height(px(18.0))
+        .text_size(px(20.0))
+        .line_height(px(20.0))
         .font_weight(FontWeight::BOLD)
         .text_color(fg())
 }
@@ -155,7 +155,6 @@ pub(crate) fn section_title(title: &'static str) -> Text {
 /// 卡条里封面 / 头像的边长与卡片内边距：卡宽固定为两者之和，翻页
 /// 范围按它算，卡条从左排起、放不下横向滚动。
 pub(crate) const CARD_ART: f32 = 160.0;
-pub(crate) const CARD_PAD: f32 = 8.0;
 pub(crate) const STRIP_MIN_W: f32 = CARD_ART + CARD_PAD * 2.0;
 pub(crate) const STRIP_GAP: f32 = 8.0;
 

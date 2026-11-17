@@ -7,6 +7,7 @@ use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
 use zeo_engine::audio::LoopMode;
+use zeo_ui_components::artists::artist_links;
 use zeo_ui_components::button::{RADIUS_MD, Size, Variant, icon_button, shell, tipped};
 use zeo_ui_components::cover::cover;
 use zeo_ui_components::icons::{Icon, icon_dyn};
@@ -69,7 +70,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
             view()
                 .flex_1()
                 .min_w(px(0.0))
-                .gap(px(3.0))
+                .gap(px(STACK_GAP))
                 .child(
                     text(move || {
                         s.track.with(|t| {
@@ -82,23 +83,27 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                     })
                     .number_of_lines(1)
                     .text_size(px(14.0))
-                    .line_height(px(17.0))
+                    .line_height(px(14.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(fg()),
                 )
-                .child(
-                    text(move || {
-                        s.track.with(|t| match (&t.path, &t.error) {
-                            (_, Some(error)) => error.clone(),
-                            (Some(_), None) => t.artist.clone(),
-                            (None, None) => "从曲库选一首开始".into(),
-                        })
-                    })
-                    .number_of_lines(1)
+                .child(dynamic(move || {
+                    let (has, error) = s.track.with(|t| (t.path.is_some(), t.error.clone()));
+                    if has && error.is_none() {
+                        return artist_links(zeo_ui_store::artist_names, 12.0);
+                    }
+                    text(error.unwrap_or_else(|| {
+                        if has {
+                            String::new()
+                        } else {
+                            "从曲库选一首开始".into()
+                        }
+                    }))
                     .text_size(px(12.0))
-                    .line_height(px(15.0))
-                    .text_color(muted_fg()),
-                ),
+                    .line_height(px(12.0))
+                    .text_color(muted_fg())
+                    .into_element()
+                })),
         );
 
     // 与全屏页的控制一致：线框的上一首 / 下一首，播放键没有底色、图标在
@@ -286,10 +291,8 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         ));
 
     let bar_view = view()
-        .absolute()
-        .left(px(16.0))
-        .right(px(16.0))
-        .bottom(px(16.0))
+        .w_full()
+        .max_w(px(BAR_MAX_W))
         .h(px(76.0))
         .flex_row()
         .items_center()
@@ -308,7 +311,17 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
     // 留下一块更亮的矩形。见 upstream.md。
     #[cfg(not(target_os = "windows"))]
     let bar_view = bar_view.backdrop_blur(px(24.0));
-    bar_view.child(now).child(center).child(right)
+    // 栏体限宽 BAR_MAX_W：窗口更宽时外层绝对定位容器负责居中，
+    // 左右 16 / 底部 16 的留白不变。容器本身不吃事件（BoxNone），
+    // 否则比栏体宽出的两翼会挡住下面列表的点击与滚动。
+    view()
+        .absolute()
+        .left(px(16.0))
+        .right(px(16.0))
+        .bottom(px(16.0))
+        .items_center()
+        .pointer_events(PointerEvents::BoxNone)
+        .child(bar_view.child(now).child(center).child(right))
 }
 
 /// 窄窗口（音量滑条放不下）时的音量：按钮打开与队列一样的 `popover`，

@@ -44,6 +44,57 @@ pub fn set_lyrics_offset(path: &str, offset_ms: i64) {
     });
 }
 
+// --- 波形缓存 -----------------------------------------------------------------
+
+/// `path`（指纹 `stamp`）缓存的波形竖条（小端 f32 序列）；没有行或
+/// 指纹不符为 `None`，blob 长度不是 4 的倍数也视为没有。
+pub(crate) fn waveform_bars_on(
+    conn: &Connection,
+    path: &str,
+    stamp: u64,
+) -> rusqlite::Result<Option<Vec<f32>>> {
+    let blob: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT bars FROM waveforms WHERE path = ?1 AND stamp = ?2",
+            params![path, stamp as i64],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(blob.and_then(|b| {
+        (b.len() % 4 == 0).then(|| {
+            b.chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect()
+        })
+    }))
+}
+
+pub(crate) fn set_waveform_bars_on(
+    conn: &Connection,
+    path: &str,
+    stamp: u64,
+    bars: &[f32],
+) -> rusqlite::Result<()> {
+    let bytes: Vec<u8> = bars.iter().flat_map(|f| f.to_le_bytes()).collect();
+    conn.execute(
+        "INSERT OR REPLACE INTO waveforms (path, stamp, bars) VALUES (?1, ?2, ?3)",
+        params![path, stamp as i64, bytes],
+    )?;
+    Ok(())
+}
+
+/// `path`（指纹 `stamp`）缓存的波形竖条；没有或指纹不符为 `None`。
+pub fn waveform_bars(path: &str, stamp: u64) -> Option<Vec<f32>> {
+    with("读波形", |conn| waveform_bars_on(conn, path, stamp)).flatten()
+}
+
+/// 写入 `path`（指纹 `stamp`）的波形竖条缓存。
+pub fn set_waveform_bars(path: &str, stamp: u64, bars: &[f32]) {
+    with("写波形", |conn| {
+        set_waveform_bars_on(conn, path, stamp, bars)
+    });
+}
+
 // --- 播放记录 -----------------------------------------------------------------
 
 pub(crate) fn record_play_on(
@@ -184,10 +235,11 @@ pub struct PlayStats {
     /// （路径，次数）按次数降序，只统计曲库里还在的曲目；零播放的
     /// 按入库时间排在末位（0 次也上榜）。
     pub top_tracks: Vec<(String, u64)>,
-    /// （歌手标签原文，次数）按次数降序：`artist` 是标签原文，可能是
-    /// `A; B` 这样的组合——按原文分组，不拆分。含零播放的歌手（排在末位），
-    /// 首页「热门艺术家」在没听过歌时也有内容。
-    pub top_artists: Vec<(String, u64)>,
+    /// （歌手标签原文，播放次数，最近播放时间）按标签原文排序：`artist`
+    /// 是标签原文，可能是 `A; B` 这样的组合——按原文分组，不拆分；
+    /// `last` 是组内最大 `played_at`，零播放为 0。首页「热门艺术家」
+    /// 自己按分隔符拆开再合并排名。
+    pub artist_plays: Vec<(String, u64, u64)>,
     /// 最近播放的路径（去重，最新在前），只统计曲库里还在的曲目；
     /// 零播放的曲目按入库时间排在末位。
     pub recent: Vec<String>,
@@ -274,11 +326,21 @@ pub(crate) fn play_stats_on(
          ORDER BY c DESC, MAX(p.played_at) DESC, COALESCE(a.added_at, 0) DESC, t.path \
          LIMIT ?1",
     )?;
-    let top_artists = ranked(
-        "SELECT t.artist, COUNT(p.id) c FROM tracks t \
-         LEFT JOIN plays p ON p.path = t.path \
-         GROUP BY t.artist ORDER BY c DESC, MAX(p.played_at) DESC, t.artist LIMIT ?1",
-    )?;
+    // 歌手播放明细不截断（首页拆分合并后自己取前 N）：全量按原文排序。
+    let artist_plays = conn
+        .prepare(
+            "SELECT t.artist, COUNT(p.id), COALESCE(MAX(p.played_at), 0) \
+             FROM tracks t LEFT JOIN plays p ON p.path = t.path \
+             GROUP BY t.artist ORDER BY t.artist",
+        )?
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, i64>(2)? as u64,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     let recent = conn
         .prepare(
             "SELECT t.path FROM tracks t \
@@ -301,7 +363,7 @@ pub(crate) fn play_stats_on(
         total,
         since: recent_n,
         top_tracks,
-        top_artists,
+        artist_plays,
         recent,
         week_secs,
         week_likes,

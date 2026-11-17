@@ -70,8 +70,8 @@ pub(crate) fn left_column(swap: &Swap) -> View {
         let list: Vec<(String, bool)> = s.meta.with(|m| {
             let Some(m) = m else { return Vec::new() };
             let mut out = Vec::new();
-            if let Some(q) = quality_tag(m) {
-                out.push((q, true));
+            if let Some(q) = m.quality_tag() {
+                out.push((q.to_owned(), true));
             }
             if let Some(year) = m.year {
                 out.push((year.to_string(), false));
@@ -200,7 +200,20 @@ pub(crate) fn left_column(swap: &Swap) -> View {
                     view()
                         .gap(px(6.0))
                         .pt(px(14.0))
-                        .child(meta_line(Icon::Person, |t| t.artist.clone()))
+                        .child(
+                            view()
+                                .h(px(18.0))
+                                .flex_row()
+                                .items_center()
+                                .gap(px(6.0))
+                                .child(icon(Icon::Person, 13.0, || white_a(0.6)))
+                                .child(view().flex_1().min_w(px(0.0)).child(artist_links_colored(
+                                    zeo_ui_store::artist_names,
+                                    13.0,
+                                    move || white_a(0.7),
+                                    move || white_a(0.95),
+                                ))),
+                        )
                         .child(meta_line(Icon::Disc, |t| t.album.clone())),
                 )
                 // 标签只占一行（多了裁掉），没有标签时也留出这一行：下面的

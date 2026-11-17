@@ -58,6 +58,7 @@ pub fn install() -> Store {
     let dirs = signal(Same(lib.dirs()));
     let lyrics = signal(None::<Lyrics>);
     let lyrics_offset = signal(0_i64);
+    let artist_seps = computed(move || library.with(|l| l.config.artist_separators.clone()));
     let active_line = computed(move || {
         let time = playback.with(|p| p.time);
         // 生效偏移 = 每曲手动偏移 + 全局偏移（正值 = 提前）。
@@ -105,6 +106,7 @@ pub fn install() -> Store {
         accent: signal(None),
         tint: signal(None),
         artist_sel: signal(None),
+        artist_seps,
         sidebar_section: signal(lib.config().sidebar_section),
         genre_sel: signal(None),
         folder_sel: signal(None),
@@ -365,6 +367,24 @@ pub fn install() -> Store {
         ]))));
         let still = move |stamp: &str| untracked(|| path.with(|p| p.as_deref() == Some(stamp)));
         let p = stamp;
+        // 波形要解码整个文件，最贵：单独一条后台链，不等元数据 /
+        // 歌词 / 偏移那条顺序链跑完。
+        spawn({
+            let p = p.clone();
+            async move {
+                let bars = blocking({
+                    let p = p.clone();
+                    move || zeo_metadata::waveform::waveform(Path::new(&p))
+                })
+                .await;
+                if still(&p) {
+                    s.waveform.set(match bars {
+                        Ok(Ok(bars)) => Some(Same(bars)),
+                        _ => None,
+                    });
+                }
+            }
+        });
         spawn(async move {
             let meta = blocking({
                 let p = p.clone();
@@ -399,23 +419,13 @@ pub fn install() -> Store {
             {
                 s.lyrics_offset.set(offset);
             }
-            let bars = blocking({
-                let p = p.clone();
-                move || zeo_metadata::waveform::waveform(Path::new(&p))
-            })
-            .await;
-            if still(&p) {
-                s.waveform.set(match bars {
-                    Ok(Ok(bars)) => Some(Same(bars)),
-                    _ => None,
-                });
-            }
         });
     });
 
-    // 队尾预载：当前曲目的后三首提前生成全部封面尺寸、解析好歌词
-    // （各自的有界缓存；歌词不进全局元数据缓存）。换曲或队列变化时
-    // 重算；重复请求在封面池 / 歌词缓存里去重，成本约等于零。
+    // 队尾预载：当前曲目的后三首提前生成全部封面尺寸、解析好歌词、
+    // 算好波形（波形走内存 LRU + SQLite 双层缓存；歌词不进全局元数据
+    // 缓存）。换曲或队列变化时重算；重复请求在封面池 / 歌词 / 波形
+    // 缓存里去重，成本约等于零。
     effect(move || {
         path.get();
         s.queue.get();
@@ -438,6 +448,7 @@ pub fn install() -> Store {
             for p in next {
                 zeo_metadata::covers::request_warm(&p);
                 Meta::lyrics(&p);
+                let _ = zeo_metadata::waveform::waveform(Path::new(&p));
             }
         });
     });
