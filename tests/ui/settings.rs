@@ -364,20 +364,26 @@ fn wait_keybind(app: &mut Headless, action: &str, want: Option<&str>) {
     assert_eq!(saved_keybind(action).as_deref(), want, "{action}");
 }
 
-/// 设置 →「快捷键」：点键位胶囊进入捕获，下一个按键由录键的临时
-/// `on_key` 绑定录成新键位——录键期间窗口快捷键整体停用，按 ⌘K /
-/// Ctrl+K 不弹命令面板而是被录下；Esc 取消不改、单按 Backspace 解绑。
-/// 「按键搜索」录下的键以带引号的平台标签写回搜索框。无头 `press_key`
-/// 经应用键位表派发，临时绑定照常触发（见 upstream.md）。
+/// 录键视图挂上后下一帧才取得焦点（`shortcuts.rs` 的 `key_recorder`）。
+fn settle_focus(app: &mut Headless) {
+    app.wait(Duration::from_millis(100)).unwrap();
+}
+
+/// 设置 →「快捷键」：点键位胶囊进入捕获，下一个按键经录键视图的
+/// `on_key_down` 录成新键位——录键期间窗口快捷键整体停用，按 ⌘K / Ctrl+K
+/// 不弹命令面板而是被录下；Esc 取消不改、单按 Backspace 解绑。「按键
+/// 搜索」录下的键以带引号的平台标签写回搜索框。
 #[test]
-fn shortcut_capture_records_keys() {
+fn shortcut_capture_records_keys_through_key_down() {
     struct Restore;
     impl Drop for Restore {
         fn drop(&mut self) {
             zeo_player::config::library_store().set_keybind("nav_metadata", None);
         }
     }
-    let mut app = start(1200.0, 800.0);
+    // 无头驱动只在 Linux 环境递送 `on_key_down`；`mod` 在那里是 Ctrl。
+    let _guard = play_lock();
+    let mut app = start_on(Os::Linux, 1200.0, 800.0);
     let _restore = Restore;
     zeo_player::config::library_store().set_keybind("nav_metadata", None);
     app.press("设置").unwrap();
@@ -390,6 +396,7 @@ fn shortcut_capture_records_keys() {
     // 已绑给命令面板的键也被录下，而不是触发命令面板。
     app.press(pill).unwrap();
     app.wait_for("按下新快捷键…").unwrap();
+    settle_focus(&mut app);
     app.press_key("mod+k").unwrap();
     app.wait_for_gone("按下新快捷键…", Duration::from_secs(2))
         .unwrap();
@@ -399,6 +406,7 @@ fn shortcut_capture_records_keys() {
     // Esc 取消：不改。
     app.press(pill).unwrap();
     app.wait_for("按下新快捷键…").unwrap();
+    settle_focus(&mut app);
     app.press_key("escape").unwrap();
     app.wait_for_gone("按下新快捷键…", Duration::from_secs(2))
         .unwrap();
@@ -409,6 +417,7 @@ fn shortcut_capture_records_keys() {
     // 单按 Backspace：解绑。
     app.press(pill).unwrap();
     app.wait_for("按下新快捷键…").unwrap();
+    settle_focus(&mut app);
     app.press_key("backspace").unwrap();
     app.wait_for_gone("按下新快捷键…", Duration::from_secs(2))
         .unwrap();
@@ -416,6 +425,7 @@ fn shortcut_capture_records_keys() {
 
     // 「按键搜索」：录下的组合键写回搜索框。
     app.press("label:按键搜索").unwrap();
+    settle_focus(&mut app);
     app.press_key("mod+shift+y").unwrap();
     app.wait(Duration::from_millis(200)).unwrap();
     let query = app

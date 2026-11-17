@@ -69,6 +69,12 @@ fn start(width: f32, height: f32) -> Headless {
 }
 
 fn start_inner(width: f32, height: f32) -> Headless {
+    start_on(Os::MacOs, width, height)
+}
+
+/// 按指定平台启动（持锁由调用方负责）。无头驱动只在 Linux 环境把硬件
+/// 按键（`on_key_down`）递给聚焦视图（见 upstream.md），录键的用例走这里。
+fn start_on(os: Os, width: f32, height: f32) -> Headless {
     isolate();
     zeo_player::config::library_store()
         .set_sidebar_section(zeo_player::config::SidebarSection::Playlists);
@@ -76,7 +82,7 @@ fn start_inner(width: f32, height: f32) -> Headless {
     let mut config = EngineConfig::new(Root::of::<App>().tokens(theme.into_tokens()));
     config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
     config.viewport = size(px(width), px(height));
-    config.environment.os = Os::MacOs;
+    config.environment.os = os;
     // 静音（在挂载前）：按压与恢复的播放会真的走 cpal 输出，测试不要出声。
     zeo_player::engine::Player::global().set_volume(0.0);
     let mut app = Headless::start(config).expect("start the app");

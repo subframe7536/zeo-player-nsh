@@ -135,10 +135,15 @@ fn edit_info_dialog_opens_with_current_tags() {
     app.wait_for("text:r").unwrap();
     app.wait_for("text:流派：Rock; Indie; Dream Pop; r")
         .unwrap();
+    // 新增后查询清空：「添加“r”」只在查询为 r 时存在，清掉就从下拉
+    // 里消失（nsh-testing 的 input_text 现在优先读无障碍值——combobox
+    // 报的是已选标题串，读不到输入框原文，见 upstream.md「测试驱动」）。
+    app.wait_for_gone("text:添加“r”", Duration::from_secs(2))
+        .unwrap();
     assert_eq!(
         app.screen().input_text("label:标签").unwrap(),
-        Some(""),
-        "新增后查询应清空"
+        Some("Rock, Indie, Dream Pop"),
+        "combobox 的无障碍值应报已选标题（新增的 r 不在 items 里被略过）"
     );
     // 「封面」栏有更换按钮；「歌词」栏默认写同名 .lrc（语料有
     // sine.lrc），多行输入预填文件内容。
