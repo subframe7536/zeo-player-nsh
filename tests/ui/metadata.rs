@@ -302,6 +302,30 @@ fn metadata_column_resize_drag() {
     .unwrap();
 }
 
+/// 右侧面板宽可拖：选中行后面板左缘出现分栏把手（`label:调整面板宽度`），
+/// 向左拖右栏变宽、面板仍正常显示；未选中时没有把手。
+#[test]
+fn metadata_panel_resize_drag() {
+    let mut app = start(1400.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("元数据").unwrap();
+    app.wait_for("text:sine.flac").unwrap();
+    // 未选中：分栏只剩表格一块可见面板，没有把手。
+    app.wait_for_gone("label:调整面板宽度", Duration::from_secs(2))
+        .unwrap();
+    app.press("text:sine.flac").unwrap();
+    app.wait_for("label:调整面板宽度").unwrap();
+    // 向左拖 80pt：把手调它前面的表格，右侧面板随之加宽。
+    app.drag(
+        "label:调整面板宽度",
+        nsh_core::geometry::point(px(-80.0), px(0.0)),
+    )
+    .unwrap();
+    app.wait_for("label:标题").unwrap();
+}
+
 /// 窄窗口元数据视图：在 720pt 最小窗口下，工具栏按钮与输入框自适应不截断，
 /// 选中曲目后右侧面板自适应收窄（280pt），左侧表格仍然维持可用宽度。
 #[test]

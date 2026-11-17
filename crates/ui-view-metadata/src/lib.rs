@@ -17,7 +17,7 @@ mod panel;
 mod rename;
 mod table;
 
-use nsh_base::{DataTableSort, popover};
+use nsh_base::{DataTableSort, h_resizable, popover, resizable_panel};
 use nsh_core::prelude::*;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
@@ -53,6 +53,9 @@ pub fn page() -> View {
             .unwrap_or_else(default_columns)
     }));
     let col_widths = signal(HashMap::<String, f32>::new());
+    // 右侧面板宽：None 走断点默认（`panel_default_w`），拖过把手后记住
+    // 用户值，窗口过断点不再重置（`size` 新值会顶掉拖拽结果）。
+    let panel_w = signal(Option::<f32>::None);
     // 列选择变化即落盘（首轮是读出来的值本身，跳过）。
     let first = std::cell::Cell::new(true);
     effect(move || {
@@ -128,6 +131,16 @@ pub fn page() -> View {
                     180.0
                 } else {
                     260.0
+                }
+            };
+            let panel_default_w = move || {
+                let cw = zeo_ui_components::tracks::content_break();
+                if cw < 760.0 {
+                    280.0
+                } else if cw < 960.0 {
+                    320.0
+                } else {
+                    380.0
                 }
             };
             view()
@@ -284,47 +297,63 @@ pub fn page() -> View {
                     view()
                         .flex_1()
                         .min_h(px(0.0))
-                        .flex_row()
                         .px(px(PAGE_X))
                         .pb(px(BAR_SPACE))
-                        .gap(move || px(gap_w()))
                         .child(
-                            view()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .rounded(px(12.0))
-                                .border_1()
-                                .border_color(border())
-                                .bg(nsh_base::theme().card)
-                                .shadow_xs()
-                                .overflow_hidden()
-                                .child(table::table(
-                                    displayed,
-                                    rows,
-                                    selected,
-                                    anchor,
-                                    sort,
-                                    visible_cols,
-                                    col_widths,
-                                )),
-                        )
-                        .child(when(
-                            move || has_selection.get(),
-                            move || {
-                                panel::panel(
-                                    displayed,
-                                    rows,
-                                    selected,
-                                    // 面板 ✕：清空选中集与范围锚点。
-                                    Rc::new(move || {
-                                        selected.set(BTreeSet::new());
-                                        anchor.set(None);
-                                    }),
-                                    move || rename_open.set(true),
+                            // 表格 | 面板分栏：把手落在两者的 gap 正中（分栏
+                            // 模型认得 flex gap），拖动在 core 里逐帧走；
+                            // 面板隐藏时不占宽、把手也随之消失。
+                            h_resizable()
+                                .gap(move || px(gap_w()))
+                                .handle_class(
+                                    "w-px bg-transparent group-hover:bg-primary \
+                                     group-active:bg-primary",
                                 )
-                                .into_element()
-                            },
-                        )),
+                                .handle_accessibility_label("调整面板宽度")
+                                .child(
+                                    resizable_panel().child(
+                                        view()
+                                            .size_full()
+                                            .min_w(px(0.0))
+                                            .rounded(px(12.0))
+                                            .border_1()
+                                            .border_color(border())
+                                            .bg(nsh_base::theme().card)
+                                            .shadow_xs()
+                                            .overflow_hidden()
+                                            .child(table::table(
+                                                displayed,
+                                                rows,
+                                                selected,
+                                                anchor,
+                                                sort,
+                                                visible_cols,
+                                                col_widths,
+                                            )),
+                                    ),
+                                )
+                                .child(
+                                    resizable_panel()
+                                        .size(move || {
+                                            Some(px(panel_w.get().unwrap_or_else(panel_default_w)))
+                                        })
+                                        .size_range(px(240.0)..px(560.0))
+                                        .fixed(true)
+                                        .visible(move || has_selection.get())
+                                        .on_resize(move |size: &Points| panel_w.set(Some(size.0)))
+                                        .child(panel::panel(
+                                            displayed,
+                                            rows,
+                                            selected,
+                                            // 面板 ✕：清空选中集与范围锚点。
+                                            Rc::new(move || {
+                                                selected.set(BTreeSet::new());
+                                                anchor.set(None);
+                                            }),
+                                            move || rename_open.set(true),
+                                        )),
+                                ),
+                        ),
                 )
                 .into_element()
         }))
