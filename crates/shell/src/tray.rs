@@ -4,11 +4,13 @@
 //!（`ImageSrc::svg_markup`）交给上游：macOS 当模板图按系统文字色绘
 //! 制；上游在 Windows 上也把 SVG 当模板（任务栏文字色），彩色垫砖图
 //! 标要自己光栅化走 `ImageSrc::rgba` 位图源（svg 里垫应用图标同款的
-//! 渐变圆角方块）。左键点图标 = 播放 / 暂停（`Tray::on_click`，上游
-//! 只吃主键），右键出菜单。菜单项与图标的动作经 `push_tray` 排队、
-//! [`take_tray_actions`] 由界面轮询统一派发——`simulate_tray`（测量脚
-//! 本）与真实菜单走同一条路。
+//! 渐变圆角方块）。图标旁的标题（`Tray::title`，macOS 画进菜单栏，
+//! Windows 通知区只显示图标、上游自己忽略）放当前曲名。左键点图标 =
+//! 播放 / 暂停（`Tray::on_click`，上游只吃主键），右键出菜单。菜单
+//! 项与图标的动作经 `push_tray` 排队、[`take_tray_actions`] 由界面轮
+//! 询统一派发——`simulate_tray`（测量脚本）与真实菜单走同一条路。
 
+use nsh_core::desktop::TrayTitleRun;
 use nsh_core::element::ImageSrc;
 use nsh_core::element::desktop::{MenuItem, Tray, tray};
 
@@ -28,6 +30,7 @@ pub fn tray_for(state: &TrayState) -> Tray {
     let off = !state.has_track;
     let mut tray = tray()
         .tooltip(tray_tooltip(state))
+        .title(tray_title(state))
         .menu([
             MenuItem::new(if state.playing { "暂停" } else { "播放" })
                 .disabled(off)
@@ -115,6 +118,17 @@ fn tray_tooltip(s: &TrayState) -> String {
     }
 }
 
+/// 图标旁的标题：有曲目时是曲名（菜单栏宽度有限，不带歌手——提示与
+/// 菜单仍是「曲名 — 歌手」全串），默认色随菜单栏文字色；没曲目不留
+/// 文字。Windows 通知区不显示标题，上游忽略。
+fn tray_title(s: &TrayState) -> Vec<TrayTitleRun> {
+    if s.has_track {
+        vec![TrayTitleRun::new(s.title.clone())]
+    } else {
+        Vec::new()
+    }
+}
+
 static TRAY_ACTIONS: std::sync::Mutex<Vec<TrayAction>> = std::sync::Mutex::new(Vec::new());
 
 /// 取走托盘上发生的操作（菜单项、单击图标）。
@@ -155,5 +169,14 @@ mod tests {
         assert_eq!(tray_tooltip(&track("歌名", "歌手")), "歌名 — 歌手");
         assert_eq!(tray_tooltip(&track("歌名", "")), "歌名");
         assert_eq!(tray_tooltip(&TrayState::default()), "Zeo Player");
+    }
+
+    #[test]
+    fn tray_title_shows_track_name_only() {
+        let runs = tray_title(&track("歌名", "歌手"));
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "歌名");
+        assert_eq!(runs[0].color, None);
+        assert!(tray_title(&TrayState::default()).is_empty());
     }
 }
