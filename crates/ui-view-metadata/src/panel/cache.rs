@@ -31,7 +31,8 @@ pub(crate) fn put_cached_full(path: &str, row: FullRow) {
     cache.push((path.to_owned(), row));
 }
 
-/// 面板（宽由 `h_resizable` 分栏管：默认随断点 280/320/380、拖把手 240-560；
+/// 面板（宽由 `h_resizable` 分栏管：默认随断点 280/320/380、拖把手 240-560
+///（窄窗口按 `panel_max` 再收，表格保底三成）；
 /// 边框 + 浮动阴影）：单选表单 / 批量修改，按选中数切换——两个
 /// 分支各按「单选路径 / 批量集合」memo，集合没变不重建（草稿留得住）。
 pub(crate) fn panel(

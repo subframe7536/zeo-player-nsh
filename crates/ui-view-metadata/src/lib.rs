@@ -35,6 +35,12 @@ use zeo_ui_store::store;
 use zeo_ui_store::theme::*;
 pub(crate) use zeo_ui_views_base::no_library;
 
+/// 右侧编辑面板的宽限：拖把手 240–560pt；窗口不够宽时按 `panel_max` 再收。
+const PANEL_MIN_W: f32 = 240.0;
+const PANEL_MAX_W: f32 = 560.0;
+/// 表格最少占分栏宽的比例：面板的实际上限 = 分栏宽 − 它。
+const TABLE_MIN_SHARE: f32 = 0.3;
+
 pub fn page() -> View {
     let s = store();
     let rows = signal(HashMap::<String, Arc<MetaRow>>::new());
@@ -142,6 +148,31 @@ pub fn page() -> View {
                 } else {
                     380.0
                 }
+            };
+            // 两块面板平分的宽度：内容宽减两侧页边距与分栏 gap。
+            let panels_room =
+                move || zeo_ui_components::tracks::content_break() - PAGE_X * 2.0 - gap_w();
+            // 把手调的是把手前的表格，面板拿到剩下的；上游
+            // `resize_panel_at_handle` 在收缩方向不夹后一块面板的 max（把手
+            // 会拖过真实边界、松手后留在那，见 upstream.md），只能把面板的
+            // 上限折进表格的下限让它真到不了。
+            let table_min = move || {
+                let room = panels_room();
+                (room * TABLE_MIN_SHARE).max(room - PANEL_MAX_W)
+            };
+            // 面板实际拖得到的上限：min 之和超过可分宽度时上游 `min_of`
+            // 按比例缩各 min，这里同口径反推，把手落点才始终贴着真实边界。
+            // `max_size` 挂它：窗口变窄面板随之收、变宽再回 `panel_w` 记住的宽。
+            // （下限取缩放后的面板 min，防止浮点误差让 max 跌破 range。）
+            let panel_max = move || {
+                let room = panels_room();
+                let total_min = table_min() + PANEL_MIN_W;
+                let scale = if total_min > room {
+                    (room / total_min).max(0.0)
+                } else {
+                    1.0
+                };
+                (room - table_min() * scale).max(PANEL_MIN_W * scale)
             };
             view()
                 .flex_1()
@@ -306,12 +337,12 @@ pub fn page() -> View {
                             h_resizable()
                                 .gap(move || px(gap_w()))
                                 .handle_class(
-                                    "w-px bg-transparent group-hover:bg-primary \
+                                    "w-[2px] bg-transparent group-hover:bg-primary \
                                      group-active:bg-primary",
                                 )
                                 .handle_accessibility_label("调整面板宽度")
                                 .child(
-                                    resizable_panel().child(
+                                    resizable_panel().min_size(move || px(table_min())).child(
                                         view()
                                             .size_full()
                                             .min_w(px(0.0))
@@ -337,7 +368,8 @@ pub fn page() -> View {
                                         .size(move || {
                                             Some(px(panel_w.get().unwrap_or_else(panel_default_w)))
                                         })
-                                        .size_range(px(240.0)..px(560.0))
+                                        .min_size(px(PANEL_MIN_W))
+                                        .max_size(move || Some(px(panel_max())))
                                         .fixed(true)
                                         .visible(move || has_selection.get())
                                         .on_resize(move |size: &Points| panel_w.set(Some(size.0)))
