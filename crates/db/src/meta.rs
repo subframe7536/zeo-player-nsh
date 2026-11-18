@@ -211,6 +211,7 @@ pub(crate) fn remove_meta_on(conn: &Connection, path: &str) -> rusqlite::Result<
     conn.execute("DELETE FROM lyrics_offsets WHERE path = ?1", [path])?;
     conn.execute("DELETE FROM waveforms WHERE path = ?1", [path])?;
     conn.execute("DELETE FROM added WHERE path = ?1", [path])?;
+    conn.execute("DELETE FROM tag_snapshots WHERE path = ?1", [path])?;
     Ok(())
 }
 
@@ -218,7 +219,13 @@ pub(crate) fn remove_meta_under_on(conn: &Connection, path: &str) -> rusqlite::R
     let sep = std::path::MAIN_SEPARATOR;
     let trimmed = path.trim_end_matches(sep);
     let under = format!("{trimmed}{sep}");
-    for table in ["tracks", "lyrics_offsets", "waveforms", "added"] {
+    for table in [
+        "tracks",
+        "lyrics_offsets",
+        "waveforms",
+        "added",
+        "tag_snapshots",
+    ] {
         conn.execute(
             &format!("DELETE FROM {table} WHERE path = ?1 OR substr(path, 1, ?2) = ?3"),
             params![trimmed, under.len() as i64, under],
@@ -281,6 +288,13 @@ pub(crate) fn move_meta_on(
     {
         // 入库时间同样跟随。
         let mut stmt = conn.prepare_cached("UPDATE added SET path = ?1 WHERE path = ?2")?;
+        for (old, new, ..) in rows {
+            stmt.execute(params![new, old])?;
+        }
+    }
+    {
+        // 标签历史快照跟随（改名后仍能按新路径还原）。
+        let mut stmt = conn.prepare_cached("UPDATE tag_snapshots SET path = ?1 WHERE path = ?2")?;
         for (old, new, ..) in rows {
             stmt.execute(params![new, old])?;
         }

@@ -4,6 +4,7 @@
 //! 打不开时什么也不存，应用照常只用内存。
 
 mod conn;
+mod history;
 mod meta;
 mod state;
 mod stats;
@@ -11,6 +12,7 @@ mod stats;
 mod tests;
 
 pub use conn::{later, shrink_memory};
+pub use history::*;
 pub use meta::*;
 pub use state::*;
 pub use stats::*;

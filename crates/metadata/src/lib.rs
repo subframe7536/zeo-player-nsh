@@ -5,6 +5,7 @@
 
 pub mod codec;
 pub mod covers;
+pub mod export;
 pub mod lyrics;
 pub mod rename;
 pub mod waveform;

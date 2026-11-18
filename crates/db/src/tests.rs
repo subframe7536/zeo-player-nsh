@@ -451,3 +451,84 @@ fn play_stats_migrate_from_v5() {
     record_play_on(&conn, "a.flac", 1, 10.0).unwrap();
     assert_eq!(play_stats_on(&conn, 0, 0, 0, 10).unwrap().total, 1);
 }
+
+/// 标签历史：批次与快照来回读、按路径过滤、封面三态、超出保留数量时
+/// 淘汰最老的、文件移动 / 删除跟随。
+#[test]
+fn tag_history_roundtrip_retention_and_follow() {
+    use crate::history::*;
+    use std::collections::HashSet;
+    let mut conn = Connection::open_in_memory().unwrap();
+    migrate(&conn).unwrap();
+    let snap = |path: &str, cover| TagSnapshot {
+        path: path.to_owned(),
+        fields: vec![("Artist".to_owned(), format!("old {path}"))],
+        cover,
+    };
+    let b = add_tag_batch_on(
+        &mut conn,
+        "歌手",
+        100,
+        &[
+            snap("a.flac", None),
+            snap("b.flac", Some(None)),
+            snap(
+                "c.flac",
+                Some(Some((vec![1, 2, 3], "image/png".to_owned()))),
+            ),
+        ],
+    )
+    .unwrap();
+    let batches = tag_batches_on(&conn).unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].id, b);
+    assert_eq!(batches[0].summary, "歌手");
+    assert_eq!(batches[0].paths.len(), 3);
+
+    let only: HashSet<String> = ["a.flac", "c.flac"].iter().map(|s| s.to_string()).collect();
+    let snaps = tag_snapshots_on(&conn, b, &only).unwrap();
+    assert_eq!(snaps.len(), 2);
+    assert_eq!(snaps[0].cover, None);
+    assert_eq!(
+        snaps[1].cover,
+        Some(Some((vec![1, 2, 3], "image/png".to_owned())))
+    );
+    assert_eq!(
+        snaps[0].fields,
+        vec![("Artist".to_owned(), "old a.flac".to_owned())]
+    );
+    let all: HashSet<String> = ["b.flac"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(
+        tag_snapshots_on(&conn, b, &all).unwrap()[0].cover,
+        Some(None)
+    );
+
+    // 移动跟随、删除清掉；清空后的批次不再列出。
+    conn.execute(
+        "UPDATE tag_snapshots SET path = 'z.flac' WHERE path = 'a.flac'",
+        [],
+    )
+    .unwrap();
+    remove_meta_on(&conn, "b.flac").unwrap();
+    remove_meta_on(&conn, "c.flac").unwrap();
+    assert_eq!(
+        tag_batches_on(&conn).unwrap()[0].paths,
+        vec!["z.flac".to_owned()]
+    );
+    remove_meta_on(&conn, "z.flac").unwrap();
+    assert!(tag_batches_on(&conn).unwrap().is_empty());
+
+    // 只留最近 KEEP_BATCHES 个。
+    for i in 0..(KEEP_BATCHES + 5) {
+        add_tag_batch_on(
+            &mut conn,
+            &format!("b{i}"),
+            i as u64,
+            &[snap("p.flac", None)],
+        )
+        .unwrap();
+    }
+    let batches = tag_batches_on(&conn).unwrap();
+    assert_eq!(batches.len(), KEEP_BATCHES);
+    assert_eq!(batches[0].summary, format!("b{}", KEEP_BATCHES + 4));
+}

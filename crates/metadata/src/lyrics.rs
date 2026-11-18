@@ -156,7 +156,7 @@ struct Entry {
 }
 
 /// 提取行首全部 `[mm:ss.xx]` / `[mm:ss.xxx]` 时间戳；返回（时间列表，剩余正文）。
-fn split_timestamps(line: &str) -> (Vec<f64>, String) {
+pub(crate) fn split_timestamps(line: &str) -> (Vec<f64>, String) {
     let mut times = Vec::new();
     let mut rest = line;
     while rest.starts_with('[') {
@@ -206,7 +206,7 @@ fn parse_time_tag(inner: &str) -> Option<f64> {
 }
 
 /// 去掉正文中残留的尖括号/方括号卡拉 OK 碎片时间标签（`<00:12.30>`、`[00:12.30]`）。
-fn clean_content(content: &str) -> String {
+pub(crate) fn clean_content(content: &str) -> String {
     let chars: Vec<char> = content.chars().collect();
     let mut out = String::with_capacity(content.len());
     let mut i = 0;
@@ -229,7 +229,7 @@ fn clean_content(content: &str) -> String {
 }
 
 /// `[ti:…]` `[ar:…]` 等 LRC 元数据头标签行。
-fn is_meta_tag_line(line: &str) -> bool {
+pub(crate) fn is_meta_tag_line(line: &str) -> bool {
     let Some(rest) = line.strip_prefix('[') else {
         return false;
     };

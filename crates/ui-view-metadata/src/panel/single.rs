@@ -41,17 +41,21 @@ pub(crate) fn single_panel(
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
     selected: Signal<BTreeSet<String>>,
     close: Rc<dyn Fn()>,
+    fresh: bool,
 ) -> View {
     // 完整字段值优先读 LRU 缓存与曲库索引条目（第 0 帧秒开，歌词与注释零延迟呈现）；
     // 未命中走后台异步读取（Lofty 跳过大封面与音频属性解析，亚毫秒完成）。
+    // `fresh`（标签历史还原后的重建）：文件刚被改写，索引与缓存都可能是旧值，
+    // 一律不用，走「加载中…」从磁盘读。
     let entry = displayed
         .with_untracked(|list| list.iter().find(|t| t.path == path).cloned())
         .or_else(|| {
             store::store()
                 .tracks
                 .with_untracked(|list| list.iter().find(|t| t.path == path).cloned())
-        });
-    let cached = get_cached_full(&path);
+        })
+        .filter(|_| !fresh);
+    let cached = get_cached_full(&path).filter(|_| !fresh);
     let initial_values = cached
         .as_ref()
         .map(|(fields, _, _)| fields.clone())
@@ -357,6 +361,8 @@ pub(crate) fn single_form(
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
     full: Signal<Option<FullRow>>,
 ) -> View {
+    // 导入歌词后让歌词输入框按草稿里的新文本重新挂载。
+    let lyrics_remount = signal(0u32);
     view()
         .gap(px(18.0))
         .child(section(
@@ -403,8 +409,17 @@ pub(crate) fn single_form(
             "封面与歌词",
             vec![
                 cover_row(draft, full),
-                multi_row("歌词", TagField::Lyrics, draft, full, 140.0, 260.0),
-                multi_row("注释", TagField::Comment, draft, full, 64.0, 120.0),
+                multi_row(
+                    "歌词",
+                    TagField::Lyrics,
+                    draft,
+                    full,
+                    140.0,
+                    260.0,
+                    Some(lyrics_remount),
+                ),
+                import_lyrics_row(draft, lyrics_remount),
+                multi_row("注释", TagField::Comment, draft, full, 64.0, 120.0, None),
             ],
         ))
         .child(section(
@@ -417,4 +432,49 @@ pub(crate) fn single_form(
             ],
         ))
         .child(tech_section(&path, rows, full))
+}
+
+/// 歌词输入框下的「从文件导入」：选一个 `.lrc` / `.txt`，自动识别编码
+/// （UTF-8 / BOM / GBK 等）后整段替换歌词草稿，输入框随之重新挂载；不立即
+/// 写盘，照常由「保存」写回。只在单选面板里有——多选没有「导入」。
+fn import_lyrics_row(draft: Signal<SingleDraft>, remount: Signal<u32>) -> View {
+    let pick = move || {
+        spawn(async move {
+            let picked = blocking(|| {
+                let file = rfd::FileDialog::new()
+                    .set_title("选择歌词文件")
+                    .add_filter("歌词", &["lrc", "txt"])
+                    .pick_file()?;
+                Some(std::fs::read(&file).map_err(|e| format!("读取歌词文件失败: {e}")))
+            })
+            .await
+            .ok()
+            .flatten();
+            let Some(read) = picked else { return };
+            match read {
+                Ok(bytes) => {
+                    let text = zeo_metadata::export::decode_text_file(&bytes).replace("\r\n", "\n");
+                    if text.trim().is_empty() {
+                        draft.update(|d| d.error = Some("歌词文件是空的".to_owned()));
+                        return;
+                    }
+                    draft.update(|d| {
+                        d.values.insert(TagField::Lyrics, text);
+                        d.saved = false;
+                        d.error = None;
+                    });
+                    remount.update(|r| *r += 1);
+                }
+                Err(error) => draft.update(|d| d.error = Some(error)),
+            }
+        });
+    };
+    wrap_row(
+        "",
+        vec![
+            text_button(Variant::Outline, Size::Sm, None, "从文件导入歌词…", pick)
+                .disabled(move || draft.with(|d| d.saving))
+                .into_element(),
+        ],
+    )
 }

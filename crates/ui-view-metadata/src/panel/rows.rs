@@ -179,6 +179,8 @@ pub(crate) fn rating_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow
 }
 
 /// 多行输入（注释 / 歌词）：限制最大高度（歌词 260pt，注释 120pt）；未就绪时画同款外观占位。
+/// 输入框非受控（`default_value` 只在挂载时生效）：外部要整段换文本（导入歌词）时
+/// 给 `remount`，它一变输入框按草稿里的新值重新挂载。
 pub(crate) fn multi_row(
     label: &'static str,
     field: TagField,
@@ -186,6 +188,7 @@ pub(crate) fn multi_row(
     full: Signal<Option<FullRow>>,
     min_height: f32,
     max_height: f32,
+    remount: Option<Signal<u32>>,
 ) -> View {
     view()
         .flex_row()
@@ -193,6 +196,9 @@ pub(crate) fn multi_row(
         .gap(px(8.0))
         .child(view().w(px(72.0)).pt(px(8.0)).child(label_cell(label)))
         .child(dynamic(move || {
+            // 递增的 key 逼它换节点：同 key 的非受控输入框会被复用、忽略新的
+            // `default_value`。
+            let generation = remount.map_or(0, |r| r.get());
             let is_ready =
                 untracked(|| draft.with(|d| d.values.contains_key(&field))) || full.get().is_some();
             if !is_ready {
@@ -225,7 +231,9 @@ pub(crate) fn multi_row(
                     })
                     .unwrap_or_default()
             });
-            multi_input(label, field, draft, initial, min_height, max_height)
+            multi_input(
+                label, field, draft, initial, min_height, max_height, generation,
+            )
         }))
 }
 
@@ -241,9 +249,11 @@ fn multi_input(
     initial: String,
     min_height: f32,
     max_height: f32,
+    generation: u32,
 ) -> AnyElement {
     let content_h = signal(0.0f32);
     input_field(false)
+        .key(format!("{field:?}-{generation}"))
         .flex_1()
         .min_w(px(0.0))
         .py(px(10.0))
@@ -329,13 +339,13 @@ pub(crate) fn cover_row(draft: Signal<SingleDraft>, full: Signal<Option<FullRow>
             view()
                 .gap(px(6.0))
                 .child(
-                    text_button(Variant::Outline, Size::Xs, None, "更换图片…", pick)
+                    text_button(Variant::Outline, Size::Sm, None, "更换图片…", pick)
                         .disabled(busy_or_loading),
                 )
                 .child(
                     text_button(
                         Variant::Outline,
-                        Size::Xs,
+                        Size::Sm,
                         None,
                         "移除封面",
                         move || {

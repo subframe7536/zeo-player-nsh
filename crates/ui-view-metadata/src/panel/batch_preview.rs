@@ -33,14 +33,14 @@ pub(crate) struct PreviewLine {
 }
 
 impl PreviewLine {
-    fn ok(text: impl Into<String>) -> Self {
+    pub(crate) fn ok(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             bad: false,
         }
     }
 
-    fn bad(text: impl Into<String>) -> Self {
+    pub(crate) fn bad(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             bad: true,
@@ -48,11 +48,11 @@ impl PreviewLine {
     }
 }
 
-/// 三个工具的效果预览；空 = 该工具没启用。
+/// 各工具的效果预览；空 = 该工具没启用。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct Preview {
-    pub(crate) number: Vec<PreviewLine>,
     pub(crate) case: Vec<PreviewLine>,
+    pub(crate) encoding: Vec<PreviewLine>,
     pub(crate) rename: Vec<PreviewLine>,
 }
 
@@ -68,9 +68,9 @@ pub(crate) fn current_value(
     }
 }
 
-/// 文件名模板能看到的字段：当前值叠上这批改动（三态 / 编号 / 大小写）
+/// 文件名模板能看到的字段：当前值叠上这批改动（三态 / 乱码修复 / 大小写）
 /// 之后的结果——模板里的 `{artist}` 取的是应用后的歌手。
-fn effective_fields(
+pub(crate) fn effective_fields(
     t: &TrackEntry,
     rows: &HashMap<String, Arc<MetaRow>>,
     edits: Option<&TagEdits>,
@@ -87,7 +87,7 @@ fn effective_fields(
             Edit::Clear => {
                 fields.insert(*field, String::new());
             }
-            Edit::Keep => {}
+            Edit::Keep | Edit::Redecode => {}
         }
     }
     fields
@@ -165,12 +165,17 @@ fn file_name(path: &str) -> String {
         .unwrap_or_default()
 }
 
-/// 当前草稿在样本上的效果：`total` 是所选总数（编号区间 / 总数用）。
+/// 当前草稿在样本上的效果：`total` 是所选总数（「… 共 N 首」用）。
+/// `texts`：所选样本从文件读出的完整歌词 / 注释（乱码修复预览用，开了修复才读，
+/// 见 `batch_panel` 的 `sample_texts`）。
+pub(crate) type SampleTexts = HashMap<String, HashMap<TagField, String>>;
+
 pub(crate) fn build_preview(
     d: &BatchDraft,
     sample: &[TrackEntry],
     total: usize,
     rows: &HashMap<String, Arc<MetaRow>>,
+    texts: &SampleTexts,
 ) -> Preview {
     let more = |mut lines: Vec<PreviewLine>| {
         if !lines.is_empty() && total > sample.len() {
@@ -179,58 +184,109 @@ pub(crate) fn build_preview(
         lines
     };
     Preview {
-        number: number_preview(d, total),
-        case: more(case_preview(d.case, sample, rows)),
-        rename: more(rename_preview(d, sample, total, rows)),
+        case: more(case_preview(d.case, d.fix_encoding, sample, rows)),
+        encoding: more(encoding_preview(d, sample, rows, texts)),
+        rename: more(rename_preview(d, sample, rows)),
     }
 }
 
-fn number_preview(d: &BatchDraft, total: usize) -> Vec<PreviewLine> {
-    let start = d.num_start.trim();
-    if start.is_empty() {
-        return Vec::new();
-    }
-    let Ok(start) = start.parse::<u32>() else {
-        return vec![PreviewLine::bad("起始号须为非负整数")];
-    };
-    let last = start.saturating_add(total.saturating_sub(1) as u32);
-    let suffix = if d.num_total {
-        format!("，总数 {total}")
+/// 乱码修复之后的字段值（没开修复 / 修不了就是当前值）：大小写作用在它上面。
+fn after_encoding(
+    t: &TrackEntry,
+    rows: &HashMap<String, Arc<MetaRow>>,
+    field: TagField,
+    fix_encoding: bool,
+) -> String {
+    let old = current_value(t, rows, field);
+    if fix_encoding && ENCODING_FIELDS.contains(&field) {
+        fix_mojibake(&old).unwrap_or(old)
     } else {
-        String::new()
-    };
-    vec![PreviewLine::ok(format!("音轨号 {start} – {last}{suffix}"))]
+        old
+    }
 }
 
-/// 大小写：每首取标题 / 歌手 / 专辑里第一个会变的字段，`旧 → 新`。
+/// 每首取 `fields` 里第一个会变的字段，`字段：旧 → 新`；都不变就写「无变化」。
+fn first_change_lines(
+    sample: &[TrackEntry],
+    fields: &[TagField],
+    change: impl Fn(&TrackEntry, TagField) -> Option<(String, String)>,
+) -> Vec<PreviewLine> {
+    sample
+        .iter()
+        .map(|t| {
+            let line = fields.iter().find_map(|f| {
+                change(t, *f).map(|(old, new)| format!("{}：{old} → {new}", f.label()))
+            });
+            PreviewLine::ok(line.unwrap_or_else(|| format!("{}（无变化）", t.file_name)))
+        })
+        .collect()
+}
+
+/// 大小写：标题 / 歌手 / 专辑里第一个会变的字段（作用在乱码修复之后的值上）。
 fn case_preview(
     op: Option<CaseOp>,
+    fix_encoding: bool,
     sample: &[TrackEntry],
     rows: &HashMap<String, Arc<MetaRow>>,
 ) -> Vec<PreviewLine> {
     let Some(op) = op else {
         return Vec::new();
     };
-    sample
+    first_change_lines(
+        sample,
+        &[TagField::Title, TagField::Artist, TagField::Album],
+        |t, f| {
+            let old = after_encoding(t, rows, f, fix_encoding);
+            let new = case_convert(&old, op);
+            (new != old).then_some((old, new))
+        },
+    )
+}
+
+/// 预览里的一行文字：多行文本（歌词 / 注释）只取第一条非空行、截到 30 字。
+fn one_line(text: &str) -> String {
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty());
+    let line = line.unwrap_or("");
+    let short: String = line.chars().take(30).collect();
+    if short.len() < line.len() {
+        format!("{short}…")
+    } else {
+        short
+    }
+}
+
+/// 乱码修复：覆盖字段（含歌词 / 注释）里第一个能修复的，`乱码 → 修复后`；
+/// 三态已定值的字段不修复，预览也跳过。
+fn encoding_preview(
+    d: &BatchDraft,
+    sample: &[TrackEntry],
+    rows: &HashMap<String, Arc<MetaRow>>,
+    texts: &SampleTexts,
+) -> Vec<PreviewLine> {
+    if !d.fix_encoding {
+        return Vec::new();
+    }
+    let fields: Vec<TagField> = ENCODING_FIELDS
         .iter()
-        .map(|t| {
-            let change = [TagField::Title, TagField::Artist, TagField::Album]
-                .into_iter()
-                .find_map(|f| {
-                    let old = current_value(t, rows, f);
-                    let new = case_convert(&old, op);
-                    (new != old).then(|| format!("{}：{old} → {new}", f.label()))
-                });
-            PreviewLine::ok(change.unwrap_or_else(|| format!("{}（无变化）", t.file_name)))
-        })
-        .collect()
+        .chain(ENCODING_FILE_FIELDS.iter())
+        .copied()
+        .filter(|f| d.modes.get(f).copied().unwrap_or(Tri::Keep) == Tri::Keep)
+        .collect();
+    first_change_lines(sample, &fields, |t, f| {
+        // 歌词 / 注释的完整文本来自文件（视图行里是截断预览）。
+        let old = if ENCODING_FILE_FIELDS.contains(&f) {
+            texts.get(&t.path)?.get(&f)?.clone()
+        } else {
+            current_value(t, rows, f)
+        };
+        fix_mojibake(&old).map(|new| (one_line(&old), one_line(&new)))
+    })
 }
 
 /// 重命名：`旧文件名 → 新文件名`，冲突 / 不可用标红并带原因。
 fn rename_preview(
     d: &BatchDraft,
     sample: &[TrackEntry],
-    total: usize,
     rows: &HashMap<String, Arc<MetaRow>>,
 ) -> Vec<PreviewLine> {
     if d.rename_tpl.trim().is_empty() {
@@ -246,10 +302,9 @@ fn rename_preview(
         &order,
         &d.modes,
         &d.values,
-        d.numbering(),
         d.case,
+        d.fix_encoding,
         &CoverMode::Keep,
-        total,
         |p, f| {
             by_path
                 .get(p)

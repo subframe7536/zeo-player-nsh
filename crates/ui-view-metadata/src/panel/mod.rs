@@ -22,6 +22,8 @@ pub(crate) use super::MetaRow;
 
 pub(crate) use zeo_library::config::library_store;
 
+pub(crate) use zeo_metadata::export::fix_mojibake;
+
 pub(crate) use zeo_metadata::rename::{self, Status};
 
 pub(crate) use zeo_metadata::write::{self, CoverEdit, Edit, TagEdits, TagField};
@@ -45,12 +47,14 @@ pub(crate) use zeo_ui_store::theme::*;
 pub(crate) use zeo_ui_store::{self as store, poster};
 
 mod batch;
+mod batch_export;
 mod batch_ops;
 mod batch_preview;
 mod batch_rename;
 mod cache;
 mod edits;
 mod genre;
+mod history;
 mod rows;
 mod single;
 mod tech;
@@ -59,12 +63,14 @@ mod tests;
 mod widgets;
 
 pub(crate) use batch::*;
+pub(crate) use batch_export::*;
 pub(crate) use batch_ops::*;
 pub(crate) use batch_preview::*;
 pub(crate) use batch_rename::*;
 pub(crate) use cache::*;
 pub(crate) use edits::*;
 pub(crate) use genre::*;
+pub(crate) use history::*;
 pub(crate) use rows::*;
 pub(crate) use single::*;
 pub(crate) use tech::*;

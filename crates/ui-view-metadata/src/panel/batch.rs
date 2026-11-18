@@ -60,24 +60,16 @@ pub(crate) const TRI_FIELDS: &[TagField] = &[
 pub(crate) struct BatchDraft {
     pub(crate) modes: HashMap<TagField, Tri>,
     pub(crate) values: HashMap<TagField, String>,
-    /// 音轨编号起始号（空 = 不改编号）与「同时写入音轨总数」。
-    pub(crate) num_start: String,
-    pub(crate) num_total: bool,
     /// 英文大小写格式化（None = 不改；作用于标题 / 歌手 / 专辑）。
     pub(crate) case: Option<CaseOp>,
+    /// 自动乱码修复：尽力把别的编码被误读的文本转回 UTF-8，认不准保持原样
+    /// （作用于 [`ENCODING_FIELDS`] 与歌词 / 注释）。
+    pub(crate) fix_encoding: bool,
     /// 文件名模板（空 = 不改名）。
     pub(crate) rename_tpl: String,
     pub(crate) cover: CoverMode,
     pub(crate) applying: bool,
     pub(crate) message: Option<String>,
-}
-
-impl BatchDraft {
-    /// 编号设置：起始号能解析才算数（解析不了由预览报错）。
-    pub(crate) fn numbering(&self) -> Option<(u32, bool)> {
-        let start = self.num_start.trim().parse::<u32>().ok()?;
-        Some((start, self.num_total))
-    }
 }
 
 /// 大小写下拉的选项（`None` = 不改动）。
@@ -97,63 +89,49 @@ pub(crate) fn batch_panel(
 ) -> View {
     let draft = signal(BatchDraft::default());
     let m = paths.len();
-    let busy = move || draft.with(|d| d.applying);
 
     // 效果预览：只算所选里的前几首（显示序），每次按键重算也便宜；
     // 全量校验（重名 / 磁盘冲突）在「应用」时做。
     let path_set: Rc<std::collections::HashSet<String>> = Rc::new(paths.iter().cloned().collect());
     let sample = computed(move || Rc::new(displayed.with(|v| sample_of(v, &path_set))));
+    // 乱码修复预览要样本的完整歌词 / 注释（视图行里只有截断预览）：开了修复才从
+    // 文件读，只在「是否开启 / 样本」变时重读，不随每次按键。
+    let encoding_on = computed(move || draft.with(|d| d.fix_encoding));
+    let sample_texts = computed(move || {
+        let mut texts = SampleTexts::new();
+        if encoding_on.get() {
+            for t in sample.get().iter() {
+                if let Ok(fields) = zeo_metadata::write::read_fields(std::path::Path::new(&t.path))
+                {
+                    texts.insert(t.path.clone(), fields);
+                }
+            }
+        }
+        Rc::new(texts)
+    });
     let preview = computed(move || {
         let sample = sample.get();
         let map = rows.get();
-        draft.with(|d| Rc::new(build_preview(d, &sample, m, &map)))
+        let texts = sample_texts.get();
+        draft.with(|d| Rc::new(build_preview(d, &sample, m, &map, &texts)))
     });
     let template_err = computed(move || draft.with(|d| template_error(&d.rename_tpl)));
     let rename_open = signal(false);
+    // 导出（歌词 / 封面）弹窗：开关与导出选项随面板存活。
+    let lyrics_open = signal(false);
+    let cover_open = signal(false);
+    let lyrics_export = signal(ExportOpts::default());
+    let cover_export = signal(ExportOpts::default());
+    let export_source = Rc::new(ExportSource {
+        displayed,
+        rows,
+        paths: paths.clone(),
+        sample,
+    });
 
     // 工具块：控件行 + 下方的效果预览 / 提示；块之间留 14pt。
     let tools = view()
         .gap(px(14.0))
-        .child(
-            view()
-                .child(wrap_row(
-                    "音轨编号",
-                    vec![
-                        input_field(true)
-                            .w(px(72.0))
-                            .label("编号起始")
-                            .placeholder("不改动")
-                            .value(move || draft.with(|d| d.num_start.clone()))
-                            .readonly(busy)
-                            .on_change(move |t: &str| {
-                                draft.update(|d| t.clone_into(&mut d.num_start))
-                            })
-                            .into_element(),
-                        // 复选框与它的文字是一组，折行时不拆开。
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(checkbox(
-                                move || draft.with(|d| d.num_total),
-                                || false,
-                                "同时写入音轨总数",
-                                move |next| draft.update(|d| d.num_total = next),
-                            ))
-                            .child(
-                                text("写入总数")
-                                    .text_size(px(12.0))
-                                    .line_height(px(12.0))
-                                    .text_color(fg()),
-                            )
-                            .into_element(),
-                    ],
-                ))
-                .child(preview_block(
-                    move || preview.with(|p| p.number.clone()),
-                    "按当前显示序连续编号",
-                )),
-        )
         .child(
             view()
                 .child(wrap_row(
@@ -184,6 +162,21 @@ pub(crate) fn batch_panel(
                 .child(preview_block(
                     move || preview.with(|p| p.case.clone()),
                     "作用于标题 / 歌手 / 专辑",
+                )),
+        )
+        .child(
+            view()
+                .child(wrap_row(
+                    "乱码修复",
+                    vec![check_with_label(
+                        "自动修复为 UTF-8",
+                        move || draft.with(|d| d.fix_encoding),
+                        move |on| draft.update(|d| d.fix_encoding = on),
+                    )],
+                ))
+                .child(preview_block(
+                    move || preview.with(|p| p.encoding.clone()),
+                    "尽力识别 GBK / Big5 / Shift-JIS 等被误读的标签文本（含歌词、注释），认不准的保持原样",
                 )),
         )
         .child(
@@ -235,7 +228,11 @@ pub(crate) fn batch_panel(
         .child(section("工具", vec![tools]))
         .child(section("字段", vec![fields]))
         // 封面只有一行，行首标签就是标题，不再另起节标题。
-        .child(cover_mode_row(draft));
+        .child(cover_mode_row(draft))
+        .child(section(
+            "文件",
+            vec![wrap_row("导出", export_buttons(lyrics_open, cover_open))],
+        ));
     view()
         .flex_1()
         .min_h(px(0.0))
@@ -283,6 +280,21 @@ pub(crate) fn batch_panel(
             move || rename_open.get(),
             move || rename_dialog(draft, preview, template_err, rename_open),
         ))
+        .child(when(move || lyrics_open.get(), {
+            let source = export_source.clone();
+            move || {
+                export_dialog(
+                    ExportWhat::Lyrics,
+                    lyrics_export,
+                    source.clone(),
+                    lyrics_open,
+                )
+            }
+        }))
+        .child(when(move || cover_open.get(), {
+            let source = export_source.clone();
+            move || export_dialog(ExportWhat::Cover, cover_export, source.clone(), cover_open)
+        }))
 }
 
 /// 单首曲目的现有索引字段值（`TrackEntry` 兜底）。

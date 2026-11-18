@@ -33,14 +33,19 @@ pub(crate) fn put_cached_full(path: &str, row: FullRow) {
 
 /// 面板（宽由 `h_resizable` 分栏管：默认随断点 280/320/380、拖把手 240-560
 ///（窄窗口按 `panel_max` 再收，表格保底三成）；
-/// 边框 + 浮动阴影）：单选表单 / 批量修改，按选中数切换——两个
+/// 边框，无阴影）：单选表单 / 批量修改，按选中数切换——两个
 /// 分支各按「单选路径 / 批量集合」memo，集合没变不重建（草稿留得住）。
+///
+/// `reload`（页面级信号）：标签历史还原写盘后加一，单选面板按磁盘新值重建（输入框
+/// 是非受控的）；那次重建里单选面板拿 `fresh = true`，不用索引 / 缓存的旧值。
 pub(crate) fn panel(
     displayed: Memo<Rc<Vec<TrackEntry>>>,
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
     selected: Signal<BTreeSet<String>>,
     close: Rc<dyn Fn()>,
+    reload: Signal<u32>,
 ) -> View {
+    let seen_reload = std::cell::Cell::new(0u32);
     let single = computed(move || {
         selected.with(|set| (set.len() == 1).then(|| set.iter().next().unwrap().clone()))
     });
@@ -56,8 +61,12 @@ pub(crate) fn panel(
         .bg(nsh_base::theme().card)
         .overflow_hidden()
         .child(dynamic(move || {
+            // 这次重建是不是 `reload` 引起的（只有那一次要无视旧缓存）。
+            let generation = reload.get();
+            let fresh = generation != seen_reload.replace(generation);
             if let Some(path) = single.get() {
-                return single_panel(path, displayed, rows, selected, close.clone()).into_element();
+                return single_panel(path, displayed, rows, selected, close.clone(), fresh)
+                    .into_element();
             }
             if let Some(paths) = batch.get() {
                 return batch_panel(paths, displayed, rows, selected, close.clone()).into_element();

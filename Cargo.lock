@@ -6465,6 +6465,7 @@ version = "0.0.0"
 dependencies = [
  "color-thief",
  "dirs",
+ "encoding_rs",
  "image",
  "lofty",
  "symphonia",

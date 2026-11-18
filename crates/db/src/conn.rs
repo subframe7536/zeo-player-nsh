@@ -5,7 +5,7 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 /// 当前表结构版本（`PRAGMA user_version`）。改表时加一，并在 [`migrate`] 里迁移。
-pub(crate) const SCHEMA_VERSION: i32 = 9;
+pub(crate) const SCHEMA_VERSION: i32 = 10;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS tracks (
@@ -164,6 +164,29 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
                 stamp INTEGER NOT NULL,
                 bars BLOB NOT NULL
             );",
+        )?;
+    }
+    if version < 10 {
+        // 标签写回历史：每次写回一个批次，每个文件存写前的旧值快照（只含
+        // 动过的字段；动过封面才带旧封面字节），供「还原」。跟随文件移动，
+        // 文件删除时清掉；只留最近若干批次（`history::KEEP_BATCHES`）。
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tag_batches (
+                id INTEGER PRIMARY KEY,
+                created_at INTEGER NOT NULL,
+                summary TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS tag_snapshots (
+                id INTEGER PRIMARY KEY,
+                batch INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                fields TEXT NOT NULL,
+                cover_touched INTEGER NOT NULL,
+                cover BLOB,
+                cover_mime TEXT
+            );
+            CREATE INDEX IF NOT EXISTS tag_snapshots_batch ON tag_snapshots(batch);
+            CREATE INDEX IF NOT EXISTS tag_snapshots_path ON tag_snapshots(path);",
         )?;
     }
     if version < SCHEMA_VERSION {

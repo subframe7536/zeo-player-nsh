@@ -4,8 +4,7 @@ use super::*;
 mod tests {
     use super::*;
 
-    /// 编号按传入顺序递增、带不带总数；大小写覆盖同名字段；三态展开；
-    /// 全空跳过。
+    /// 大小写覆盖同名字段；三态展开；全空跳过。
     #[test]
     pub(crate) fn batch_edits_builds_per_file() {
         let paths: Vec<String> = (1..=3).map(|i| format!("/m/{i}.mp3")).collect();
@@ -14,7 +13,7 @@ mod tests {
         modes.insert(TagField::Album, Tri::Clear);
         let mut values = HashMap::new();
         values.insert(TagField::Artist, "歌手".to_owned());
-        // 编号起始 3 带总数 + 首字母大写（作用于现有标题）。
+        // 首字母大写（作用于现有标题）。
         let field_of = |_: &str, f: TagField| match f {
             TagField::Title => "my song".to_owned(),
             _ => String::new(),
@@ -23,10 +22,9 @@ mod tests {
             &paths,
             &modes,
             &values,
-            Some((3, true)),
             Some(CaseOp::Title),
+            false,
             &CoverMode::Keep,
-            paths.len(),
             field_of,
         );
         assert_eq!(items.len(), 3);
@@ -36,18 +34,6 @@ mod tests {
                 .find(|(k, _)| *k == f)
                 .map(|(_, v)| v.clone())
         };
-        assert_eq!(
-            get(&items[0].1, TagField::Track),
-            Some(Edit::Set("3".to_owned()))
-        );
-        assert_eq!(
-            get(&items[2].1, TagField::Track),
-            Some(Edit::Set("5".to_owned()))
-        );
-        assert_eq!(
-            get(&items[0].1, TagField::TrackTotal),
-            Some(Edit::Set("3".to_owned()))
-        );
         assert_eq!(
             get(&items[0].1, TagField::Artist),
             Some(Edit::Set("歌手".to_owned()))
@@ -64,9 +50,8 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             None,
-            None,
+            false,
             &CoverMode::Keep,
-            paths.len(),
             |_, _| String::new(),
         );
         assert!(empty.is_empty());
@@ -154,6 +139,75 @@ mod tests {
         }))
     }
 
+    /// 乱码修复：Latin-1 乱码按所选编码还原，三态已定值的字段不动，大小写
+    /// 作用在修复之后的值上；预览显示 `乱码 → 修复后`。
+    #[test]
+    pub(crate) fn encoding_fix_runs_before_case_and_respects_tri_state() {
+        // 「周杰伦」的 GBK 字节被当 Latin-1 读出来。
+        let garbled = "\u{d6}\u{dc}\u{bd}\u{dc}\u{c2}\u{d7}";
+        let sample = vec![entry("/m/a.mp3", "my song", garbled, 1)];
+        let path = vec!["/m/a.mp3".to_owned()];
+        let get = |items: &[(String, TagEdits)], f: TagField| {
+            items[0]
+                .1
+                .fields
+                .iter()
+                .find(|(k, _)| *k == f)
+                .map(|(_, e)| e.clone())
+        };
+        let field_of = |_: &str, f: TagField| match f {
+            TagField::Title => "my song".to_owned(),
+            TagField::Artist => garbled.to_owned(),
+            _ => String::new(),
+        };
+        let run = |modes: &HashMap<TagField, Tri>, values: &HashMap<TagField, String>| {
+            batch_edits(
+                &path,
+                modes,
+                values,
+                Some(CaseOp::Title),
+                true,
+                &CoverMode::Keep,
+                field_of,
+            )
+        };
+        let items = run(&HashMap::new(), &HashMap::new());
+        assert_eq!(
+            get(&items, TagField::Artist),
+            Some(Edit::Set("周杰伦".to_owned()))
+        );
+        assert_eq!(
+            get(&items, TagField::Title),
+            Some(Edit::Set("My Song".to_owned()))
+        );
+        // 歌词与注释的完整文本在文件里：留给写回时解析（Redecode）。
+        assert_eq!(get(&items, TagField::Lyrics), Some(Edit::Redecode));
+        assert_eq!(get(&items, TagField::Comment), Some(Edit::Redecode));
+        // 艺术家、注释被三态定了值：乱码修复不碰它们。
+        let modes = HashMap::from([
+            (TagField::Artist, Tri::Set),
+            (TagField::Comment, Tri::Clear),
+        ]);
+        let values = HashMap::from([(TagField::Artist, "X".to_owned())]);
+        let items = run(&modes, &values);
+        assert_eq!(
+            get(&items, TagField::Artist),
+            Some(Edit::Set("X".to_owned()))
+        );
+        assert_eq!(get(&items, TagField::Comment), Some(Edit::Clear));
+
+        let mut d = BatchDraft::default();
+        d.fix_encoding = true;
+        let p = build_preview(&d, &sample, 1, &HashMap::new(), &HashMap::new());
+        assert_eq!(p.encoding[0].text, format!("歌手：{garbled} → 周杰伦"));
+        d.fix_encoding = false;
+        assert!(
+            build_preview(&d, &sample, 1, &HashMap::new(), &HashMap::new())
+                .encoding
+                .is_empty()
+        );
+    }
+
     /// 效果预览：大小写显示 `旧 → 新`；重命名按应用后的标签渲染（模板里
     /// 的 `{title}` 取大小写格式化后的值）；坏模板标红；没启用的工具无预览。
     #[test]
@@ -167,11 +221,14 @@ mod tests {
         ];
         let rows = HashMap::new();
         let mut d = BatchDraft::default();
-        assert_eq!(build_preview(&d, &sample, 2, &rows), Preview::default());
+        assert_eq!(
+            build_preview(&d, &sample, 2, &rows, &HashMap::new()),
+            Preview::default()
+        );
 
         d.case = Some(CaseOp::Title);
         d.rename_tpl = "{track:02d} - {title}".to_owned();
-        let p = build_preview(&d, &sample, 2, &rows);
+        let p = build_preview(&d, &sample, 2, &rows, &HashMap::new());
         assert_eq!(p.case[0].text, "标题：my song → My Song");
         // 第二首标题已是首字母大写：只剩没变的提示。
         assert!(p.case[1].text.ends_with("（无变化）"), "{:?}", p.case);
@@ -188,15 +245,10 @@ mod tests {
         assert!(p.rename.iter().all(|l| !l.bad));
 
         d.rename_tpl = "{nope}".to_owned();
-        let p = build_preview(&d, &sample, 2, &rows);
+        let p = build_preview(&d, &sample, 2, &rows, &HashMap::new());
         assert!(p.rename[0].bad, "{:?}", p.rename);
         assert!(template_error(&d.rename_tpl).is_some());
 
-        d.num_start = "x".to_owned();
-        assert!(build_preview(&d, &sample, 2, &rows).number[0].bad);
-        d.num_start = "3".to_owned();
-        let p = build_preview(&d, &sample, 5, &rows);
-        assert_eq!(p.number[0].text, "音轨号 3 – 7");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -234,7 +286,7 @@ mod tests {
         config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
         config.viewport = size(px(400.0), px(800.0));
         let mut app = Headless::start(config).expect("start");
-        app.wait_for("text:音轨编号").unwrap();
+        app.wait_for("text:大小写").unwrap();
         let nodes = app.screen().layout_nodes();
         let host = nodes
             .iter()
@@ -301,6 +353,112 @@ mod tests {
         app.wait_for("text:{artist} - {title}{year}").unwrap();
     }
 
+    /// 「文件」节：导出歌词 / 封面、标签历史各开自己的弹窗；导出弹窗的选项可改、
+    /// 另存模式才出现文件夹与文件名模板。
+    #[test]
+    pub(crate) fn export_and_history_dialogs_open() {
+        use nsh_core::geometry::{px, size};
+        use nsh_engine::{EngineConfig, Root};
+        use nsh_testing::Headless;
+        use std::time::Duration;
+        let theme =
+            nsh_base::Theme::from_json(include_str!("../../../../theme.json")).expect("theme.json");
+        let mut config =
+            EngineConfig::new(Root::of::<NarrowBatchPanelTest>().tokens(theme.into_tokens()));
+        config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
+        config.viewport = size(px(600.0), px(900.0));
+        let mut app = Headless::start(config).expect("start");
+        app.wait_for("text:乱码修复").unwrap();
+
+        app.press("导出歌词…").unwrap();
+        app.wait_for("text:把内嵌歌词写成外部文本文件（UTF-8，无 BOM），不改动标签。")
+            .unwrap();
+        // 同目录模式没有文件名模板；切到另存才出现。
+        assert!(!app.shows("label:导出文件名模板"));
+        app.press("label:去除时间戳").unwrap();
+        app.press("label:导出位置").unwrap();
+        app.press("role:option[另存到文件夹]").unwrap();
+        app.wait_for("label:导出文件名模板").unwrap();
+        app.press("完成").unwrap();
+        app.wait_for_gone("label:导出文件名模板", Duration::from_secs(5))
+            .unwrap();
+
+        app.press("导出封面…").unwrap();
+        app.wait_for("text:把内嵌封面保存成图片文件，不改动标签。")
+            .unwrap();
+        app.press("完成").unwrap();
+
+        // 批量面板没有标签历史（只在单选面板里）。
+        assert!(!app.shows("标签历史…"));
+    }
+
+    #[component]
+    pub(crate) fn LyricsRemountTest() -> impl IntoElement {
+        zeo_ui_store::install();
+        let full = signal(Some((
+            HashMap::from([(TagField::Lyrics, "old".to_owned())]),
+            Some("FLAC"),
+            None,
+        )));
+        let draft = signal(SingleDraft {
+            path: "mock.flac".to_owned(),
+            original: HashMap::new(),
+            values: HashMap::from([(TagField::Lyrics, "old".to_owned())]),
+            cover: None,
+            cover_src: None,
+            saving: false,
+            saved: false,
+            error: None,
+        });
+        let remount = signal(0u32);
+        view()
+            .child(multi_row(
+                "歌词",
+                TagField::Lyrics,
+                draft,
+                full,
+                40.0,
+                120.0,
+                Some(remount),
+            ))
+            .child(text_button(
+                Variant::Outline,
+                Size::Sm,
+                None,
+                "换歌词",
+                move || {
+                    draft.update(|d| {
+                        d.values.insert(TagField::Lyrics, "new".to_owned());
+                    });
+                    remount.update(|r| *r += 1);
+                },
+            ))
+    }
+
+    /// 导入歌词靠「改草稿 + 递增 remount」让非受控的歌词输入框重新挂载出新文本。
+    #[test]
+    pub(crate) fn lyrics_input_remounts_with_new_text() {
+        use nsh_core::geometry::{px, size};
+        use nsh_engine::{EngineConfig, Root};
+        use nsh_testing::Headless;
+        let theme =
+            nsh_base::Theme::from_json(include_str!("../../../../theme.json")).expect("theme.json");
+        let mut config =
+            EngineConfig::new(Root::of::<LyricsRemountTest>().tokens(theme.into_tokens()));
+        config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
+        config.viewport = size(px(500.0), px(400.0));
+        let mut app = Headless::start(config).expect("start");
+        app.wait_for("label:歌词").unwrap();
+        assert_eq!(app.screen().input_text("label:歌词").unwrap(), Some("old"));
+        app.press("换歌词").unwrap();
+        app.wait_until(
+            "歌词输入框换成新文本",
+            std::time::Duration::from_secs(5),
+            |s| s.input_text("label:歌词") == Ok(Some("new")),
+        )
+        .unwrap();
+    }
+
     #[component]
     pub(crate) fn SinglePanelInstantSeedTest() -> impl IntoElement {
         zeo_ui_store::install();
@@ -327,7 +485,49 @@ mod tests {
         let displayed = computed(move || Rc::new(vec![entry.clone()]));
         let rows = signal(HashMap::new());
         let selected = signal(BTreeSet::from([p.clone()]));
-        single_panel(p, displayed, rows, selected, Rc::new(|| {}))
+        single_panel(p, displayed, rows, selected, Rc::new(|| {}), false)
+    }
+
+    /// 页面级标签历史弹窗（入口在「显示列」下拉末尾）。
+    #[component]
+    pub(crate) fn HistoryDialogTest() -> impl IntoElement {
+        zeo_ui_store::install();
+        let open = signal(true);
+        // 和页面（lib.rs）一样用 `when(open)` 挂载：「完成」关掉信号才会卸载弹窗。
+        view().child(when(
+            move || open.get(),
+            move || {
+                history_dialog(
+                    "mock.flac".to_owned(),
+                    signal(HashMap::new()),
+                    open,
+                    signal(0u32),
+                )
+            },
+        ))
+    }
+
+    /// 没有历史记录时弹窗给提示；「完成」收起弹窗。
+    #[test]
+    pub(crate) fn history_dialog_shows_empty_state_and_closes() {
+        use nsh_core::geometry::{px, size};
+        use nsh_engine::{EngineConfig, Root};
+        use nsh_testing::Headless;
+        let theme =
+            nsh_base::Theme::from_json(include_str!("../../../../theme.json")).expect("theme.json");
+        let mut config =
+            EngineConfig::new(Root::of::<HistoryDialogTest>().tokens(theme.into_tokens()));
+        config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
+        config.viewport = size(px(600.0), px(600.0));
+        let mut app = Headless::start(config).expect("start");
+        app.wait_for("text:这首曲目还没有标签历史。保存写回前会自动记下旧值。")
+            .unwrap();
+        app.press("完成").unwrap();
+        app.wait_for_gone(
+            "text:这首曲目还没有标签历史。保存写回前会自动记下旧值。",
+            std::time::Duration::from_secs(5),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -359,5 +559,7 @@ mod tests {
         app.wait_for("text:JPOP").unwrap();
         app.wait_for("text:标签").unwrap();
         app.wait_for("text:流派：二次元; JPOP").unwrap();
+        // 标签历史入口已挪到「显示列」下拉末尾：单选面板里不再有这颗按钮。
+        assert!(!app.shows("标签历史…"));
     }
 }

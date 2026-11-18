@@ -60,6 +60,10 @@ pub enum Icon {
     /// 关于页的「i」圆标。
     Info,
     Keyboard,
+    /// 标签历史（时钟回拨）。
+    History,
+    /// 列显示设置（三栏）。
+    Columns,
 }
 
 impl Icon {
@@ -211,6 +215,14 @@ impl Icon {
             }
             // check
             Icon::Check => r#"<path d="M20 6 9 17l-5-5"/>"#,
+            // history
+            Icon::History => {
+                r#"<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>"#
+            }
+            // columns-3
+            Icon::Columns => {
+                r#"<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/>"#
+            }
         }
     }
 }

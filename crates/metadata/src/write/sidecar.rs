@@ -19,7 +19,7 @@ pub(crate) fn write_lrc_sidecar(audio: &Path, edit: &Edit) -> Result<(), String>
         .find(|p| p.is_file())
         .unwrap_or_else(|| dir.join(format!("{stem}.lrc")));
     match edit {
-        Edit::Keep => Ok(()),
+        Edit::Keep | Edit::Redecode => Ok(()),
         Edit::Clear => match fs::remove_file(&lrc) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),

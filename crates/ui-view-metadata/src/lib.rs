@@ -57,6 +57,10 @@ pub fn page() -> View {
             .unwrap_or_else(default_columns)
     }));
     let col_widths = signal(HashMap::<String, f32>::new());
+    // 标签历史（入口在「显示列」下拉末尾，只在选中恰好一首时可用）：弹窗开关、
+    // 还原写盘后让右侧单选面板重建的 `reload` 计数。
+    let history_open = signal(false);
+    let history_reload = signal(0u32);
     // 右侧面板宽：None 走断点默认（`panel_default_w`），拖过把手后记住
     // 用户值，窗口过断点不再重置（`size` 新值会顶掉拖拽结果）。
     let panel_w = signal(Option::<f32>::None);
@@ -113,244 +117,260 @@ pub fn page() -> View {
 
     let count = computed(move || s.tracks.with(|t| t.len()));
     let has_selection = computed(move || selected.with(|s| !s.is_empty()));
+    let single_path = computed(move || {
+        selected.with(|s| (s.len() == 1).then(|| s.iter().next().unwrap().clone()))
+    });
+    let can_history = computed(move || single_path.with(|p| p.is_some()));
     // 空曲库切换单独成 memo：若直接读 `s.tracks`，每次索引刷新 /
     // `move_path` 都整页重建（表格滚动位、面板草稿、筛选框全丢）。
     let empty = computed(move || s.tracks.with(|t| t.is_empty()));
-    view().flex_1().min_w(px(0.0)).child(dynamic(move || {
-        if empty.get() {
-            return no_library().into_element();
-        }
-        let gap_w = move || {
-            if zeo_ui_components::tracks::content_break() < 860.0 {
-                10.0
-            } else {
-                16.0
+    view()
+        .flex_1()
+        .min_w(px(0.0))
+        .child(dynamic(move || {
+            if empty.get() {
+                return no_library().into_element();
             }
-        };
-        let filter_w = move || {
-            if zeo_ui_components::tracks::content_break() < 860.0 {
-                180.0
-            } else {
-                260.0
-            }
-        };
-        let panel_default_w = move || {
-            let cw = zeo_ui_components::tracks::content_break();
-            if cw < 760.0 {
-                280.0
-            } else if cw < 960.0 {
-                320.0
-            } else {
-                380.0
-            }
-        };
-        // 两块面板平分的宽度：内容宽减两侧页边距与分栏 gap。
-        let panels_room =
-            move || zeo_ui_components::tracks::content_break() - PAGE_X * 2.0 - gap_w();
-        // 把手调的是把手前的表格，面板拿到剩下的；上游
-        // `resize_panel_at_handle` 在收缩方向不夹后一块面板的 max（把手
-        // 会拖过真实边界、松手后留在那，见 upstream.md），只能把面板的
-        // 上限折进表格的下限让它真到不了。
-        let table_min = move || {
-            let room = panels_room();
-            (room * TABLE_MIN_SHARE).max(room - PANEL_MAX_W)
-        };
-        // 面板实际拖得到的上限：min 之和超过可分宽度时上游 `min_of`
-        // 按比例缩各 min，这里同口径反推，把手落点才始终贴着真实边界。
-        // `max_size` 挂它：窗口变窄面板随之收、变宽再回 `panel_w` 记住的宽。
-        // （下限取缩放后的面板 min，防止浮点误差让 max 跌破 range。）
-        let panel_max = move || {
-            let room = panels_room();
-            let total_min = table_min() + PANEL_MIN_W;
-            let scale = if total_min > room {
-                (room / total_min).max(0.0)
-            } else {
-                1.0
+            let gap_w = move || {
+                if zeo_ui_components::tracks::content_break() < 860.0 {
+                    10.0
+                } else {
+                    16.0
+                }
             };
-            (room - table_min() * scale).max(PANEL_MIN_W * scale)
-        };
-        view()
-            .flex_1()
-            .min_w(px(0.0))
-            .child(page_header(
-                || "元数据".into(),
-                move || {
-                    format!(
-                        "{} 首曲目 · 已选 {} 首",
-                        count.get(),
-                        selected.with(|set| set.len())
-                    )
-                },
-                None,
-                None,
-            ))
-            .child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.0))
-                    .px(px(PAGE_X))
-                    .pb(px(16.0))
-                    .child(
-                        input_field(true)
-                            .w(move || px(filter_w()))
-                            .label("筛选")
-                            .placeholder("筛选文件名、标题、艺术家、专辑、标签")
-                            .default_value(untracked(|| filter.get()))
-                            .window_drag(false)
-                            .on_change(move |t: &str| filter.set(t.to_owned())),
-                    )
-                    .child(column_selector(visible_cols))
-                    .child(view().flex_1().min_w(px(0.0)).window_drag(true))
-                    .child({
-                        // 「全选」不放表头格：上游自定义表头对滚动区列
-                        // 不落渲染内容（见 upstream.md），工具栏的 nsh_base
-                        // 复选框在真机 / headless 都稳。
-                        let mark = checkbox(
-                            move || {
-                                selected.with(|s| {
-                                    if s.is_empty() {
-                                        return false;
-                                    }
-                                    displayed.with(|v| {
-                                        !v.is_empty()
-                                            && s.len() >= v.len()
-                                            && v.iter().all(|t| s.contains(&t.path))
-                                    })
-                                })
-                            },
-                            move || {
-                                selected.with(|s| {
-                                    if s.is_empty() {
-                                        return false;
-                                    }
-                                    displayed.with(|v| {
-                                        if v.is_empty() {
+            let filter_w = move || {
+                if zeo_ui_components::tracks::content_break() < 860.0 {
+                    180.0
+                } else {
+                    260.0
+                }
+            };
+            let panel_default_w = move || {
+                let cw = zeo_ui_components::tracks::content_break();
+                if cw < 760.0 {
+                    280.0
+                } else if cw < 960.0 {
+                    320.0
+                } else {
+                    380.0
+                }
+            };
+            // 两块面板平分的宽度：内容宽减两侧页边距与分栏 gap。
+            let panels_room =
+                move || zeo_ui_components::tracks::content_break() - PAGE_X * 2.0 - gap_w();
+            // 把手调的是把手前的表格，面板拿到剩下的；上游
+            // `resize_panel_at_handle` 在收缩方向不夹后一块面板的 max（把手
+            // 会拖过真实边界、松手后留在那，见 upstream.md），只能把面板的
+            // 上限折进表格的下限让它真到不了。
+            let table_min = move || {
+                let room = panels_room();
+                (room * TABLE_MIN_SHARE).max(room - PANEL_MAX_W)
+            };
+            // 面板实际拖得到的上限：min 之和超过可分宽度时上游 `min_of`
+            // 按比例缩各 min，这里同口径反推，把手落点才始终贴着真实边界。
+            // `max_size` 挂它：窗口变窄面板随之收、变宽再回 `panel_w` 记住的宽。
+            // （下限取缩放后的面板 min，防止浮点误差让 max 跌破 range。）
+            let panel_max = move || {
+                let room = panels_room();
+                let total_min = table_min() + PANEL_MIN_W;
+                let scale = if total_min > room {
+                    (room / total_min).max(0.0)
+                } else {
+                    1.0
+                };
+                (room - table_min() * scale).max(PANEL_MIN_W * scale)
+            };
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .child(page_header(
+                    || "元数据".into(),
+                    move || {
+                        format!(
+                            "{} 首曲目 · 已选 {} 首",
+                            count.get(),
+                            selected.with(|set| set.len())
+                        )
+                    },
+                    None,
+                    None,
+                ))
+                .child(
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(8.0))
+                        .px(px(PAGE_X))
+                        .pb(px(16.0))
+                        .child(
+                            input_field(true)
+                                .w(move || px(filter_w()))
+                                .label("筛选")
+                                .placeholder("筛选文件名、标题、艺术家、专辑、标签")
+                                .default_value(untracked(|| filter.get()))
+                                .window_drag(false)
+                                .on_change(move |t: &str| filter.set(t.to_owned())),
+                        )
+                        .child(column_selector(visible_cols, history_open, can_history))
+                        .child(view().flex_1().min_w(px(0.0)).window_drag(true))
+                        .child({
+                            // 「全选」不放表头格：上游自定义表头对滚动区列
+                            // 不落渲染内容（见 upstream.md），工具栏的 nsh_base
+                            // 复选框在真机 / headless 都稳。
+                            let mark = checkbox(
+                                move || {
+                                    selected.with(|s| {
+                                        if s.is_empty() {
                                             return false;
                                         }
-                                        let any = v.iter().any(|t| s.contains(&t.path));
-                                        let all = s.len() >= v.len()
-                                            && v.iter().all(|t| s.contains(&t.path));
-                                        any && !all
+                                        displayed.with(|v| {
+                                            !v.is_empty()
+                                                && s.len() >= v.len()
+                                                && v.iter().all(|t| s.contains(&t.path))
+                                        })
                                     })
-                                })
-                            },
-                            "全选",
-                            move |next| {
-                                let paths: Vec<String> =
-                                    displayed.with(|v| v.iter().map(|t| t.path.clone()).collect());
-                                selected.update(|set| {
-                                    if next {
-                                        for p in &paths {
-                                            set.insert(p.clone());
-                                        }
-                                    } else {
-                                        for p in &paths {
-                                            set.remove(p);
-                                        }
-                                    }
-                                });
-                                if next {
-                                    anchor.set(paths.first().cloned());
-                                }
-                            },
-                        );
-                        view()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(mark)
-                            .child(
-                                text("全选")
-                                    .text_size(px(13.0))
-                                    .line_height(px(13.0))
-                                    .text_color(muted_fg()),
-                            )
-                            .into_element()
-                    })
-                    .child(when(
-                        move || selected.with(|set| !set.is_empty()),
-                        move || {
-                            text_button(
-                                Variant::Ghost,
-                                Size::Xs,
-                                None,
-                                if zeo_ui_components::tracks::content_break() < 860.0 {
-                                    "取消"
-                                } else {
-                                    "取消选择"
                                 },
                                 move || {
-                                    selected.set(BTreeSet::new());
-                                    anchor.set(None);
+                                    selected.with(|s| {
+                                        if s.is_empty() {
+                                            return false;
+                                        }
+                                        displayed.with(|v| {
+                                            if v.is_empty() {
+                                                return false;
+                                            }
+                                            let any = v.iter().any(|t| s.contains(&t.path));
+                                            let all = s.len() >= v.len()
+                                                && v.iter().all(|t| s.contains(&t.path));
+                                            any && !all
+                                        })
+                                    })
                                 },
-                            )
-                            .accessibility_label("取消选择")
-                        },
-                    )),
-            )
-            .child(
-                view()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .px(px(PAGE_X))
-                    .pb(px(BAR_SPACE))
-                    .child(
-                        // 表格 | 面板分栏：把手落在两者的 gap 正中（分栏
-                        // 模型认得 flex gap），拖动在 core 里逐帧走；
-                        // 面板隐藏时不占宽、把手也随之消失。
-                        h_resizable()
-                            .gap(move || px(gap_w()))
-                            .handle_class(
-                                "w-[2px] bg-transparent group-hover:bg-primary \
+                                "全选",
+                                move |next| {
+                                    let paths: Vec<String> = displayed
+                                        .with(|v| v.iter().map(|t| t.path.clone()).collect());
+                                    selected.update(|set| {
+                                        if next {
+                                            for p in &paths {
+                                                set.insert(p.clone());
+                                            }
+                                        } else {
+                                            for p in &paths {
+                                                set.remove(p);
+                                            }
+                                        }
+                                    });
+                                    if next {
+                                        anchor.set(paths.first().cloned());
+                                    }
+                                },
+                            );
+                            view()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(6.0))
+                                .child(mark)
+                                .child(
+                                    text("全选")
+                                        .text_size(px(13.0))
+                                        .line_height(px(13.0))
+                                        .text_color(muted_fg()),
+                                )
+                                .into_element()
+                        })
+                        .child(when(
+                            move || selected.with(|set| !set.is_empty()),
+                            move || {
+                                text_button(
+                                    Variant::Ghost,
+                                    Size::Xs,
+                                    Some(Icon::Close),
+                                    if zeo_ui_components::tracks::content_break() < 860.0 {
+                                        "取消"
+                                    } else {
+                                        "取消选择"
+                                    },
+                                    move || {
+                                        selected.set(BTreeSet::new());
+                                        anchor.set(None);
+                                    },
+                                )
+                                .accessibility_label("取消选择")
+                            },
+                        )),
+                )
+                .child(
+                    view()
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .px(px(PAGE_X))
+                        .pb(px(BAR_SPACE))
+                        .child(
+                            // 表格 | 面板分栏：把手落在两者的 gap 正中（分栏
+                            // 模型认得 flex gap），拖动在 core 里逐帧走；
+                            // 面板隐藏时不占宽、把手也随之消失。
+                            h_resizable()
+                                .gap(move || px(gap_w()))
+                                .handle_class(
+                                    "w-[2px] bg-transparent group-hover:bg-primary \
                                      group-active:bg-primary",
-                            )
-                            .handle_accessibility_label("调整面板宽度")
-                            .child(
-                                resizable_panel().min_size(move || px(table_min())).child(
-                                    view()
-                                        .size_full()
-                                        .min_w(px(0.0))
-                                        .rounded(px(12.0))
-                                        .border_1()
-                                        .border_color(border())
-                                        .bg(nsh_base::theme().card)
-                                        .shadow_xs()
-                                        .overflow_hidden()
-                                        .child(table::table(
+                                )
+                                .handle_accessibility_label("调整面板宽度")
+                                .child(
+                                    resizable_panel().min_size(move || px(table_min())).child(
+                                        view()
+                                            .size_full()
+                                            .min_w(px(0.0))
+                                            .rounded(px(12.0))
+                                            .border_1()
+                                            .border_color(border())
+                                            .bg(nsh_base::theme().card)
+                                            .shadow_xs()
+                                            .overflow_hidden()
+                                            .child(table::table(
+                                                displayed,
+                                                rows,
+                                                selected,
+                                                anchor,
+                                                sort,
+                                                visible_cols,
+                                                col_widths,
+                                            )),
+                                    ),
+                                )
+                                .child(
+                                    resizable_panel()
+                                        .size(move || {
+                                            Some(px(panel_w.get().unwrap_or_else(panel_default_w)))
+                                        })
+                                        .min_size(px(PANEL_MIN_W))
+                                        .max_size(move || Some(px(panel_max())))
+                                        .fixed(true)
+                                        .visible(move || has_selection.get())
+                                        .on_resize(move |size: &Points| panel_w.set(Some(size.0)))
+                                        .child(panel::panel(
                                             displayed,
                                             rows,
                                             selected,
-                                            anchor,
-                                            sort,
-                                            visible_cols,
-                                            col_widths,
+                                            // 面板 ✕：清空选中集与范围锚点。
+                                            Rc::new(move || {
+                                                selected.set(BTreeSet::new());
+                                                anchor.set(None);
+                                            }),
+                                            history_reload,
                                         )),
                                 ),
-                            )
-                            .child(
-                                resizable_panel()
-                                    .size(move || {
-                                        Some(px(panel_w.get().unwrap_or_else(panel_default_w)))
-                                    })
-                                    .min_size(px(PANEL_MIN_W))
-                                    .max_size(move || Some(px(panel_max())))
-                                    .fixed(true)
-                                    .visible(move || has_selection.get())
-                                    .on_resize(move |size: &Points| panel_w.set(Some(size.0)))
-                                    .child(panel::panel(
-                                        displayed,
-                                        rows,
-                                        selected,
-                                        // 面板 ✕：清空选中集与范围锚点。
-                                        Rc::new(move || {
-                                            selected.set(BTreeSet::new());
-                                            anchor.set(None);
-                                        }),
-                                    )),
-                            ),
-                    ),
-            )
-            .into_element()
-    }))
+                        ),
+                )
+                .into_element()
+        }))
+        // 标签历史弹窗（页面级：入口在「显示列」下拉里；换选中就收掉）。
+        .child(when(
+            move || history_open.get() && single_path.with(|p| p.is_some()),
+            move || {
+                let path = single_path.get_untracked().unwrap_or_default();
+                panel::history_dialog(path, rows, history_open, history_reload)
+            },
+        ))
 }

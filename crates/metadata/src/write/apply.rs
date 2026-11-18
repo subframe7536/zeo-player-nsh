@@ -17,6 +17,16 @@ use lofty::tag::{Accessor, ItemKey, Tag, TagItem, TagType};
 /// → lofty 写标签 → `rename` 覆盖）；任何一步失败原文件都不动。
 /// 数字字段在复制文件之前校验。只写 `.lrc` 侧车（`edits.lrc`）时不动音频。
 pub fn write_tags(path: &Path, edits: &TagEdits) -> Result<(), String> {
+    // 乱码修复先换成具体的 Set（读完整文本）；调用方通常已解析过，这里兜底。
+    let resolved;
+    let edits = if edits.has_redecode() {
+        let mut copy = edits.clone();
+        super::resolve_redecode(path, &mut copy)?;
+        resolved = copy;
+        &resolved
+    } else {
+        edits
+    };
     validate(edits)?;
     // 写入目标是符号链接所指的真实文件（链接本身留着不动）。
     let target = fs::canonicalize(path).map_err(|e| format!("无法访问 {}: {e}", path.display()))?;
@@ -175,7 +185,8 @@ fn apply_edits(tag: &mut Tag, edits: &TagEdits) -> Result<(), String> {
 
 fn apply_field(tag: &mut Tag, field: TagField, edit: &Edit) -> Result<(), String> {
     match edit {
-        Edit::Keep => Ok(()),
+        // `Redecode` 在 `write_tags` 入口已换成 Set / Keep，到这里只剩兜底。
+        Edit::Keep | Edit::Redecode => Ok(()),
         Edit::Clear => clear_field(tag, field),
         Edit::Set(raw) => {
             let value = raw.trim();

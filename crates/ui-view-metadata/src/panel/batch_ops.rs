@@ -40,10 +40,10 @@ pub(crate) fn cover_mode_row(draft: Signal<BatchDraft>) -> View {
                 CoverMode::Keep => view()
                     .flex_row()
                     .gap(px(8.0))
-                    .child(text_button(Variant::Outline, Size::Xs, None, "替换…", pick))
+                    .child(text_button(Variant::Outline, Size::Sm, None, "替换…", pick))
                     .child(text_button(
-                        Variant::Destructive,
-                        Size::Xs,
+                        Variant::Outline,
+                        Size::Sm,
                         None,
                         "移除",
                         move || draft.update(|d| d.cover = CoverMode::Remove),
@@ -73,7 +73,7 @@ pub(crate) fn cover_mode_row(draft: Signal<BatchDraft>) -> View {
                         )
                         .child(text_button(
                             Variant::Ghost,
-                            Size::Xs,
+                            Size::Sm,
                             None,
                             "撤销",
                             move || draft.update(|d| d.cover = CoverMode::Keep),
@@ -111,10 +111,9 @@ pub(crate) fn apply_batch(
         &order,
         &d.modes,
         &d.values,
-        d.numbering(),
         d.case,
+        d.fix_encoding,
         &d.cover,
-        order.len(),
         |p, f| {
             selected_entries
                 .get(p)
@@ -137,28 +136,17 @@ pub(crate) fn apply_batch(
         d.applying = true;
         d.message = None;
     });
-    let tag_total = items.len();
-    let item_paths: Vec<String> = items.iter().map(|(p, _)| p.clone()).collect();
-    let after_tags = move |errors: Vec<(String, String)>| {
-        // 失败的路径仍保留在选中集里；成功行失效，加载器按新指纹重读。
-        let ok: Vec<&String> = item_paths
-            .iter()
-            .filter(|p| !errors.iter().any(|(e, _)| e == *p))
-            .collect();
-        {
-            let mut cache = full_cache().lock().unwrap();
-            for p in &ok {
-                cache.retain(|(cp, _)| cp != *p);
-            }
-        }
-        rows.update(|r| {
-            for p in &ok {
-                r.remove(*p);
-            }
-        });
-        let tag_note = (tag_total > 0).then(|| {
+    let has_tag_items = !items.is_empty();
+    let after_tags = move |saved: store::BatchSaved| {
+        let errors = saved.errors;
+        // 失败的路径仍保留在选中集里；写成功的行失效，加载器按新指纹重读。
+        forget_rows(saved.written.iter(), rows);
+        let tag_note = has_tag_items.then(|| {
             if errors.is_empty() {
-                format!("已更新 {tag_total} 首")
+                match saved.written.len() {
+                    0 => "标签没有需要修改的内容".to_owned(),
+                    n => format!("已更新 {n} 首"),
+                }
             } else {
                 let lines: Vec<String> = errors
                     .iter()
@@ -193,14 +181,31 @@ pub(crate) fn apply_batch(
         });
     };
     if items.is_empty() {
-        after_tags(Vec::new());
+        after_tags(store::BatchSaved::default());
     } else {
-        store::save_tags_batch(items, after_tags);
+        store::save_tags_batch(items, "批量修改", after_tags);
     }
 }
 
+/// 标签写成功的文件：丢掉它们的行缓存与单选面板缓存，加载器按新指纹重读。
+pub(crate) fn forget_rows<'a>(
+    paths: impl IntoIterator<Item = &'a String>,
+    rows: Signal<HashMap<String, Arc<MetaRow>>>,
+) {
+    let paths: Vec<&String> = paths.into_iter().collect();
+    {
+        let mut cache = full_cache().lock().unwrap();
+        cache.retain(|(cp, _)| !paths.contains(&cp));
+    }
+    rows.update(|r| {
+        for p in &paths {
+            r.remove(*p);
+        }
+    });
+}
+
 /// 失败清单缩成一句（最多 3 条）。
-fn brief(failures: &[String]) -> String {
+pub(crate) fn brief(failures: &[String]) -> String {
     failures
         .iter()
         .take(3)
@@ -209,25 +214,58 @@ fn brief(failures: &[String]) -> String {
         .join("；")
 }
 
+/// 乱码修复覆盖的文本字段（值取自曲库索引）。歌词与注释不在这里：视图行里它们
+/// 只是截断的预览，拿预览去修复再写回会把原文截掉——它们走
+/// [`ENCODING_FILE_FIELDS`]。
+pub(crate) const ENCODING_FIELDS: [TagField; 10] = [
+    TagField::Title,
+    TagField::Artist,
+    TagField::Album,
+    TagField::AlbumArtist,
+    TagField::Genre,
+    TagField::Composer,
+    TagField::Conductor,
+    TagField::Lyricist,
+    TagField::Publisher,
+    TagField::Copyright,
+];
+
+/// 乱码修复里要读文件才有完整文本的字段（`Edit::Redecode`）。
+pub(crate) const ENCODING_FILE_FIELDS: [TagField; 2] = [TagField::Lyrics, TagField::Comment];
+
+/// 写进 `fields` 的某字段改动（已有就换，没有就加）。
+fn put_edit(fields: &mut Vec<(TagField, Edit)>, field: TagField, edit: Edit) {
+    match fields.iter_mut().find(|(k, _)| *k == field) {
+        Some(slot) => slot.1 = edit,
+        None => fields.push((field, edit)),
+    }
+}
+
+/// 该字段此刻的值：前面的改动（三态 / 乱码修复）已经定了新值就用它，
+/// 否则是 `old`——后面的步骤（大小写）作用在前面步骤的结果上。
+fn effective_value(fields: &[(TagField, Edit)], field: TagField, old: String) -> String {
+    match fields.iter().find(|(k, _)| *k == field).map(|(_, e)| e) {
+        Some(Edit::Set(v)) => v.clone(),
+        Some(Edit::Clear) => String::new(),
+        _ => old,
+    }
+}
+
 /// 批量草稿 → 每首一份 `TagEdits`（纯函数）：三态按字段展开（「保持原
-/// 值」= `Edit::Keep`），编号与大小写在其后覆盖同名字段；全空的跳过。
-/// `total` 是所选总数（写音轨总数用），`paths` 的下标就是编号偏移。
+/// 值」= `Edit::Keep`），乱码修复、大小写依次在其后覆盖同名字段（三态已定值的
+/// 字段不做乱码修复；大小写作用在修复后的值上）；全空的跳过。
 pub(crate) fn batch_edits(
     paths: &[String],
     modes: &HashMap<TagField, Tri>,
     values: &HashMap<TagField, String>,
-    numbering: Option<(u32, bool)>,
     case: Option<CaseOp>,
+    fix_encoding: bool,
     cover: &CoverMode,
-    total: usize,
     field_of: impl Fn(&str, TagField) -> String,
 ) -> Vec<(String, TagEdits)> {
-    // `paths` 可以只是所选的前几首（预览），总数照所选全部。
-    let total = total as u32;
     paths
         .iter()
-        .enumerate()
-        .filter_map(|(i, path)| {
+        .filter_map(|path| {
             let mut fields: Vec<(TagField, Edit)> = TRI_FIELDS
                 .iter()
                 .map(|f| {
@@ -241,26 +279,32 @@ pub(crate) fn batch_edits(
                     )
                 })
                 .collect();
-            let mut put = |f: TagField, e: Edit| {
-                if let Some(slot) = fields.iter_mut().find(|(k, _)| *k == f) {
-                    slot.1 = e;
-                } else {
-                    fields.push((f, e));
+            // 乱码修复 / 大小写覆盖同名字段。
+            if fix_encoding {
+                for f in ENCODING_FIELDS {
+                    let decided = fields.iter().any(|(k, e)| *k == f && *e != Edit::Keep);
+                    if decided {
+                        continue;
+                    }
+                    if let Some(fixed) = fix_mojibake(&field_of(path, f)) {
+                        put_edit(&mut fields, f, Edit::Set(fixed));
+                    }
                 }
-            };
-            // 编号 / 大小写覆盖同名字段（tri-state 里 TrackTotal 也在）。
-            if let Some((start, with_total)) = numbering {
-                put(TagField::Track, Edit::Set((start + i as u32).to_string()));
-                if with_total {
-                    put(TagField::TrackTotal, Edit::Set(total.to_string()));
+                // 歌词与注释的完整文本只在文件里（视图里是截断预览）：留给写回时
+                // 读文件解析（`resolve_redecode`），没乱码的文件自然成空改动。
+                for f in ENCODING_FILE_FIELDS {
+                    let decided = fields.iter().any(|(k, e)| *k == f && *e != Edit::Keep);
+                    if !decided {
+                        put_edit(&mut fields, f, Edit::Redecode);
+                    }
                 }
             }
             if let Some(op) = case {
                 for f in [TagField::Title, TagField::Artist, TagField::Album] {
-                    let old = field_of(path, f);
+                    let old = effective_value(&fields, f, field_of(path, f));
                     let new = case_convert(&old, op);
                     if new != old {
-                        put(f, Edit::Set(new));
+                        put_edit(&mut fields, f, Edit::Set(new));
                     }
                 }
             }

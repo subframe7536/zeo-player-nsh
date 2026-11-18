@@ -16,7 +16,7 @@ mod tests_edge;
 #[cfg(test)]
 mod tests_tags;
 #[cfg(test)]
-mod testutil;
+pub(crate) mod testutil;
 
 pub(crate) use apply::apply_tag_edits;
 pub use apply::write_tags;
@@ -82,6 +82,16 @@ impl TagField {
         TagField::AlbumGain,
         TagField::AlbumPeak,
     ];
+
+    /// 稳定的字段标识（标签历史快照等持久化用；别拿 `label` 存，它是给人看的）。
+    pub fn id(self) -> String {
+        format!("{self:?}")
+    }
+
+    /// [`TagField::id`] 的逆；认不得的（版本间删了字段）为 `None`。
+    pub fn from_id(id: &str) -> Option<TagField> {
+        TagField::ALL.into_iter().find(|f| f.id() == id)
+    }
 
     /// 界面与报错里的中文字段名。
     pub fn label(self) -> &'static str {
@@ -150,6 +160,10 @@ pub enum Edit {
     Set(String),
     /// 删掉该字段。
     Clear,
+    /// 尽力把该字段现有的乱码文本自动转回正常文本（`export::fix_mojibake`；批量
+    /// 「乱码修复」用，只支持歌词与注释——它们的完整文本只在文件里，视图里是截断
+    /// 预览）。写之前由 [`resolve_redecode`] 读文件换成具体的 `Set`（修不了就是 `Keep`）。
+    Redecode,
 }
 
 /// 封面的改动（`TagEdits::cover` 为 `None` 即不动）。
@@ -183,10 +197,33 @@ impl TagEdits {
         self.fields.iter().any(|(_, e)| *e != Edit::Keep) || self.cover.is_some()
     }
 
+    fn has_redecode(&self) -> bool {
+        self.fields.iter().any(|(_, e)| matches!(e, Edit::Redecode))
+    }
+
     /// 没有任何改动（批量编辑逐条跳过空改动用）。
     pub fn is_empty(&self) -> bool {
         !self.has_tag_changes() && self.cover_file.is_none() && self.lrc.is_none()
     }
+}
+
+/// 把 `edits` 里的 [`Edit::Redecode`] 换成具体改动：读文件里该字段的完整当前值，
+/// 修得动就 `Set(修好的)`，修不动（没乱码 / 不是该编码）换成 `Keep`——这样没有
+/// 乱码的文件整个 `edits` 变空，调用方可以跳过写盘。没有 `Redecode` 时不读文件。
+pub fn resolve_redecode(path: &Path, edits: &mut TagEdits) -> Result<(), String> {
+    if !edits.has_redecode() {
+        return Ok(());
+    }
+    let current = read_fields(path)?;
+    for (field, edit) in &mut edits.fields {
+        if *edit == Edit::Redecode {
+            let fixed = current
+                .get(field)
+                .and_then(|text| crate::export::fix_mojibake(text));
+            *edit = fixed.map_or(Edit::Keep, Edit::Set);
+        }
+    }
+    Ok(())
 }
 
 /// 用户选的封面图片 → MIME 类型：先看扩展名，不认得的按文件头猜。
