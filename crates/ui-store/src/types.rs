@@ -180,6 +180,9 @@ pub struct Store {
     pub folder_op: Signal<Option<FileOp>>,
     /// 应用更新状态（「关于」页）。
     pub update: Signal<UpdateState>,
+    /// 「发现新版本」弹窗开着：检查到 `Available` 时置真；关掉只是不再
+    /// 打扰，`update` 里的结果仍在，「关于」页可继续下载安装。
+    pub update_prompt: Signal<bool>,
     /// 生效的快捷键表（`KeyAction` → 键位；空串 = 未绑定）：绑定挂在读
     /// 它的 `dynamic` 里，换绑时换 owner 重绑。
     pub keybinds: Signal<Same<Keybinds>>,
@@ -241,13 +244,14 @@ pub enum UpdateState {
     Checking,
     /// 已是最新。
     Current,
-    /// 有新版本：版本号、说明、能否原地安装、产物地址。
+    /// 有新版本：版本号、说明、能否原地安装、产物地址与大小。
     Available {
         version: String,
         notes: Option<String>,
         can_install: bool,
         url: String,
         can_download: bool,
+        size: Option<u64>,
     },
     /// 下载中（已收字节 / 总字节）。
     Downloading { received: u64, total: Option<u64> },

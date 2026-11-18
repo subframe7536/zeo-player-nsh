@@ -16,11 +16,17 @@ pub fn updates_supported() -> bool {
 }
 
 /// 检查更新（手动按钮与启动自动检查共用；检查中重复点直接跳过）。
+/// `Ready`（已装好等重启）也不再查：后台的自动检查不能把待重启的
+/// 状态盖回「有新版本」。
 pub fn check_for_update() {
     let s = store();
     if !updates_supported()
-        || s.update
-            .with(|u| matches!(u, UpdateState::Checking | UpdateState::Downloading { .. }))
+        || s.update.with(|u| {
+            matches!(
+                u,
+                UpdateState::Checking | UpdateState::Downloading { .. } | UpdateState::Ready { .. }
+            )
+        })
     {
         return;
     }
@@ -36,12 +42,20 @@ pub fn check_for_update() {
                     can_install: u.can_install,
                     url: u.url,
                     can_download: u.can_download,
+                    size: u.size,
                 }
             }
             Ok(None) => UpdateState::Current,
             Err(e) => UpdateState::Error(e),
         };
-        post.post(move || s.update.set(next));
+        post.post(move || {
+            // 有更新就弹详情弹窗（手动与启动的自动检查都弹；弹窗里能就地
+            // 关掉自动检查）。失败 / 已是最新不打扰。
+            if matches!(next, UpdateState::Available { .. }) {
+                s.update_prompt.set(true);
+            }
+            s.update.set(next);
+        });
     });
 }
 

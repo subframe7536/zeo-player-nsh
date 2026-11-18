@@ -115,6 +115,7 @@ pub fn install() -> Store {
         folder_message: signal(String::new()),
         folder_op: signal(None),
         update: signal(UpdateState::Idle),
+        update_prompt: signal(false),
         keybinds: signal(Same(Arc::new(keybinds_map()))),
         global_keybinds: signal(Same(Arc::new(global_keybinds_map()))),
         key_capture: signal(None),

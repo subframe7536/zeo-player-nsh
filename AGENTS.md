@@ -82,7 +82,7 @@ nsh package . --target windows --icon resources/icon-windows.png  # Windows inst
 
 - Dev builds (`nsh run`, debug `cargo run`) use the repo's `.nsh/dev-data` instead of the system data dir; `ZEO_PLAYER_DATA_DIR` overrides everything.
 - Release `.app` is ad-hoc signed; distributing to other Macs needs a Developer ID re-sign + `xcrun notarytool` notarization + `xcrun stapler staple`.
-- 更新发布：`nsh package --target <os>` 出各平台归档，`nsh update-manifest` 生成 `latest.json`（+ `.sig`），作为 GitHub Release 资产上传；「关于」页的检查 / 下载 / 安装走 `zeo-ui-store::update`（后台线程 + `poster` 回排，`Store::update` 信号驱动界面）。设置分类 `Pane::About` 在 `zeo_ui_store::nav`，节在 `ui-view-settings/src/about.rs`。
+- 更新发布：`nsh package --target <os>` 出各平台归档，`nsh update-manifest` 生成 `latest.json`（+ `.sig`），作为 GitHub Release 资产上传；「关于」页的检查 / 下载 / 安装走 `zeo-ui-store::update`（后台线程 + `poster` 回排，`Store::update` 信号驱动界面）；检查到 `Available` 同时置 `Store::update_prompt` 弹「发现新版本」弹窗（`ui-view-settings` 的 `update_dialog`：版本 / 说明 / 包大小 / 进度 / 就地关自动检查，关掉后结果仍在 `Store::update` 里）。设置分类 `Pane::About` 在 `zeo_ui_store::nav`，节在 `ui-view-settings/src/about.rs`。
 
 - Run `nsh check .` and `nsh test .` before reporting a change as done.
 - On Windows, the tests need libclang (QuickJS bindings in the headless test runner): install LLVM and set `$env:LIBCLANG_PATH` to its `bin` directory (the one with `libclang.dll`, e.g. `C:\Program Files\LLVM\bin`) before `nsh test .`.

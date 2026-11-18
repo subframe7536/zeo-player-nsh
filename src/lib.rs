@@ -198,6 +198,10 @@ pub fn App() -> impl IntoElement {
             zeo_ui_views::welcome_page,
         ))
         .child(when(
+            move || s.update_prompt.get() && !s.hidden.get(),
+            zeo_ui_views::update_dialog,
+        ))
+        .child(when(
             move || s.close_prompt.get() && !s.hidden.get(),
             close_prompt,
         ))

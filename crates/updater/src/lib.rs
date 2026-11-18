@@ -68,8 +68,9 @@ pub struct Update {
     pub can_download: bool,
     /// 可原地替换安装（应用目录用户可写）。
     pub can_install: bool,
+    /// 产物大小（字节；清单给了才有，界面用来显示更新包多大）。
+    pub size: Option<u64>,
     sha256: Option<String>,
-    size: Option<u64>,
 }
 
 /// 检查更新（有网络 IO，调用方放后台线程）。打包外运行返回

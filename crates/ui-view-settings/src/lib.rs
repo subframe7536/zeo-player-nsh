@@ -9,6 +9,7 @@ mod tests;
 /// 命中的节，所选分类没命中时落到第一个有命中的分类。
 mod widgets;
 
+pub use about::update_dialog;
 pub use appearance::accent_section;
 pub(crate) use catalog::*;
 pub(crate) use nav::*;
