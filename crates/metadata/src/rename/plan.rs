@@ -41,14 +41,16 @@ pub fn plan(items: &[(String, HashMap<TagField, String>)], template: &Template) 
         .collect();
     // 批次内冲突：两条计划的目标名相同（不分大小写）→ 都标冲突；
     // 已标错的不改（保留更具体的报错）。
+    // 按小写目标名分桶，线性扫一遍（成千上万首时不能两两比）。
+    let mut first_of: HashMap<String, usize> = HashMap::new();
     for i in 0..planned.len() {
-        for j in (i + 1)..planned.len() {
-            if planned[i].dest.to_lowercase() == planned[j].dest.to_lowercase() {
-                for k in [i, j] {
-                    if planned[k].status == Status::Ok {
-                        planned[k].status = Status::Conflict("与批次内其他文件重名".to_owned());
-                    }
-                }
+        let Some(&j) = first_of.get(&planned[i].dest.to_lowercase()) else {
+            first_of.insert(planned[i].dest.to_lowercase(), i);
+            continue;
+        };
+        for k in [j, i] {
+            if planned[k].status == Status::Ok {
+                planned[k].status = Status::Conflict("与批次内其他文件重名".to_owned());
             }
         }
     }

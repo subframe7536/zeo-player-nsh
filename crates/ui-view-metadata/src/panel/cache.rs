@@ -40,9 +40,7 @@ pub(crate) fn panel(
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
     selected: Signal<BTreeSet<String>>,
     close: Rc<dyn Fn()>,
-    open_rename: impl Fn() + Copy + 'static,
 ) -> View {
-    let open_rename = Rc::new(open_rename);
     let single = computed(move || {
         selected.with(|set| (set.len() == 1).then(|| set.iter().next().unwrap().clone()))
     });
@@ -55,7 +53,6 @@ pub(crate) fn panel(
         .rounded(px(12.0))
         .border_1()
         .border_color(border())
-        .shadow_xl()
         .bg(nsh_base::theme().card)
         .overflow_hidden()
         .child(dynamic(move || {
@@ -63,8 +60,7 @@ pub(crate) fn panel(
                 return single_panel(path, displayed, rows, selected, close.clone()).into_element();
             }
             if let Some(paths) = batch.get() {
-                return batch_panel(paths, displayed, rows, close.clone(), open_rename.clone())
-                    .into_element();
+                return batch_panel(paths, displayed, rows, selected, close.clone()).into_element();
             }
             view().into_element()
         }))

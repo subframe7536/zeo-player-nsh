@@ -152,28 +152,86 @@ pub(crate) fn commit_rename(
     });
 }
 
+/// 批量改名（批量面板「应用」的第二步）：后台顺序执行（正播放的先停、
+/// 含同名侧车），回界面侧先 `done(失败清单)`、再把已移走的音频换到新路径
+/// （索引 / 歌单引用、行图、选中集，一次性换完）。顺序不能反：选中集一换，
+/// 批量面板按新路径重建，面板草稿信号随旧面板销毁，`done` 再写它会 panic。
+pub(crate) fn rename_files(
+    planned: Vec<rename::Planned>,
+    rows: Signal<HashMap<String, Arc<MetaRow>>>,
+    selected: Signal<BTreeSet<String>>,
+    done: impl FnOnce(Vec<String>) + Send + 'static,
+) {
+    let post = poster();
+    std::thread::spawn(move || {
+        let results: Vec<(String, String, Vec<(String, String)>, Option<String>)> = planned
+            .iter()
+            .map(|item| {
+                stop_if_playing_under(&item.src);
+                let (moves, error) = rename::apply(item);
+                (item.src.clone(), item.dest.clone(), moves, error)
+            })
+            .collect();
+        post.post(move || {
+            let failures = results
+                .iter()
+                .filter_map(|(.., error)| error.clone())
+                .collect();
+            done(failures);
+            let moved: Vec<(String, String)> = results
+                .into_iter()
+                .filter(|(src, dest, moves, _)| moves.iter().any(|(o, n)| o == src && n == dest))
+                .map(|(src, dest, ..)| (src, dest))
+                .collect();
+            for (src, dest) in &moved {
+                library_store().move_path(src, dest);
+                store::move_playlist_paths(src, dest);
+            }
+            apply_moves(&moved, rows, selected);
+        });
+    });
+}
+
 /// 单路径改名后的界面侧换键：行图与选中集从 `src` 挪到 `dest`（`single`
-/// memo 随之按新路径重建面板）。与重命名弹窗同一套挪法。
+/// memo 随之按新路径重建面板）。
 pub(crate) fn apply_move(
     src: &str,
     dest: &str,
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
     selected: Signal<BTreeSet<String>>,
 ) {
-    let mut cache = full_cache().lock().unwrap();
-    if let Some(pos) = cache.iter().position(|(p, _)| p == src) {
-        let mut entry = cache.remove(pos);
-        dest.clone_into(&mut entry.0);
-        cache.push(entry);
+    apply_moves(&[(src.to_owned(), dest.to_owned())], rows, selected);
+}
+
+/// 一批 `(旧, 新)` 路径的界面侧换键：缓存、行图、选中集各只更新一次
+/// （成千上万首时逐条 `update` 会让面板重建上千次）。
+fn apply_moves(
+    moves: &[(String, String)],
+    rows: Signal<HashMap<String, Arc<MetaRow>>>,
+    selected: Signal<BTreeSet<String>>,
+) {
+    {
+        let mut cache = full_cache().lock().unwrap();
+        for (src, dest) in moves {
+            if let Some(pos) = cache.iter().position(|(p, _)| p == src) {
+                let mut entry = cache.remove(pos);
+                dest.clone_into(&mut entry.0);
+                cache.push(entry);
+            }
+        }
     }
     rows.update(|r| {
-        if let Some(row) = r.remove(src) {
-            r.insert(dest.to_owned(), row);
+        for (src, dest) in moves {
+            if let Some(row) = r.remove(src) {
+                r.insert(dest.clone(), row);
+            }
         }
     });
     selected.update(|set| {
-        if set.remove(src) {
-            set.insert(dest.to_owned());
+        for (src, dest) in moves {
+            if set.remove(src) {
+                set.insert(dest.clone());
+            }
         }
     });
 }

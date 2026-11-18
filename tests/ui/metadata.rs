@@ -72,23 +72,36 @@ fn metadata_row_press_opens_single_panel() {
     );
 }
 
-/// 重命名弹窗：模板里含目录分隔符时显示分隔符报错且「重命名」禁用。
+/// 批量面板的重命名：行里是一颗按钮，点开模板弹窗（预设 + 占位符速查）；
+/// 模板含目录分隔符时弹窗里标红报错，「应用到 N 首」禁用；预设一点即生效。
 #[test]
-fn metadata_rename_dialog_rejects_separators() {
+fn metadata_batch_rename_rejects_separators() {
     let mut app = start(1400.0, 800.0);
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
     }
     app.press("元数据").unwrap();
-    app.wait_for("text:sine.flac").unwrap();
-    app.press("text:sine.flac").unwrap();
-    app.press("重命名文件…").unwrap();
+    app.wait_for("label:全选").unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+    app.press("label:全选").unwrap();
+    app.press("label:重命名模板").unwrap();
     app.wait_for("label:模板").unwrap();
+    app.wait_for("text:{filename}").unwrap();
     app.type_text("label:模板", "a/b").unwrap();
     app.wait_for("text:仅支持重命名文件名，不能包含目录分隔符（/ 或 \\）")
         .unwrap();
-    assert_eq!(app.screen().enabled("label:确认重命名"), Ok(false));
-    app.press("取消").unwrap();
+    assert_eq!(app.screen().enabled("label:应用批量修改"), Ok(false));
+    // 点预设：整个替换，报错消失。
+    app.press("text:{artist} - {title}").unwrap();
+    app.wait_for_gone(
+        "text:仅支持重命名文件名，不能包含目录分隔符（/ 或 \\）",
+        Duration::from_secs(5),
+    )
+    .unwrap();
+    assert_eq!(
+        app.screen().input_text("label:模板").unwrap(),
+        Some("{artist} - {title}")
+    );
 }
 
 /// 筛选框也匹配标签（流派），不分大小写。
@@ -342,7 +355,6 @@ fn metadata_narrow_window_layout() {
     app.press("text:sine.flac").unwrap();
     app.wait_for("label:标题").unwrap();
     // 验证工具栏上的操作按钮依然存在且可点击（无截断丢失）
-    app.wait_for("label:重命名文件…").unwrap();
     app.wait_for("label:取消选择").unwrap();
     // 点击取消选择
     app.press("label:取消选择").unwrap();

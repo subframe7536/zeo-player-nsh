@@ -26,6 +26,7 @@ mod tests {
             Some((3, true)),
             Some(CaseOp::Title),
             &CoverMode::Keep,
+            paths.len(),
             field_of,
         );
         assert_eq!(items.len(), 3);
@@ -65,6 +66,7 @@ mod tests {
             None,
             None,
             &CoverMode::Keep,
+            paths.len(),
             |_, _| String::new(),
         );
         assert!(empty.is_empty());
@@ -129,6 +131,174 @@ mod tests {
         // are clipped within max_h (260pt and 120pt) and do not expand the scroll content.
         let err = app.scroll("text:基本信息", px(-1.0)).unwrap_err();
         assert!(err.contains("cannot scroll by -1"));
+    }
+
+    fn entry(path: &str, title: &str, artist: &str, track: u32) -> TrackEntry {
+        let meta = Arc::new(zeo_metadata::MetaInfo {
+            title: title.to_owned(),
+            artist: artist.to_owned(),
+            track: Some(track),
+            ..Default::default()
+        });
+        TrackEntry(Arc::new(zeo_types::config::TrackShared {
+            provider: zeo_types::config::ProviderId::Local,
+            path: path.to_owned(),
+            file_name: path.rsplit('/').next().unwrap().to_owned(),
+            album_artist: String::new(),
+            genres: Vec::new(),
+            artists: Vec::new(),
+            size_bytes: 1,
+            modified: 0,
+            stamp: 1,
+            meta,
+        }))
+    }
+
+    /// 效果预览：大小写显示 `旧 → 新`；重命名按应用后的标签渲染（模板里
+    /// 的 `{title}` 取大小写格式化后的值）；坏模板标红；没启用的工具无预览。
+    #[test]
+    pub(crate) fn preview_shows_case_and_rename_effects() {
+        let dir = std::env::temp_dir().join(format!("zeo-preview-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = |name: &str| dir.join(name).to_string_lossy().replace('\\', "/");
+        let sample = vec![
+            entry(&path("a.flac"), "my song", "me", 1),
+            entry(&path("b.flac"), "Other", "Me", 2),
+        ];
+        let rows = HashMap::new();
+        let mut d = BatchDraft::default();
+        assert_eq!(build_preview(&d, &sample, 2, &rows), Preview::default());
+
+        d.case = Some(CaseOp::Title);
+        d.rename_tpl = "{track:02d} - {title}".to_owned();
+        let p = build_preview(&d, &sample, 2, &rows);
+        assert_eq!(p.case[0].text, "标题：my song → My Song");
+        // 第二首标题已是首字母大写：只剩没变的提示。
+        assert!(p.case[1].text.ends_with("（无变化）"), "{:?}", p.case);
+        assert!(
+            p.rename[0].text.ends_with("01 - My Song.flac"),
+            "{:?}",
+            p.rename
+        );
+        assert!(
+            p.rename[1].text.ends_with("02 - Other.flac"),
+            "{:?}",
+            p.rename
+        );
+        assert!(p.rename.iter().all(|l| !l.bad));
+
+        d.rename_tpl = "{nope}".to_owned();
+        let p = build_preview(&d, &sample, 2, &rows);
+        assert!(p.rename[0].bad, "{:?}", p.rename);
+        assert!(template_error(&d.rename_tpl).is_some());
+
+        d.num_start = "x".to_owned();
+        assert!(build_preview(&d, &sample, 2, &rows).number[0].bad);
+        d.num_start = "3".to_owned();
+        let p = build_preview(&d, &sample, 5, &rows);
+        assert_eq!(p.number[0].text, "音轨号 3 – 7");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 面板最窄宽度（`PANEL_MIN_W`）下的批量面板。
+    #[component]
+    pub(crate) fn NarrowBatchPanelTest() -> impl IntoElement {
+        zeo_ui_store::install();
+        let paths = Rc::new(vec!["a.flac".to_owned(), "b.flac".to_owned()]);
+        let displayed = computed(|| Rc::new(Vec::<TrackEntry>::new()));
+        let rows = signal(HashMap::new());
+        let selected = signal(BTreeSet::new());
+        view()
+            .w(px(240.0))
+            .h(px(800.0))
+            .test_id("host")
+            .child(batch_panel(
+                paths,
+                displayed,
+                rows,
+                selected,
+                Rc::new(|| {}),
+            ))
+    }
+
+    /// 窄面板里批量表单的控件折行而不是溢出：任何可见节点都不越过面板右缘。
+    #[test]
+    pub(crate) fn batch_panel_wraps_controls_instead_of_overflowing() {
+        use nsh_core::geometry::{px, size};
+        use nsh_engine::{EngineConfig, Root};
+        use nsh_testing::Headless;
+        let theme =
+            nsh_base::Theme::from_json(include_str!("../../../../theme.json")).expect("theme.json");
+        let mut config =
+            EngineConfig::new(Root::of::<NarrowBatchPanelTest>().tokens(theme.into_tokens()));
+        config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
+        config.viewport = size(px(400.0), px(800.0));
+        let mut app = Headless::start(config).expect("start");
+        app.wait_for("text:音轨编号").unwrap();
+        let nodes = app.screen().layout_nodes();
+        let host = nodes
+            .iter()
+            .find(|n| n.test_id.as_deref() == Some("host"))
+            .expect("host")
+            .bounds;
+        let right = host.origin.x.0 + host.size.width.0;
+        // 行首标签与同行的矮控件（按钮）在同一条水平中线上；「封面」不再有
+        // 独立的节标题（整个面板只有行首这一个）。
+        let center_y = |text: &str| {
+            let hits: Vec<_> = nodes
+                .iter()
+                .filter(|n| n.text.as_ref().is_some_and(|t| t.text.text == text))
+                .collect();
+            assert_eq!(hits.len(), 1, "{text}: {} 处", hits.len());
+            hits[0].bounds.origin.y.0 + hits[0].bounds.size.height.0 / 2.0
+        };
+        let (label, button) = (center_y("封面"), center_y("替换…"));
+        assert!(
+            (label - button).abs() <= 1.0,
+            "封面标签与按钮未对齐：{label} vs {button}"
+        );
+        for n in nodes.iter().filter(|n| !n.hidden) {
+            let edge = n.bounds.origin.x.0 + n.bounds.size.width.0;
+            assert!(
+                edge <= right + 0.5,
+                "{:?} {:?} overflows the panel: {edge} > {right}",
+                n.kind,
+                n.text.as_ref().map(|t| &t.text)
+            );
+        }
+    }
+
+    /// 重命名行是一颗按钮，点开模板弹窗：有占位符速查；点预设整个替换模板，
+    /// 点占位符追加；「完成」收起后按钮上显示当前模板。
+    #[test]
+    pub(crate) fn rename_button_opens_dialog_with_presets_and_cheatsheet() {
+        use nsh_core::geometry::{px, size};
+        use nsh_engine::{EngineConfig, Root};
+        use nsh_testing::Headless;
+        let theme =
+            nsh_base::Theme::from_json(include_str!("../../../../theme.json")).expect("theme.json");
+        let mut config =
+            EngineConfig::new(Root::of::<NarrowBatchPanelTest>().tokens(theme.into_tokens()));
+        config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
+        config.viewport = size(px(600.0), px(800.0));
+        let mut app = Headless::start(config).expect("start");
+        app.wait_for("text:设置重命名模板…").unwrap();
+        app.press("label:重命名模板").unwrap();
+        app.wait_for("text:{filename}").unwrap();
+        app.press("text:{artist} - {title}").unwrap();
+        assert_eq!(
+            app.screen().input_text("label:模板").unwrap(),
+            Some("{artist} - {title}")
+        );
+        app.press("label:插入 {year}").unwrap();
+        assert_eq!(
+            app.screen().input_text("label:模板").unwrap(),
+            Some("{artist} - {title}{year}")
+        );
+        app.press("完成").unwrap();
+        app.wait_for_gone("label:模板", std::time::Duration::from_secs(5))
+            .unwrap();
+        app.wait_for("text:{artist} - {title}{year}").unwrap();
     }
 
     #[component]

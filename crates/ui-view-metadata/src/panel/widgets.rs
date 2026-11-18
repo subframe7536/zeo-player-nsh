@@ -26,6 +26,37 @@ pub(crate) fn label_cell(label: &'static str) -> Text {
         .text_color(muted_fg())
 }
 
+/// 批量面板的一行 `标签 + 控件组`：控件组占满标签右侧余宽并可折行——
+/// 面板窄时放不下的控件落到下一行、仍与控件列左对齐，而不是被裁掉。
+/// 想占满余宽的控件自己设 `flex_1().min_w(N)`：`N` 就是它折行的门槛。
+/// 标签与首行垂直居中对齐：控件组首位放一根 32pt 高、零宽的撑杆（左移一个
+/// gap 抵掉它占的间隔），把每行撑到输入框高——只有按钮这类矮控件的行
+/// 也与标签同一条中线，而不是贴着行顶。
+pub(crate) fn wrap_row(label: &'static str, controls: Vec<AnyElement>) -> View {
+    view()
+        .flex_row()
+        .items_start()
+        .gap(px(8.0))
+        .child(
+            view()
+                .h(px(32.0))
+                .flex_shrink_0()
+                .justify_center()
+                .child(label_cell(label)),
+        )
+        .child(
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .gap(px(8.0))
+                .child(view().w(px(0.0)).h(px(32.0)).ml(px(-8.0)))
+                .children(controls),
+        )
+}
+
 /// 加载中的输入框占位：与 `input_field` 同款外观，无法获得焦点，文字显示「加载中...」。
 pub(crate) fn loading_input(small: bool, width: Option<f32>) -> View {
     let t = nsh_base::theme();

@@ -23,8 +23,9 @@ pub(crate) enum CaseOp {
 }
 
 /// 批量封面改动。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) enum CoverMode {
+    #[default]
     Keep,
     Replace {
         data: Vec<u8>,
@@ -53,181 +54,145 @@ pub(crate) const TRI_FIELDS: &[TagField] = &[
     TagField::Rating,
 ];
 
-#[derive(Debug, Clone, PartialEq)]
+/// 批量草稿。三个工具都是「实时」的：填了就生效（空 / 不改动 = 不启用），
+/// 效果即时预览在工具行下方，随「应用」一并写回——没有「暂存」这一步。
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct BatchDraft {
     pub(crate) modes: HashMap<TagField, Tri>,
     pub(crate) values: HashMap<TagField, String>,
-    /// 音轨编号：起始输入（默认 "1"）与「同时写入音轨总数」。
+    /// 音轨编号起始号（空 = 不改编号）与「同时写入音轨总数」。
     pub(crate) num_start: String,
     pub(crate) num_total: bool,
-    /// 已暂存的编号（「编号」按下后）；起始 + 是否写总数。
-    pub(crate) staged_num: Option<(u32, bool)>,
-    /// 已暂存的大小写格式化（作用于标题 / 歌手 / 专辑）。
-    pub(crate) staged_case: Option<CaseOp>,
+    /// 英文大小写格式化（None = 不改；作用于标题 / 歌手 / 专辑）。
+    pub(crate) case: Option<CaseOp>,
+    /// 文件名模板（空 = 不改名）。
+    pub(crate) rename_tpl: String,
     pub(crate) cover: CoverMode,
     pub(crate) applying: bool,
     pub(crate) message: Option<String>,
 }
 
+impl BatchDraft {
+    /// 编号设置：起始号能解析才算数（解析不了由预览报错）。
+    pub(crate) fn numbering(&self) -> Option<(u32, bool)> {
+        let start = self.num_start.trim().parse::<u32>().ok()?;
+        Some((start, self.num_total))
+    }
+}
+
+/// 大小写下拉的选项（`None` = 不改动）。
+const CASE_CHOICES: [(&str, Option<CaseOp>); 4] = [
+    ("不改动", None),
+    ("首字母大写", Some(CaseOp::Title)),
+    ("全部小写", Some(CaseOp::Lower)),
+    ("全部大写", Some(CaseOp::Upper)),
+];
+
 pub(crate) fn batch_panel(
     paths: Rc<Vec<String>>,
     displayed: Memo<Rc<Vec<TrackEntry>>>,
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
+    selected: Signal<BTreeSet<String>>,
     close: Rc<dyn Fn()>,
-    open_rename: Rc<dyn Fn()>,
 ) -> View {
-    let draft = signal(BatchDraft {
-        modes: HashMap::new(),
-        values: HashMap::new(),
-        num_start: "1".to_owned(),
-        num_total: false,
-        staged_num: None,
-        staged_case: None,
-        cover: CoverMode::Keep,
-        applying: false,
-        message: None,
-    });
+    let draft = signal(BatchDraft::default());
     let m = paths.len();
     let busy = move || draft.with(|d| d.applying);
-    let mut tools = view().gap(px(8.0));
 
-    // 工具行：音轨连续编号（按当前显示序）与英文大小写——按下只暂存，
-    // 「应用」统一写回。
-    let case_sel = signal(CaseOp::Title);
-    tools = tools
+    // 效果预览：只算所选里的前几首（显示序），每次按键重算也便宜；
+    // 全量校验（重名 / 磁盘冲突）在「应用」时做。
+    let path_set: Rc<std::collections::HashSet<String>> = Rc::new(paths.iter().cloned().collect());
+    let sample = computed(move || Rc::new(displayed.with(|v| sample_of(v, &path_set))));
+    let preview = computed(move || {
+        let sample = sample.get();
+        let map = rows.get();
+        draft.with(|d| Rc::new(build_preview(d, &sample, m, &map)))
+    });
+    let template_err = computed(move || draft.with(|d| template_error(&d.rename_tpl)));
+    let rename_open = signal(false);
+
+    // 工具块：控件行 + 下方的效果预览 / 提示；块之间留 14pt。
+    let tools = view()
+        .gap(px(14.0))
         .child(
             view()
-                .flex_row()
-                .items_center()
-                .gap(px(8.0))
-                .child(label_cell("音轨编号"))
-                .child(
-                    input_field(true)
-                        .w(px(56.0))
-                        .label("编号起始")
-                        .value(move || draft.with(|d| d.num_start.clone()))
-                        .readonly(busy)
-                        .on_change(move |t: &str| draft.update(|d| t.clone_into(&mut d.num_start))),
-                )
-                .child(checkbox(
-                    move || draft.with(|d| d.num_total),
-                    || false,
-                    "同时写入音轨总数",
-                    move |next| draft.update(|d| d.num_total = next),
+                .child(wrap_row(
+                    "音轨编号",
+                    vec![
+                        input_field(true)
+                            .w(px(72.0))
+                            .label("编号起始")
+                            .placeholder("不改动")
+                            .value(move || draft.with(|d| d.num_start.clone()))
+                            .readonly(busy)
+                            .on_change(move |t: &str| {
+                                draft.update(|d| t.clone_into(&mut d.num_start))
+                            })
+                            .into_element(),
+                        // 复选框与它的文字是一组，折行时不拆开。
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(checkbox(
+                                move || draft.with(|d| d.num_total),
+                                || false,
+                                "同时写入音轨总数",
+                                move |next| draft.update(|d| d.num_total = next),
+                            ))
+                            .child(
+                                text("写入总数")
+                                    .text_size(px(12.0))
+                                    .line_height(px(12.0))
+                                    .text_color(fg()),
+                            )
+                            .into_element(),
+                    ],
                 ))
-                .child(
-                    text("写总数")
-                        .text_size(px(12.0))
-                        .line_height(px(12.0))
-                        .text_color(fg()),
-                )
-                .child(text_button(
-                    Variant::Outline,
-                    Size::Xs,
-                    None,
-                    "编号",
-                    move || {
-                        let start = draft
-                            .with(|d| d.num_start.trim().parse::<u32>().ok())
-                            .unwrap_or(1);
-                        draft.update(|d| {
-                            d.staged_num = Some((start, d.num_total));
-                            d.message = None;
-                        });
-                    },
+                .child(preview_block(
+                    move || preview.with(|p| p.number.clone()),
+                    "按当前显示序连续编号",
                 )),
         )
         .child(
             view()
-                .flex_row()
-                .items_center()
-                .gap(px(8.0))
-                .child(label_cell("大小写"))
-                .child(select(
-                    move || {
-                        match case_sel.get() {
-                            CaseOp::Title => "首字母大写",
-                            CaseOp::Lower => "全部小写",
-                            CaseOp::Upper => "全部大写",
-                        }
-                        .to_owned()
-                    },
+                .child(wrap_row(
                     "大小写",
                     vec![
-                        SelectOption::new("首字母大写", move || case_sel.set(CaseOp::Title)),
-                        SelectOption::new("全部小写", move || case_sel.set(CaseOp::Lower)),
-                        SelectOption::new("全部大写", move || case_sel.set(CaseOp::Upper)),
+                        select(
+                            move || {
+                                let now = draft.with(|d| d.case);
+                                CASE_CHOICES
+                                    .iter()
+                                    .find(|(_, op)| *op == now)
+                                    .map_or("不改动", |(name, _)| name)
+                                    .to_owned()
+                            },
+                            "大小写",
+                            CASE_CHOICES
+                                .iter()
+                                .map(|(name, op)| {
+                                    let op = *op;
+                                    SelectOption::new(name, move || draft.update(|d| d.case = op))
+                                })
+                                .collect(),
+                            128.0,
+                        )
+                        .into_element(),
                     ],
-                    120.0,
                 ))
-                .child(text_button(
-                    Variant::Outline,
-                    Size::Xs,
-                    None,
-                    "格式化",
-                    move || {
-                        draft.update(|d| {
-                            d.staged_case = Some(case_sel.get());
-                            d.message = None;
-                        });
-                    },
+                .child(preview_block(
+                    move || preview.with(|p| p.case.clone()),
+                    "作用于标题 / 歌手 / 专辑",
                 )),
         )
-        // 提示跟控件列对齐（72 标签 + 8 间隔），行内不再挤。
-        .child(
-            text("作用于标题 / 歌手 / 专辑")
-                .pl(px(80.0))
-                .text_size(px(11.0))
-                .line_height(px(11.0))
-                .text_color(faint()),
-        )
-        .child(when(
-            move || draft.with(|d| d.staged_num.is_some() || d.staged_case.is_some()),
-            move || {
-                let n = m;
-                view().gap(px(2.0)).children(
-                    [
-                        draft.with(|d| d.staged_num).map(|_| {
-                            text(format!("将修改音轨号 ×{n}"))
-                                .text_size(px(11.0))
-                                .line_height(px(11.0))
-                                .text_color(muted_fg())
-                                .into_element()
-                        }),
-                        draft.with(|d| d.staged_case).map(|_| {
-                            text("将对标题 / 歌手 / 专辑做大小写格式化")
-                                .text_size(px(11.0))
-                                .line_height(px(11.0))
-                                .text_color(muted_fg())
-                                .into_element()
-                        }),
-                    ]
-                    .into_iter()
-                    .flatten(),
-                )
-            },
-        ))
         .child(
             view()
-                .flex_row()
-                .items_center()
-                .gap(px(8.0))
-                .child(label_cell("重命名"))
-                .child(text_button(
-                    Variant::Outline,
-                    Size::Xs,
-                    None,
-                    "重命名文件…",
-                    move || open_rename(),
+                .child(wrap_row("重命名", vec![rename_button(draft, rename_open)]))
+                .child(preview_block(
+                    move || preview.with(|p| p.rename.clone()),
+                    "点按钮设置模板；只改文件名，同名 .lrc 与封面一起改",
                 )),
-        )
-        // 提示跟控件列对齐（同上行的大小写提示）。
-        .child(
-            text("按模板重命名所选文件（文件留在原文件夹）")
-                .pl(px(80.0))
-                .text_size(px(11.0))
-                .line_height(px(11.0))
-                .text_color(faint()),
         );
     // 建立所选路径的 TrackEntry 快速查找表（一次 pass），避免三态字段
     // 计算占位符与批量应用时对全表进行 O(M × N) 线性扫描。
@@ -240,7 +205,7 @@ pub(crate) fn batch_panel(
                 .collect()
         })
     });
-    let mut fields = view().gap(px(8.0));
+    let mut fields = view().gap(px(10.0));
     for field in TRI_FIELDS {
         fields = fields.child(tri_row(
             *field,
@@ -269,7 +234,8 @@ pub(crate) fn batch_panel(
         ))
         .child(section("工具", vec![tools]))
         .child(section("字段", vec![fields]))
-        .child(section("封面", vec![cover_mode_row(draft)]));
+        // 封面只有一行，行首标签就是标题，不再另起节标题。
+        .child(cover_mode_row(draft));
     view()
         .flex_1()
         .min_h(px(0.0))
@@ -300,16 +266,23 @@ pub(crate) fn batch_panel(
                             selected_entries.clone(),
                             displayed,
                             rows,
+                            selected,
                             draft,
                         )
                     },
                 )
-                .disabled(move || draft.with(|d| d.applying))
+                .accessibility_label("应用批量修改")
+                // 模板写错时不让按（报错已在重命名行下方标红）。
+                .disabled(move || draft.with(|d| d.applying) || template_err.get().is_some())
                 .into_element(),
             ],
             close,
         ))
         .child(scroll().key("batch").flex_1().min_h(px(0.0)).child(form))
+        .child(when(
+            move || rename_open.get(),
+            move || rename_dialog(draft, preview, template_err, rename_open),
+        ))
 }
 
 /// 单首曲目的现有索引字段值（`TrackEntry` 兜底）。
@@ -389,44 +362,44 @@ pub(crate) fn tri_row(
             .with(|d| d.values.get(&field).cloned())
             .unwrap_or_default()
     });
-    view()
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .child(label_cell(label))
-        .child(select(
-            move || {
-                match mode() {
-                    Tri::Keep => "保持原值",
-                    Tri::Set => "统一设为",
-                    Tri::Clear => "清空",
-                }
-                .to_owned()
-            },
-            label,
-            vec![
-                SelectOption::new("保持原值", move || {
-                    draft.update(|d| {
-                        d.modes.insert(field, Tri::Keep);
-                    })
-                }),
-                SelectOption::new("统一设为", move || {
-                    draft.update(|d| {
-                        d.modes.insert(field, Tri::Set);
-                    })
-                }),
-                SelectOption::new("清空", move || {
-                    draft.update(|d| {
-                        d.modes.insert(field, Tri::Clear);
-                    })
-                }),
-            ],
-            112.0,
-        ))
-        .child(
+    // 输入框 `min_w(TRI_INPUT_MIN_W)` 是折行门槛：控件列放不下「下拉 + 输入框」
+    // 时输入框落到下一行（占满整行），不再被面板右缘裁掉。
+    wrap_row(
+        label,
+        vec![
+            select(
+                move || {
+                    match mode() {
+                        Tri::Keep => "保持原值",
+                        Tri::Set => "统一设为",
+                        Tri::Clear => "清空",
+                    }
+                    .to_owned()
+                },
+                label,
+                vec![
+                    SelectOption::new("保持原值", move || {
+                        draft.update(|d| {
+                            d.modes.insert(field, Tri::Keep);
+                        })
+                    }),
+                    SelectOption::new("统一设为", move || {
+                        draft.update(|d| {
+                            d.modes.insert(field, Tri::Set);
+                        })
+                    }),
+                    SelectOption::new("清空", move || {
+                        draft.update(|d| {
+                            d.modes.insert(field, Tri::Clear);
+                        })
+                    }),
+                ],
+                112.0,
+            )
+            .into_element(),
             input_field(true)
                 .flex_1()
-                .min_w(px(0.0))
+                .min_w(px(TRI_INPUT_MIN_W))
                 .label(label)
                 .placeholder(placeholder)
                 .default_value(initial)
@@ -435,6 +408,11 @@ pub(crate) fn tri_row(
                     draft.update(|d| {
                         d.values.insert(field, t.to_owned());
                     })
-                }),
-        )
+                })
+                .into_element(),
+        ],
+    )
 }
+
+/// 三态行输入框的最小宽（也是折行门槛）。
+const TRI_INPUT_MIN_W: f32 = 120.0;

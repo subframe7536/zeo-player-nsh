@@ -33,62 +33,69 @@ pub(crate) fn cover_mode_row(draft: Signal<BatchDraft>) -> View {
             }
         });
     };
-    view()
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .child(label_cell("封面"))
-        .child(dynamic(move || match draft.get().cover {
-            CoverMode::Keep => view()
-                .flex_row()
-                .gap(px(8.0))
-                .child(text_button(Variant::Outline, Size::Xs, None, "替换…", pick))
-                .child(text_button(
-                    Variant::Outline,
-                    Size::Xs,
-                    None,
-                    "移除",
-                    move || draft.update(|d| d.cover = CoverMode::Remove),
-                ))
-                .into_element(),
-            ref mode => {
-                let note = match mode {
-                    CoverMode::Replace { src, .. } => {
-                        format!("替换为 {}", zeo_ui_views_base::last_segment(src))
-                    }
-                    _ => "移除内嵌封面".to_owned(),
-                };
-                view()
+    wrap_row(
+        "封面",
+        vec![
+            dynamic(move || match draft.get().cover {
+                CoverMode::Keep => view()
                     .flex_row()
-                    .items_center()
                     .gap(px(8.0))
-                    .child(
-                        text(note)
-                            .flex_1()
-                            .number_of_lines(1)
-                            .text_size(px(12.0))
-                            .line_height(px(12.0))
-                            .text_color(fg()),
-                    )
+                    .child(text_button(Variant::Outline, Size::Xs, None, "替换…", pick))
                     .child(text_button(
-                        Variant::Ghost,
+                        Variant::Destructive,
                         Size::Xs,
                         None,
-                        "撤销",
-                        move || draft.update(|d| d.cover = CoverMode::Keep),
+                        "移除",
+                        move || draft.update(|d| d.cover = CoverMode::Remove),
                     ))
-                    .into_element()
-            }
-        }))
+                    .into_element(),
+                ref mode => {
+                    let note = match mode {
+                        CoverMode::Replace { src, .. } => {
+                            format!("替换为 {}", zeo_ui_views_base::last_segment(src))
+                        }
+                        _ => "移除内嵌封面".to_owned(),
+                    };
+                    view()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .flex_row()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            text(note)
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .number_of_lines(1)
+                                .text_size(px(12.0))
+                                .line_height(px(12.0))
+                                .text_color(fg()),
+                        )
+                        .child(text_button(
+                            Variant::Ghost,
+                            Size::Xs,
+                            None,
+                            "撤销",
+                            move || draft.update(|d| d.cover = CoverMode::Keep),
+                        ))
+                        .into_element()
+                }
+            })
+            .into_element(),
+        ],
+    )
 }
 
-/// 「应用」：按当前显示序生成每首的 `TagEdits`（暂存的编号 / 大小写
-/// 覆盖同名字段），后台顺序写回；成功行失效重读。
+/// 「应用」：按当前显示序生成每首的 `TagEdits`（编号 / 大小写覆盖同名
+/// 字段），后台顺序写回；成功行失效重读。设了重命名模板就在标签写完后
+/// 接着改名（模板按应用后的标签渲染）：全部文件名先整批校验，有一条
+/// 不可用就整个不应用，先于任何写盘。
 pub(crate) fn apply_batch(
     paths: Rc<Vec<String>>,
     selected_entries: Rc<HashMap<String, TrackEntry>>,
     displayed: Memo<Rc<Vec<TrackEntry>>>,
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
+    selected: Signal<BTreeSet<String>>,
     draft: Signal<BatchDraft>,
 ) {
     let d = draft.get_untracked();
@@ -104,21 +111,25 @@ pub(crate) fn apply_batch(
         &order,
         &d.modes,
         &d.values,
-        d.staged_num,
-        d.staged_case,
+        d.numbering(),
+        d.case,
         &d.cover,
+        order.len(),
         |p, f| {
-            if let Some(row) = map.get(p) {
-                return row.fields.get(&f).cloned().unwrap_or_default();
-            }
-            if let Some(t) = selected_entries.get(p) {
-                return entry_field_of(t, f);
-            }
-            String::new()
+            selected_entries
+                .get(p)
+                .map(|t| current_value(t, &map, f))
+                .unwrap_or_default()
         },
     );
-    let total = items.len();
-    if total == 0 {
+    let renames = match plan_renames(&d.rename_tpl, &order, &items, &selected_entries, &map) {
+        Ok(planned) => planned,
+        Err(message) => {
+            draft.update(|d| d.message = Some(message));
+            return;
+        }
+    };
+    if items.is_empty() && renames.is_empty() {
         draft.update(|d| d.message = Some("没有要应用的修改".to_owned()));
         return;
     }
@@ -126,8 +137,9 @@ pub(crate) fn apply_batch(
         d.applying = true;
         d.message = None;
     });
+    let tag_total = items.len();
     let item_paths: Vec<String> = items.iter().map(|(p, _)| p.clone()).collect();
-    store::save_tags_batch(items, move |errors| {
+    let after_tags = move |errors: Vec<(String, String)>| {
         // 失败的路径仍保留在选中集里；成功行失效，加载器按新指纹重读。
         let ok: Vec<&String> = item_paths
             .iter()
@@ -144,24 +156,62 @@ pub(crate) fn apply_batch(
                 r.remove(*p);
             }
         });
-        draft.update(|d| {
-            d.applying = false;
-            d.message = Some(if errors.is_empty() {
-                format!("已更新 {total} 首")
+        let tag_note = (tag_total > 0).then(|| {
+            if errors.is_empty() {
+                format!("已更新 {tag_total} 首")
             } else {
-                let shown: Vec<String> = errors
+                let lines: Vec<String> = errors
                     .iter()
-                    .take(3)
                     .map(|(p, e)| format!("{}：{e}", zeo_ui_views_base::last_segment(p)))
                     .collect();
-                format!("{} 首失败：{}", errors.len(), shown.join("；"))
-            });
+                format!("{} 首失败：{}", errors.len(), brief(&lines))
+            }
         });
-    });
+        // 标签没写成的不改名：它们的内容还是旧的，改了名也对不上预览。
+        let todo: Vec<rename::Planned> = renames
+            .into_iter()
+            .filter(|p| !errors.iter().any(|(e, _)| *e == p.src))
+            .collect();
+        let rename_total = todo.len();
+        let finish = move |rename_note: Option<String>| {
+            draft.update(|d| {
+                d.applying = false;
+                let notes: Vec<String> = tag_note.into_iter().chain(rename_note).collect();
+                d.message = Some(notes.join("；"));
+            });
+        };
+        if todo.is_empty() {
+            finish(None);
+            return;
+        }
+        rename_files(todo, rows, selected, move |failures| {
+            finish(Some(if failures.is_empty() {
+                format!("已重命名 {rename_total} 个文件")
+            } else {
+                format!("{} 个重命名失败：{}", failures.len(), brief(&failures))
+            }))
+        });
+    };
+    if items.is_empty() {
+        after_tags(Vec::new());
+    } else {
+        store::save_tags_batch(items, after_tags);
+    }
+}
+
+/// 失败清单缩成一句（最多 3 条）。
+fn brief(failures: &[String]) -> String {
+    failures
+        .iter()
+        .take(3)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join("；")
 }
 
 /// 批量草稿 → 每首一份 `TagEdits`（纯函数）：三态按字段展开（「保持原
 /// 值」= `Edit::Keep`），编号与大小写在其后覆盖同名字段；全空的跳过。
+/// `total` 是所选总数（写音轨总数用），`paths` 的下标就是编号偏移。
 pub(crate) fn batch_edits(
     paths: &[String],
     modes: &HashMap<TagField, Tri>,
@@ -169,9 +219,11 @@ pub(crate) fn batch_edits(
     numbering: Option<(u32, bool)>,
     case: Option<CaseOp>,
     cover: &CoverMode,
+    total: usize,
     field_of: impl Fn(&str, TagField) -> String,
 ) -> Vec<(String, TagEdits)> {
-    let total = paths.len() as u32;
+    // `paths` 可以只是所选的前几首（预览），总数照所选全部。
+    let total = total as u32;
     paths
         .iter()
         .enumerate()
