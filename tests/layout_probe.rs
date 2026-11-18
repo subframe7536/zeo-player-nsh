@@ -47,7 +47,9 @@ fn isolate() -> bool {
         } else {
             std::fs::write(
                 data.join("library.json"),
-                serde_json::json!({ "remember_frame": false, "welcome_done": true }).to_string(),
+                // `roots` 是必填字段：缺了整份配置反序列化失败，welcome_done 一起丢。
+                serde_json::json!({ "roots": [], "remember_frame": false, "welcome_done": true })
+                    .to_string(),
             )
             .unwrap();
         }

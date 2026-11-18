@@ -2809,8 +2809,8 @@ dependencies = [
 
 [[package]]
 name = "nsh-base"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=00cfb08ec7c337c71e47e04034a5e5962bc0a871#00cfb08ec7c337c71e47e04034a5e5962bc0a871"
+version = "0.6.0"
+source = "git+https://github.com/longbridge/nsh?rev=4aeefa80ab5a517d6c184eb95863bb646389d102#4aeefa80ab5a517d6c184eb95863bb646389d102"
 dependencies = [
  "chrono",
  "html5ever",
@@ -2833,10 +2833,11 @@ dependencies = [
 
 [[package]]
 name = "nsh-core"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=00cfb08ec7c337c71e47e04034a5e5962bc0a871#00cfb08ec7c337c71e47e04034a5e5962bc0a871"
+version = "0.6.0"
+source = "git+https://github.com/longbridge/nsh?rev=4aeefa80ab5a517d6c184eb95863bb646389d102#4aeefa80ab5a517d6c184eb95863bb646389d102"
 dependencies = [
  "cap-std",
+ "chrono",
  "crc32fast",
  "flate2",
  "futures-util",
@@ -2873,8 +2874,8 @@ dependencies = [
 
 [[package]]
 name = "nsh-engine"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=00cfb08ec7c337c71e47e04034a5e5962bc0a871#00cfb08ec7c337c71e47e04034a5e5962bc0a871"
+version = "0.6.0"
+source = "git+https://github.com/longbridge/nsh?rev=4aeefa80ab5a517d6c184eb95863bb646389d102#4aeefa80ab5a517d6c184eb95863bb646389d102"
 dependencies = [
  "crossbeam-channel",
  "env_filter",
@@ -2895,13 +2896,13 @@ dependencies = [
 
 [[package]]
 name = "nsh-i18n"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=00cfb08ec7c337c71e47e04034a5e5962bc0a871#00cfb08ec7c337c71e47e04034a5e5962bc0a871"
+version = "0.6.0"
+source = "git+https://github.com/longbridge/nsh?rev=4aeefa80ab5a517d6c184eb95863bb646389d102#4aeefa80ab5a517d6c184eb95863bb646389d102"
 
 [[package]]
 name = "nsh-js"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=00cfb08ec7c337c71e47e04034a5e5962bc0a871#00cfb08ec7c337c71e47e04034a5e5962bc0a871"
+version = "0.6.0"
+source = "git+https://github.com/longbridge/nsh?rev=4aeefa80ab5a517d6c184eb95863bb646389d102#4aeefa80ab5a517d6c184eb95863bb646389d102"
 dependencies = [
  "futures-util",
  "getrandom 0.4.3",
@@ -2923,8 +2924,8 @@ dependencies = [
 
 [[package]]
 name = "nsh-macros"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=00cfb08ec7c337c71e47e04034a5e5962bc0a871#00cfb08ec7c337c71e47e04034a5e5962bc0a871"
+version = "0.6.0"
+source = "git+https://github.com/longbridge/nsh?rev=4aeefa80ab5a517d6c184eb95863bb646389d102#4aeefa80ab5a517d6c184eb95863bb646389d102"
 dependencies = [
  "imagesize 0.15.0",
  "proc-macro2",
@@ -2936,8 +2937,8 @@ dependencies = [
 
 [[package]]
 name = "nsh-package"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=00cfb08ec7c337c71e47e04034a5e5962bc0a871#00cfb08ec7c337c71e47e04034a5e5962bc0a871"
+version = "0.6.0"
+source = "git+https://github.com/longbridge/nsh?rev=4aeefa80ab5a517d6c184eb95863bb646389d102#4aeefa80ab5a517d6c184eb95863bb646389d102"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",
@@ -2951,8 +2952,8 @@ dependencies = [
 
 [[package]]
 name = "nsh-testing"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=00cfb08ec7c337c71e47e04034a5e5962bc0a871#00cfb08ec7c337c71e47e04034a5e5962bc0a871"
+version = "0.6.0"
+source = "git+https://github.com/longbridge/nsh?rev=4aeefa80ab5a517d6c184eb95863bb646389d102#4aeefa80ab5a517d6c184eb95863bb646389d102"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -2964,8 +2965,8 @@ dependencies = [
 
 [[package]]
 name = "nsh-updater"
-version = "0.5.0"
-source = "git+https://github.com/longbridge/nsh?rev=00cfb08ec7c337c71e47e04034a5e5962bc0a871#00cfb08ec7c337c71e47e04034a5e5962bc0a871"
+version = "0.6.0"
+source = "git+https://github.com/longbridge/nsh?rev=4aeefa80ab5a517d6c184eb95863bb646389d102#4aeefa80ab5a517d6c184eb95863bb646389d102"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek 2.2.0",

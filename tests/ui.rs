@@ -29,7 +29,9 @@ fn isolate() -> bool {
         // 窗口位置会互相写 / 互相恢复。
         // 同时写 welcome_done：否则空曲库（没语料）首次启动会弹欢迎指南，
         // 盖住别的用例要点的界面。
+        // `roots` 是必填字段：缺了整份配置反序列化失败，welcome_done 跟着丢。
         let mut config = serde_json::json!({
+            "roots": [],
             "remember_frame": false,
             "welcome_done": true,
         });
