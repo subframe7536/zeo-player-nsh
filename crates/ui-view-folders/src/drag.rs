@@ -100,7 +100,7 @@ impl DragCtx {
         if !(ox..=ox + w).contains(&page.x.0) {
             return None;
         }
-        let row_h = TREE_ROW;
+        let row_h = TREE_ROW + ROW_GAP;
         let index = ((page.y.0 - oy + self.scroll.get_untracked()) / row_h).floor();
         if index < 0.0 {
             return None;

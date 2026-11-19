@@ -9,8 +9,9 @@ pub(crate) const FOLDER_COLS: Columns = Columns {
     format: true,
 };
 
-/// 目录树行高（与侧栏 nav_row 统一为 34pt）与每层缩进。
+/// 目录树行高（与侧栏 nav_row 统一为 34pt）、行距与每层缩进。
 pub(crate) const TREE_ROW: f32 = 34.0;
+pub(crate) const ROW_GAP: f32 = 2.0;
 pub(crate) const INDENT: f32 = 14.0;
 
 #[derive(Default)]

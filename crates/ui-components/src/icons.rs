@@ -21,6 +21,8 @@ pub enum Icon {
     Mute,
     Home,
     Folder,
+    /// 展开态的文件夹（目录树里已打开的节点）。
+    FolderOpen,
     Mic,
     Disc,
     Tag,
@@ -92,9 +94,12 @@ impl Icon {
             Icon::Home => {
                 r#"<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>"#
             }
-            // folder
+            // folder / folder-open
             Icon::Folder => {
                 r#"<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>"#
+            }
+            Icon::FolderOpen => {
+                r#"<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>"#
             }
             // mic
             Icon::Mic => {

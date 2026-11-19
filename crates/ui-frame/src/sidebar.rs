@@ -242,12 +242,18 @@ fn sidebar_lower_section() -> View {
 
     let header_action = dynamic(move || match s.sidebar_section.get() {
         store::SidebarSection::Playlists => zeo_ui_views::playlists::add_playlist_button(),
-        store::SidebarSection::Folders => sidebar_rescan_button(),
+        store::SidebarSection::Folders => view()
+            .flex_row()
+            .items_center()
+            .gap(px(4.0))
+            .child(sidebar_rescan_button())
+            .child(zeo_ui_views::folders::add_folder_button())
+            .into_element(),
         store::SidebarSection::Tags => view().into_element(),
     });
 
     // 小标题行：左侧是「歌单 / 标签 / 文件夹」的视图切换，右侧是该
-    // 视图的快捷操作（新建歌单 / 重新扫描）。
+    // 视图的快捷操作（新建歌单 / 重新扫描 + 添加文件夹）。
     let header = view()
         .h(px(33.0))
         .flex_row()

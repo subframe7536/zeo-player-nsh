@@ -152,6 +152,9 @@ pub fn App() -> impl IntoElement {
                     ),
             )
             .child(zeo_ui_views::folders::drag_ghost())
+            // 外部文件拖进任一文件夹拖放目标时的整窗遮罩（虚线装饰，
+            // pointer-events 全关，落下仍进原目标）。
+            .child(zeo_ui_views::folders::drop_overlay())
             .child(zeo_ui_frame::title_bar())
             .child(when(
                 move || full_open.get(),

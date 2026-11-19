@@ -186,11 +186,12 @@ pub fn like_red() -> AdaptiveColor {
 }
 
 /// 音质徽章的颜色：HQ 绿、SQ 蓝、Hi-Res 黄，其它标签回落 muted。
+/// 深色的绿 / 黄压暗一档（500 阶），纯描边小标在暗底上 400 阶太亮。
 pub fn quality_color(tag: &str) -> AdaptiveColor {
     match tag {
-        "HQ" => AdaptiveColor::rgb(0x16a34a, 0x4ade80),
+        "HQ" => AdaptiveColor::rgb(0x16a34a, 0x22c55e),
         "SQ" => AdaptiveColor::rgb(0x2563eb, 0x60a5fa),
-        "Hi-Res" => AdaptiveColor::rgb(0xca8a04, 0xfacc15),
+        "Hi-Res" => AdaptiveColor::rgb(0xca8a04, 0xeab308),
         _ => muted_fg(),
     }
 }

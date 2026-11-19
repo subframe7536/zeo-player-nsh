@@ -11,6 +11,7 @@ pub fn Folders() -> impl IntoElement {
     let select_folder = ui.select.clone();
     let message = s.folder_message;
 
+    let dragging = ui.dragging;
     let on_drop = {
         let select_folder = select_folder.clone();
         move |event: &FileDropEvent| {
@@ -104,23 +105,31 @@ pub fn Folders() -> impl IntoElement {
         }
     });
 
-    view().flex_1().on_file_drop(on_drop).child(
-        when(
-            move || s.library.with(|l| l.config.roots.is_empty()),
-            no_library,
-        )
-        .otherwise(move || {
-            folder_page(
-                &ui,
-                filtered_files,
-                filter_conditions,
-                match_all,
-                filter_open,
-                selected_paths,
-                anchor_path,
+    view()
+        .flex_1()
+        .on_file_drag_enter(move || dragging.set(true))
+        .on_file_drag_leave(move || dragging.set(false))
+        .on_file_drop(move |event: &FileDropEvent| {
+            dragging.set(false);
+            on_drop(event);
+        })
+        .child(
+            when(
+                move || s.library.with(|l| l.config.roots.is_empty()),
+                no_library,
             )
-        }),
-    )
+            .otherwise(move || {
+                folder_page(
+                    &ui,
+                    filtered_files,
+                    filter_conditions,
+                    match_all,
+                    filter_open,
+                    selected_paths,
+                    anchor_path,
+                )
+            }),
+        )
 }
 
 pub(crate) fn folder_page(
@@ -177,11 +186,22 @@ pub(crate) fn folder_page(
         })
     };
     let title = move || here.with(|p| p.title.clone());
+    let picking = ui.picking;
     let actions = view()
         .flex_row()
         .items_center()
         .gap(px(8.0))
         .child(rescan_button())
+        .child(
+            icon_button(
+                || Icon::Plus,
+                16.0,
+                "添加文件夹",
+                muted_fg,
+                pick_folder_into_library,
+            )
+            .disabled(move || picking.get()),
+        )
         .child(when(
             move || here.with(|p| !p.all.is_empty()),
             move || {

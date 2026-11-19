@@ -11,6 +11,11 @@ pub(crate) struct FolderUi {
     pub(crate) ctx: Rc<DragCtx>,
     pub(crate) list_ref: ElementRef,
     pub(crate) scroll: Signal<f32>,
+    /// 有外部文件拖在任一文件夹拖放目标（本页 / 侧栏树）上：全窗遮罩
+    /// 据此显示。拖出窗口、取消或落下都会清掉。
+    pub(crate) dragging: Signal<bool>,
+    /// 系统文件夹选择器已开着：「+」钮去抖，别连开出两个。
+    pub(crate) picking: Signal<bool>,
 }
 
 pub(crate) fn create_folder_ui() -> FolderUi {
@@ -66,6 +71,8 @@ pub(crate) fn create_folder_ui() -> FolderUi {
     let over = signal(None::<String>);
     let anchor = signal((-10000.0, -10000.0));
     let scroll = signal(0.0_f32);
+    let dragging = signal(false);
+    let picking = signal(false);
     let gx = animated_value(0.0);
     let gy = animated_value(0.0);
     let list_ref = element_ref();
@@ -95,6 +102,8 @@ pub(crate) fn create_folder_ui() -> FolderUi {
         ctx,
         list_ref,
         scroll,
+        dragging,
+        picking,
     }
 }
 

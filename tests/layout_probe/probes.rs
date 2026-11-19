@@ -88,9 +88,9 @@ fn smart_playlist_select_probe() {
     );
 }
 
-/// 侧栏文件树各行的文件夹图标必须完全水平对齐：有子目录的行是「箭头
-/// + 图标」，无子目录的行是「16pt 占位 + 图标」——行内最靠右的图像
-/// 都是文件夹图标，x 应一致。
+/// 侧栏文件树各行的文件夹图标必须完全水平对齐：折叠标识就是图标本体
+/// （有子目录的行点开是 FolderOpen），行内最靠右的图像都是文件夹图
+/// 标，x 应一致。
 #[test]
 fn sidebar_tree_alignment_probe() {
     if !isolate() {
@@ -144,7 +144,7 @@ fn sidebar_tree_alignment_probe() {
         false
     };
 
-    // 文件夹图标是行内最靠右的图像（有子目录的行左边还有折叠箭头）。
+    // 文件夹图标是行内最靠右（也是唯一）的图像。
     let folder_x = |row: NodeId| {
         p.images
             .keys()
