@@ -28,6 +28,14 @@ pub fn set_volume(volume: f64) {
     player().set_volume(volume);
 }
 
+/// 拖动音量滑条中的写入：只到引擎共享状态（输出回调即时生效），
+/// `s.playback` 的广播留到抬起 `set_volume` 一次——它的订阅点遍布
+/// 歌词行扫描、进度条与播放键，拖动中每个 move 都广播会让滑条顿挫
+/// （同均衡器推子的 `apply_eq_live`）。
+pub fn set_volume_live(volume: f64) {
+    player().set_volume_live(volume);
+}
+
 /// 静音切换（记住静音前音量）。
 pub fn toggle_mute() {
     let s = store();

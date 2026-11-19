@@ -1,6 +1,6 @@
 //! 「元数据」视图：全库曲目的标签表格（nsh-base `DataTable` + 复选框
-//! 多选），右侧单选 / 批量编辑面板（批量面板内联按模板重命名，随
-//! 「应用」一并执行）。
+//! 多选），右侧单选 / 批量编辑面板；工具栏有乱码修复 / 批量重命名 /
+//! 标签历史三个弹窗入口（前两者作用于当前所选）。
 //!
 //! 行的标签值是视图自有状态（`rows` 信号）：后台线程分批用
 //! `write::read_row` 读出，不进 `MetaCache` / SQLite（全局元数据缓存
@@ -57,8 +57,11 @@ pub fn page() -> View {
             .unwrap_or_else(default_columns)
     }));
     let col_widths = signal(HashMap::<String, f32>::new());
-    // 标签历史（入口在「显示列」下拉末尾，只在选中恰好一首时可用）：弹窗开关、
-    // 还原写盘后让右侧单选面板重建的 `reload` 计数。
+    // 工具栏批量工具（乱码修复 / 批量重命名，选中至少一首可用）与标签历史
+    // （只选中恰好一首时可用）的弹窗开关；`reload` 是历史还原写盘后让右侧
+    // 单选面板重建的计数。
+    let encoding_open = signal(false);
+    let rename_open = signal(false);
     let history_open = signal(false);
     let history_reload = signal(0u32);
     // 右侧面板宽：None 走断点默认（`panel_default_w`），拖过把手后记住
@@ -140,7 +143,7 @@ pub fn page() -> View {
             };
             let filter_w = move || {
                 if zeo_ui_components::tracks::content_break() < 860.0 {
-                    180.0
+                    120.0
                 } else {
                     260.0
                 }
@@ -203,15 +206,36 @@ pub fn page() -> View {
                         .px(px(PAGE_X))
                         .pb(px(16.0))
                         .child(
-                            input_field(true)
+                            // 筛选框：原生 Input 没有前置图标位，左内边距让出
+                            // 图标宽、把搜索图标绝对定位叠上去（不吃点击）。
+                            view()
                                 .w(move || px(filter_w()))
-                                .label("筛选")
-                                .placeholder("筛选文件名、标题、艺术家、专辑、标签")
-                                .default_value(untracked(|| filter.get()))
-                                .window_drag(false)
-                                .on_change(move |t: &str| filter.set(t.to_owned())),
+                                .h(px(32.0))
+                                .child(
+                                    input_field(true)
+                                        .size_full()
+                                        .label("筛选")
+                                        .placeholder("筛选文件名、标题、艺术家、专辑、标签")
+                                        .default_value(untracked(|| filter.get()))
+                                        .window_drag(false)
+                                        .pl(px(26.0))
+                                        .on_change(move |t: &str| filter.set(t.to_owned())),
+                                )
+                                .child(
+                                    view()
+                                        .absolute()
+                                        .inset_0()
+                                        .flex_row()
+                                        .items_center()
+                                        .pl(px(9.0))
+                                        .pointer_events(PointerEvents::None)
+                                        .child(icon(Icon::Search, 14.0, faint)),
+                                ),
                         )
-                        .child(column_selector(visible_cols, history_open, can_history))
+                        .child(column_selector(visible_cols))
+                        .child(panel::encoding_button(encoding_open, has_selection))
+                        .child(panel::rename_button(rename_open, has_selection))
+                        .child(panel::history_button(history_open, can_history))
                         .child(view().flex_1().min_w(px(0.0)).window_drag(true))
                         .child({
                             // 「全选」不放表头格：上游自定义表头对滚动区列
@@ -271,12 +295,17 @@ pub fn page() -> View {
                                 .items_center()
                                 .gap(px(6.0))
                                 .child(mark)
-                                .child(
-                                    text("全选")
-                                        .text_size(px(13.0))
-                                        .line_height(px(13.0))
-                                        .text_color(muted_fg()),
-                                )
+                                // 窄窗口省掉「全选」文字只留复选框：工具栏加了两颗
+                                // 批量工具钮，文字再占 34pt 会把行尾挤出可视区。
+                                .child(when(
+                                    move || zeo_ui_components::tracks::content_break() >= 860.0,
+                                    || {
+                                        text("全选")
+                                            .text_size(px(13.0))
+                                            .line_height(px(13.0))
+                                            .text_color(muted_fg())
+                                    },
+                                ))
                                 .into_element()
                         })
                         .child(when(
@@ -365,7 +394,22 @@ pub fn page() -> View {
                 )
                 .into_element()
         }))
-        // 标签历史弹窗（页面级：入口在「显示列」下拉里；换选中就收掉）。
+        // 批量工具与标签历史弹窗（页面级：入口是工具栏图标钮；作用目标按
+        // 打开时的所选快照算，清空选中会连带收掉弹窗）。
+        .child(when(
+            move || encoding_open.get() && has_selection.get(),
+            move || {
+                let (order, entries, sample) = panel::tool_context(displayed, selected);
+                panel::encoding_dialog(order, entries, sample, rows, encoding_open)
+            },
+        ))
+        .child(when(
+            move || rename_open.get() && has_selection.get(),
+            move || {
+                let (order, entries, sample) = panel::tool_context(displayed, selected);
+                panel::rename_dialog(order, entries, sample, rows, selected, rename_open)
+            },
+        ))
         .child(when(
             move || history_open.get() && single_path.with(|p| p.is_some()),
             move || {

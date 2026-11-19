@@ -23,8 +23,8 @@ pub(crate) use zeo_ui_components::slider::{SliderStyle, scrub, slider};
 pub(crate) use zeo_ui_store::theme::*;
 
 pub(crate) use zeo_ui_store::{
-    format_time, open_edit_info, player, progress_fraction, seek_to, set_volume, shown_time, store,
-    toggle_mute,
+    format_time, open_edit_info, player, progress_fraction, seek_to, set_volume, set_volume_live,
+    shown_time, store, toggle_mute,
 };
 
 pub(crate) use zeo_ui_views::playlists;

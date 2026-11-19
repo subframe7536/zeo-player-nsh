@@ -116,6 +116,7 @@ pub fn full_player(fade: AnimatedValue, on_close: Rc<dyn Fn()>) -> View {
         ));
 
     view()
+        .test_id("now-playing")
         .absolute()
         .inset(px(0.0))
         .z_index(50)

@@ -1,6 +1,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
+
+use nsh_core::canvas::{FillRule, Num, PathOp};
 
 use super::*;
 
@@ -39,11 +42,21 @@ pub(crate) fn waveform_seek() -> View {
     });
     let duration = move || s.playback.with(|p| p.duration);
     const H: f32 = 26.0;
+    // 播放头横坐标（点）：画进 canvas 的是读它的槽位，原生侧逐帧取用——
+    // 拖动时 `on_move` 直写它，已播部分当帧跟上指针，不用等 `seek_preview`
+    // 通知 painter 重画再交回原生侧的往返（那会让亮条拖一拍）。平时由
+    // effect 跟随进度（100 ms 轮询、拖动预览与列宽都在源里）。
+    let head = animated_value(0.0);
+    effect(move || {
+        let w = width.get();
+        head.set(progress_fraction() as f32 * w);
+    });
     let painter = move || {
         let w = width.get();
         let grow_v = grow.get();
-        let head = progress_fraction() as f32 * w;
         let mut p = Painter::new();
+        // 亮条裁切矩形的宽：槽位编号在录制时定下，值由原生侧画时读取。
+        let head_n = p.num(&head);
         s.waveform.with(|bars| {
             // 载入中 / 解不开：全部是归一化的下限。
             let fallback = [zeo_metadata::waveform::WaveformOptions::default().min;
@@ -60,42 +73,45 @@ pub(crate) fn waveform_seek() -> View {
             // 下限是归一化的 `WaveformOptions::min`：grow=0 时全部贴
             // 下限（即最小条高），grow=1 时回到目标高度。
             let floor = zeo_metadata::waveform::WaveformOptions::default().min as f32;
+            let radius = px(bar / 2.0);
+            let mut rects = Vec::with_capacity(n);
             for (i, amp) in bars.iter().enumerate() {
                 // 已归一化到 0.1..0.9（waveform.rs）：floor→amp 按 grow 插值。
                 let a = floor + ((*amp as f32).clamp(0.0, 1.0) - floor) * grow_v;
                 let bh = (a * H).max(bar);
                 let x = i as f32 * step + (step - bar) / 2.0;
-                let rect = Bounds::new(point(px(x), px((H - bh) / 2.0)), size(px(bar), px(bh)));
-                let radius = px(bar / 2.0);
-                // 已播部分的宽度：0（未到）、bar（已过）或两者之间（播放头上）。
-                let played = (head - x).clamp(0.0, bar);
-                if played < bar {
-                    p = std::mem::take(&mut p)
-                        .fill_color(dim)
-                        .begin_path()
-                        .round_rect(rect, radius)
-                        .fill();
-                }
-                if played >= bar {
-                    p = std::mem::take(&mut p)
-                        .fill_color(lit)
-                        .begin_path()
-                        .round_rect(rect, radius)
-                        .fill();
-                } else if played > 0.0 {
-                    // 只亮到播放头：裁到左侧 `played` 宽，再画一根完整的亮条。
-                    p = std::mem::take(&mut p)
-                        .save()
-                        .begin_path()
-                        .rect(Bounds::new(point(px(x), px(0.0)), size(px(played), px(H))))
-                        .clip()
-                        .fill_color(lit)
-                        .begin_path()
-                        .round_rect(rect, radius)
-                        .fill()
-                        .restore();
-                }
+                rects.push(Bounds::new(
+                    point(px(x), px((H - bh) / 2.0)),
+                    size(px(bar), px(bh)),
+                ));
             }
+            // 已播部分 = 亮条裁到 [0, head]：头左侧全亮、头下的那根只亮
+            // 到头、右侧全暗，与逐根算 `played` 同效，但裁切宽随槽位原生侧
+            // 变化，painter 本身不用因进度重录。
+            for &rect in &rects {
+                p = std::mem::take(&mut p)
+                    .fill_color(dim)
+                    .begin_path()
+                    .round_rect(rect, radius)
+                    .fill();
+            }
+            let clip: Arc<[PathOp]> = Arc::new([PathOp::Rect([
+                Num::Const(0.0),
+                Num::Const(0.0),
+                head_n,
+                Num::Const(H),
+            ])]);
+            p = std::mem::take(&mut p)
+                .save()
+                .clip_path(&clip, FillRule::NonZero);
+            for &rect in &rects {
+                p = std::mem::take(&mut p)
+                    .fill_color(lit)
+                    .begin_path()
+                    .round_rect(rect, radius)
+                    .fill();
+            }
+            p = std::mem::take(&mut p).restore();
         });
         p
     };
@@ -119,7 +135,10 @@ pub(crate) fn waveform_seek() -> View {
             false,
             "播放进度",
             progress_fraction,
-            move |f| s.seek_preview.set(Some(f * duration())),
+            move |f| {
+                head.set(f as f32 * width.get_untracked());
+                s.seek_preview.set(Some(f * duration()));
+            },
             move |f| seek_to(f * duration()),
         ))
         .child(

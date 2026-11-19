@@ -56,13 +56,8 @@ pub(crate) fn default_columns() -> BTreeSet<String> {
     cols
 }
 
-/// 「显示列」下拉：列显隐 + 末尾一项「标签历史…」（仅选中恰好一首时可点，
-/// 打开页面级的标签历史弹窗）。
-pub(crate) fn column_selector(
-    visible_cols: Signal<BTreeSet<String>>,
-    history_open: Signal<bool>,
-    can_history: Memo<bool>,
-) -> AnyElement {
+/// 「显示列」下拉：列显隐多选，按分组罗列全部列。
+pub(crate) fn column_selector(visible_cols: Signal<BTreeSet<String>>) -> AnyElement {
     let open = signal(false);
 
     let trigger = view()
@@ -170,42 +165,9 @@ pub(crate) fn column_selector(
         }
     }
 
-    // 列表末尾：分隔线 + 「标签历史…」（没有恰好选中一首时置灰、不响应）。
-    items.push(view().mt(px(6.0)).h(px(1.0)).bg(border()).into_element());
-    items.push(
-        view()
-            .flex_row()
-            .items_center()
-            .gap(px(8.0))
-            .px(px(8.0))
-            .py(px(7.0))
-            .rounded(px(4.0))
-            .cursor_pointer()
-            .role(AccessibilityRole::Button)
-            .label("标签历史")
-            .hover(|st| st.bg(hover()))
-            .active(|st| st.opacity(0.85))
-            .opacity(move || if can_history.get() { 1.0_f32 } else { 0.45_f32 })
-            .on_press(move || {
-                if can_history.get_untracked() {
-                    open.set(false);
-                    history_open.set(true);
-                }
-            })
-            .child(icon(Icon::History, 14.0, muted_fg))
-            .child(
-                text("标签历史…")
-                    .flex_1()
-                    .text_size(px(13.0))
-                    .line_height(px(13.0))
-                    .text_color(fg()),
-            )
-            .into_element(),
-    );
-
     let popup = view()
         .w(px(230.0))
-        .h(px(390.0))
+        .h(px(356.0))
         .rounded(px(RADIUS_MD))
         .border_1()
         .border_color(border())

@@ -4,7 +4,7 @@ use super::*;
 mod tests {
     use super::*;
 
-    /// 大小写覆盖同名字段；三态展开；全空跳过。
+    /// 三态展开；全空跳过。
     #[test]
     pub(crate) fn batch_edits_builds_per_file() {
         let paths: Vec<String> = (1..=3).map(|i| format!("/m/{i}.mp3")).collect();
@@ -13,20 +13,9 @@ mod tests {
         modes.insert(TagField::Album, Tri::Clear);
         let mut values = HashMap::new();
         values.insert(TagField::Artist, "歌手".to_owned());
-        // 首字母大写（作用于现有标题）。
-        let field_of = |_: &str, f: TagField| match f {
-            TagField::Title => "my song".to_owned(),
-            _ => String::new(),
-        };
-        let items = batch_edits(
-            &paths,
-            &modes,
-            &values,
-            Some(CaseOp::Title),
-            false,
-            &CoverMode::Keep,
-            field_of,
-        );
+        let items = batch_edits(&paths, &modes, &values, false, &CoverMode::Keep, |_, _| {
+            String::new()
+        });
         assert_eq!(items.len(), 3);
         let get = |e: &TagEdits, f: TagField| {
             e.fields
@@ -39,34 +28,16 @@ mod tests {
             Some(Edit::Set("歌手".to_owned()))
         );
         assert_eq!(get(&items[0].1, TagField::Album), Some(Edit::Clear));
-        // 大小写覆盖 Title（Artist 的 Set 不受影响——Artist 不在大小写范围）。
-        assert_eq!(
-            get(&items[0].1, TagField::Title),
-            Some(Edit::Set("My Song".to_owned()))
-        );
         // 全 Keep 的跳过。
         let empty = batch_edits(
             &paths,
             &HashMap::new(),
             &HashMap::new(),
-            None,
             false,
             &CoverMode::Keep,
             |_, _| String::new(),
         );
         assert!(empty.is_empty());
-    }
-
-    /// 大小写：词首大写（ASCII 字母词），小写 / 大写整串转；非 ASCII
-    /// 与数字原样。
-    #[test]
-    pub(crate) fn case_convert_rules() {
-        assert_eq!(case_convert("my song", CaseOp::Title), "My Song");
-        assert_eq!(case_convert("MY SONG", CaseOp::Title), "My Song");
-        assert_eq!(case_convert("abc123def", CaseOp::Title), "Abc123def");
-        assert_eq!(case_convert("中文abc", CaseOp::Title), "中文Abc");
-        assert_eq!(case_convert("A/B", CaseOp::Lower), "a/b");
-        assert_eq!(case_convert("a b", CaseOp::Upper), "A B");
     }
 
     #[component]
@@ -139,10 +110,10 @@ mod tests {
         }))
     }
 
-    /// 乱码修复：Latin-1 乱码按所选编码还原，三态已定值的字段不动，大小写
-    /// 作用在修复之后的值上；预览显示 `乱码 → 修复后`。
+    /// 乱码修复：Latin-1 乱码按识别出的编码还原，三态已定值的字段不动；
+    /// 预览显示 `乱码 → 修复后`。
     #[test]
-    pub(crate) fn encoding_fix_runs_before_case_and_respects_tri_state() {
+    pub(crate) fn encoding_fix_respects_tri_state_and_previews() {
         // 「周杰伦」的 GBK 字节被当 Latin-1 读出来。
         let garbled = "\u{d6}\u{dc}\u{bd}\u{dc}\u{c2}\u{d7}";
         let sample = vec![entry("/m/a.mp3", "my song", garbled, 1)];
@@ -161,24 +132,12 @@ mod tests {
             _ => String::new(),
         };
         let run = |modes: &HashMap<TagField, Tri>, values: &HashMap<TagField, String>| {
-            batch_edits(
-                &path,
-                modes,
-                values,
-                Some(CaseOp::Title),
-                true,
-                &CoverMode::Keep,
-                field_of,
-            )
+            batch_edits(&path, modes, values, true, &CoverMode::Keep, field_of)
         };
         let items = run(&HashMap::new(), &HashMap::new());
         assert_eq!(
             get(&items, TagField::Artist),
             Some(Edit::Set("周杰伦".to_owned()))
-        );
-        assert_eq!(
-            get(&items, TagField::Title),
-            Some(Edit::Set("My Song".to_owned()))
         );
         // 歌词与注释的完整文本在文件里：留给写回时解析（Redecode）。
         assert_eq!(get(&items, TagField::Lyrics), Some(Edit::Redecode));
@@ -196,58 +155,31 @@ mod tests {
         );
         assert_eq!(get(&items, TagField::Comment), Some(Edit::Clear));
 
-        let mut d = BatchDraft::default();
-        d.fix_encoding = true;
-        let p = build_preview(&d, &sample, 1, &HashMap::new(), &HashMap::new());
-        assert_eq!(p.encoding[0].text, format!("歌手：{garbled} → 周杰伦"));
-        d.fix_encoding = false;
-        assert!(
-            build_preview(&d, &sample, 1, &HashMap::new(), &HashMap::new())
-                .encoding
-                .is_empty()
-        );
+        let lines = encoding_preview(&sample, &HashMap::new(), &HashMap::new());
+        assert_eq!(lines[0].text, format!("歌手：{garbled} → 周杰伦"));
     }
 
-    /// 效果预览：大小写显示 `旧 → 新`；重命名按应用后的标签渲染（模板里
-    /// 的 `{title}` 取大小写格式化后的值）；坏模板标红；没启用的工具无预览。
+    /// 重命名预览：模板按当前标签值渲染；坏模板标红；空模板无预览。
     #[test]
-    pub(crate) fn preview_shows_case_and_rename_effects() {
+    pub(crate) fn rename_preview_renders_and_flags_bad_templates() {
         let dir = std::env::temp_dir().join(format!("zeo-preview-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = |name: &str| dir.join(name).to_string_lossy().replace('\\', "/");
         let sample = vec![
-            entry(&path("a.flac"), "my song", "me", 1),
+            entry(&path("a.flac"), "My Song", "me", 1),
             entry(&path("b.flac"), "Other", "Me", 2),
         ];
         let rows = HashMap::new();
-        let mut d = BatchDraft::default();
-        assert_eq!(
-            build_preview(&d, &sample, 2, &rows, &HashMap::new()),
-            Preview::default()
-        );
+        assert!(rename_preview("", &sample, &rows).is_empty());
 
-        d.case = Some(CaseOp::Title);
-        d.rename_tpl = "{track:02d} - {title}".to_owned();
-        let p = build_preview(&d, &sample, 2, &rows, &HashMap::new());
-        assert_eq!(p.case[0].text, "标题：my song → My Song");
-        // 第二首标题已是首字母大写：只剩没变的提示。
-        assert!(p.case[1].text.ends_with("（无变化）"), "{:?}", p.case);
-        assert!(
-            p.rename[0].text.ends_with("01 - My Song.flac"),
-            "{:?}",
-            p.rename
-        );
-        assert!(
-            p.rename[1].text.ends_with("02 - Other.flac"),
-            "{:?}",
-            p.rename
-        );
-        assert!(p.rename.iter().all(|l| !l.bad));
+        let p = rename_preview("{track:02d} - {title}", &sample, &rows);
+        assert!(p[0].text.ends_with("01 - My Song.flac"), "{:?}", p);
+        assert!(p[1].text.ends_with("02 - Other.flac"), "{:?}", p);
+        assert!(p.iter().all(|l| !l.bad));
 
-        d.rename_tpl = "{nope}".to_owned();
-        let p = build_preview(&d, &sample, 2, &rows, &HashMap::new());
-        assert!(p.rename[0].bad, "{:?}", p.rename);
-        assert!(template_error(&d.rename_tpl).is_some());
+        let p = rename_preview("{nope}", &sample, &rows);
+        assert!(p[0].bad, "{:?}", p);
+        assert!(template_error("{nope}").is_some());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -259,18 +191,11 @@ mod tests {
         let paths = Rc::new(vec!["a.flac".to_owned(), "b.flac".to_owned()]);
         let displayed = computed(|| Rc::new(Vec::<TrackEntry>::new()));
         let rows = signal(HashMap::new());
-        let selected = signal(BTreeSet::new());
         view()
             .w(px(240.0))
             .h(px(800.0))
             .test_id("host")
-            .child(batch_panel(
-                paths,
-                displayed,
-                rows,
-                selected,
-                Rc::new(|| {}),
-            ))
+            .child(batch_panel(paths, displayed, rows, Rc::new(|| {})))
     }
 
     /// 窄面板里批量表单的控件折行而不是溢出：任何可见节点都不越过面板右缘。
@@ -286,7 +211,7 @@ mod tests {
         config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
         config.viewport = size(px(400.0), px(800.0));
         let mut app = Headless::start(config).expect("start");
-        app.wait_for("text:大小写").unwrap();
+        app.wait_for("text:字段").unwrap();
         let nodes = app.screen().layout_nodes();
         let host = nodes
             .iter()
@@ -320,23 +245,59 @@ mod tests {
         }
     }
 
-    /// 重命名行是一颗按钮，点开模板弹窗：有占位符速查；点预设整个替换模板，
-    /// 点占位符追加；「完成」收起后按钮上显示当前模板。
+    /// 工具栏批量工具测试组件：两颗入口钮 + 各自的页面级弹窗（与页面同款
+    /// `when` 挂载），选中集固定两首。
+    #[component]
+    pub(crate) fn ToolDialogsTest() -> impl IntoElement {
+        zeo_ui_store::install();
+        let shown = vec![entry("a.flac", "t0", "a", 1), entry("b.flac", "t1", "a", 2)];
+        let displayed = computed(move || Rc::new(shown.clone()));
+        let rows = signal(HashMap::new());
+        let selected = signal(BTreeSet::from(["a.flac".to_owned(), "b.flac".to_owned()]));
+        let encoding_open = signal(false);
+        let rename_open = signal(false);
+        let can = computed(move || !selected.get().is_empty());
+        view()
+            .flex_row()
+            .child(encoding_button(encoding_open, can))
+            .child(rename_button(rename_open, can))
+            .child(when(
+                move || encoding_open.get() && can.get(),
+                move || {
+                    let (order, entries, sample) = tool_context(displayed, selected);
+                    encoding_dialog(order, entries, sample, rows, encoding_open)
+                },
+            ))
+            .child(when(
+                move || rename_open.get() && can.get(),
+                move || {
+                    let (order, entries, sample) = tool_context(displayed, selected);
+                    rename_dialog(order, entries, sample, rows, selected, rename_open)
+                },
+            ))
+    }
+
+    /// 工具栏「批量重命名」点开模板弹窗：有占位符速查；点预设整个替换模板，
+    /// 点占位符追加；空模板时「重命名 N 首」不可按；右上角 ✕ 收弹窗。
+    /// 「乱码修复」点开预览弹窗，「取消」收掉。
     #[test]
-    pub(crate) fn rename_button_opens_dialog_with_presets_and_cheatsheet() {
+    pub(crate) fn tool_buttons_open_rename_and_encoding_dialogs() {
         use nsh_core::geometry::{px, size};
         use nsh_engine::{EngineConfig, Root};
         use nsh_testing::Headless;
+        use std::time::Duration;
         let theme =
             nsh_base::Theme::from_json(include_str!("../../../../theme.json")).expect("theme.json");
         let mut config =
-            EngineConfig::new(Root::of::<NarrowBatchPanelTest>().tokens(theme.into_tokens()));
+            EngineConfig::new(Root::of::<ToolDialogsTest>().tokens(theme.into_tokens()));
         config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
         config.viewport = size(px(600.0), px(800.0));
         let mut app = Headless::start(config).expect("start");
-        app.wait_for("text:设置重命名模板…").unwrap();
-        app.press("label:重命名模板").unwrap();
+        app.wait_for("label:批量重命名").unwrap();
+        app.press("label:批量重命名").unwrap();
         app.wait_for("text:{filename}").unwrap();
+        // 空模板：应用钮不可按。
+        assert_eq!(app.screen().enabled("label:重命名 2 首"), Ok(false));
         app.press("text:{artist} - {title}").unwrap();
         assert_eq!(
             app.screen().input_text("label:模板").unwrap(),
@@ -347,10 +308,17 @@ mod tests {
             app.screen().input_text("label:模板").unwrap(),
             Some("{artist} - {title}{year}")
         );
-        app.press("完成").unwrap();
-        app.wait_for_gone("label:模板", std::time::Duration::from_secs(5))
+        assert_eq!(app.screen().enabled("label:重命名 2 首"), Ok(true));
+        app.press("label:关闭重命名模板").unwrap();
+        app.wait_for_gone("label:模板", Duration::from_secs(5))
             .unwrap();
-        app.wait_for("text:{artist} - {title}{year}").unwrap();
+
+        app.press("label:乱码修复").unwrap();
+        app.wait_for("text:乱码修复").unwrap();
+        app.wait_for("text:修复 2 首").unwrap();
+        app.press("取消").unwrap();
+        app.wait_for_gone("text:修复 2 首", Duration::from_secs(5))
+            .unwrap();
     }
 
     /// 「文件」节：导出歌词 / 封面、标签历史各开自己的弹窗；导出弹窗的选项可改、
@@ -368,7 +336,7 @@ mod tests {
         config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
         config.viewport = size(px(600.0), px(900.0));
         let mut app = Headless::start(config).expect("start");
-        app.wait_for("text:乱码修复").unwrap();
+        app.wait_for("text:字段").unwrap();
 
         app.press("导出歌词…").unwrap();
         app.wait_for("text:把内嵌歌词写成外部文本文件（UTF-8，无 BOM），不改动标签。")
@@ -388,8 +356,80 @@ mod tests {
             .unwrap();
         app.press("完成").unwrap();
 
-        // 批量面板没有标签历史（只在单选面板里）。
+        // 批量面板没有标签历史（入口在页面工具栏）。
         assert!(!app.shows("标签历史…"));
+    }
+
+    /// `ApplyButtonTest` 的所选路径（真实文件副本，`paths` 要在组件挂载前填好）。
+    static APPLY_PATHS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    #[component]
+    pub(crate) fn ApplyButtonTest() -> impl IntoElement {
+        zeo_ui_store::install();
+        let paths = Rc::new(APPLY_PATHS.lock().unwrap().clone());
+        let shown: Vec<TrackEntry> = paths
+            .iter()
+            .enumerate()
+            .map(|(i, p)| entry(p, &format!("t{i}"), "a", i as u32 + 1))
+            .collect();
+        let displayed = computed(move || Rc::new(shown.clone()));
+        let rows = signal(HashMap::new());
+        view()
+            .w(px(480.0))
+            .h(px(800.0))
+            .child(batch_panel(paths, displayed, rows, Rc::new(|| {})))
+    }
+
+    /// 「应用到 N 首」：草稿没动时不可按；有改动时可按，应用成功后文字换
+    /// ✓（无障碍名「应用成功」），三秒还原；下方不再出「已保存」类消息行。
+    #[test]
+    pub(crate) fn apply_button_gating_and_success_check() {
+        use nsh_core::geometry::{px, size};
+        use nsh_engine::{EngineConfig, Root};
+        use nsh_testing::Headless;
+        use std::time::Duration;
+
+        let corpus = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../.nsh/tmp/zeo-player-test-music/sine.flac"
+        );
+        let src = std::path::Path::new(corpus);
+        if !src.is_file() {
+            return eprintln!("跳过：没有 {corpus}");
+        }
+        let dir = std::env::temp_dir().join(format!("zeo-apply-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut paths = Vec::new();
+        for name in ["x1.flac", "x2.flac"] {
+            let p = dir.join(name);
+            std::fs::copy(src, &p).unwrap();
+            paths.push(p.to_string_lossy().into_owned());
+        }
+        *APPLY_PATHS.lock().unwrap() = paths;
+
+        let theme =
+            nsh_base::Theme::from_json(include_str!("../../../../theme.json")).expect("theme.json");
+        let mut config =
+            EngineConfig::new(Root::of::<ApplyButtonTest>().tokens(theme.into_tokens()));
+        config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
+        config.viewport = size(px(500.0), px(900.0));
+        let mut app = Headless::start(config).expect("start");
+        app.wait_for("text:批量修改").unwrap();
+        // 草稿里没有任何改动：不可按。
+        assert_eq!(app.screen().enabled("label:应用批量修改"), Ok(false));
+        // 封面选「移除」（一处改动）：可按。
+        app.press("text:移除").unwrap();
+        assert_eq!(app.screen().enabled("label:应用批量修改"), Ok(true));
+        app.press("label:应用批量修改").unwrap();
+        // 成功：按钮文字换 ✓，消息行不出现。
+        app.wait_for("label:应用成功").unwrap();
+        assert!(!app.shows("标签没有需要修改的内容"));
+        // 三秒后还原。
+        app.wait_for_gone("label:应用成功", Duration::from_secs(10))
+            .unwrap();
+        app.wait_for("label:应用批量修改").unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[component]
@@ -488,7 +528,7 @@ mod tests {
         single_panel(p, displayed, rows, selected, Rc::new(|| {}), false)
     }
 
-    /// 页面级标签历史弹窗（入口在「显示列」下拉末尾）。
+    /// 页面级标签历史弹窗（入口在工具栏图标钮）。
     #[component]
     pub(crate) fn HistoryDialogTest() -> impl IntoElement {
         zeo_ui_store::install();
@@ -559,7 +599,7 @@ mod tests {
         app.wait_for("text:JPOP").unwrap();
         app.wait_for("text:标签").unwrap();
         app.wait_for("text:流派：二次元; JPOP").unwrap();
-        // 标签历史入口已挪到「显示列」下拉末尾：单选面板里不再有这颗按钮。
+        // 标签历史入口在页面工具栏：单选面板里没有这颗按钮。
         assert!(!app.shows("标签历史…"));
     }
 }

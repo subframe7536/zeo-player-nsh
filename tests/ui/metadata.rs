@@ -72,8 +72,9 @@ fn metadata_row_press_opens_single_panel() {
     );
 }
 
-/// 批量面板的重命名：行里是一颗按钮，点开模板弹窗（预设 + 占位符速查）；
-/// 模板含目录分隔符时弹窗里标红报错，「应用到 N 首」禁用；预设一点即生效。
+/// 工具栏「批量重命名」：未选中时禁用，全选后可点，点开模板弹窗（预设 +
+/// 占位符速查）；模板含目录分隔符时弹窗里标红报错、「重命名 N 首」禁用；
+/// 预设一点即生效。工具栏「乱码修复」同样按选中数启用。
 #[test]
 fn metadata_batch_rename_rejects_separators() {
     let mut app = start(1400.0, 800.0);
@@ -83,21 +84,25 @@ fn metadata_batch_rename_rejects_separators() {
     app.press("元数据").unwrap();
     app.wait_for("label:全选").unwrap();
     app.wait_for("text:测试歌曲").unwrap();
+    // 没选中：两颗批量工具钮都禁用。
+    assert_eq!(app.screen().enabled("label:批量重命名"), Ok(false));
+    assert_eq!(app.screen().enabled("label:乱码修复"), Ok(false));
     app.press("label:全选").unwrap();
-    app.press("label:重命名模板").unwrap();
+    app.press("label:批量重命名").unwrap();
     app.wait_for("label:模板").unwrap();
     app.wait_for("text:{filename}").unwrap();
     app.type_text("label:模板", "a/b").unwrap();
     app.wait_for("text:仅支持重命名文件名，不能包含目录分隔符（/ 或 \\）")
         .unwrap();
-    assert_eq!(app.screen().enabled("label:应用批量修改"), Ok(false));
-    // 点预设：整个替换，报错消失。
+    assert_eq!(app.screen().enabled("label:重命名 6 首"), Ok(false));
+    // 点预设：整个替换，报错消失、应用钮恢复可按。
     app.press("text:{artist} - {title}").unwrap();
     app.wait_for_gone(
         "text:仅支持重命名文件名，不能包含目录分隔符（/ 或 \\）",
         Duration::from_secs(5),
     )
     .unwrap();
+    assert_eq!(app.screen().enabled("label:重命名 6 首"), Ok(true));
     assert_eq!(
         app.screen().input_text("label:模板").unwrap(),
         Some("{artist} - {title}")
@@ -300,6 +305,30 @@ fn metadata_column_selector_opens() {
         .unwrap();
 }
 
+/// 工具栏「显示列」旁的历史钮：未恰好选中一首时禁用，选中一首后点开
+/// 标签历史弹窗，「完成」关闭。
+#[test]
+fn metadata_history_button_opens_dialog() {
+    let mut app = start(1400.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("元数据").unwrap();
+    app.wait_for("label:标签历史").unwrap();
+    app.wait_for("text:sine.flac").unwrap();
+    app.press("text:sine.flac").unwrap();
+    app.wait_for("label:标题").unwrap();
+    app.press("label:标签历史").unwrap();
+    app.wait_for("text:保留最近 30 次写回的旧值（含封面）。还原只作用于这首曲目，并同样记入历史。")
+        .unwrap();
+    app.press("完成").unwrap();
+    app.wait_for_gone(
+        "text:保留最近 30 次写回的旧值（含封面）。还原只作用于这首曲目，并同样记入历史。",
+        Duration::from_secs(5),
+    )
+    .unwrap();
+}
+
 #[test]
 fn metadata_column_resize_drag() {
     let mut app = start(1400.0, 800.0);
@@ -407,4 +436,29 @@ fn window_close_prompt_is_an_alert_and_saves_only_when_checked() {
         "unchecked: 不写配置"
     );
     store.set_close_action(CloseAction::Ask);
+}
+
+/// 点行选中后开乱码修复弹窗，一次 Esc 就关掉：点行让 data_table 拿到
+/// 键盘（它的 Esc 层先清内置选中、再放键盘，会连吃两下），弹层要靠
+/// 自己更新的 pass_through 绑定（`modal` 的 `on_key_with("escape")`）把
+/// 键放回 `on_cancel` 一次关掉——回归：曾要按三次 Esc。
+#[test]
+fn encoding_dialog_one_escape_after_row_click() {
+    let mut app = start(1400.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("元数据").unwrap();
+    app.wait_for("text:sine.flac").unwrap();
+    // 点行体选中 → 单选面板挂载，data_table 的 Esc 键位层激活。
+    app.press("text:sine.flac").unwrap();
+    app.settle();
+    app.press("label:乱码修复").unwrap();
+    app.wait_for("role:dialog").unwrap();
+    app.press_key("escape").unwrap();
+    assert_eq!(
+        app.screen().count("role:dialog").unwrap(),
+        0,
+        "弹窗应被一次 Esc 关闭"
+    );
 }

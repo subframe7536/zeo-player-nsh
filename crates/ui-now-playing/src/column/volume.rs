@@ -3,6 +3,11 @@ use super::*;
 pub(crate) fn volume_row() -> View {
     let s = store();
     let volume = move || s.playback.with(|p| p.volume);
+    // 拖动中的本地音量：图标与百分比跟手，`s.playback` 与媒体会话
+    // 留到抬起 `set_volume` 一次（同均衡器推子的 live_db）；滑条自身
+    // 的 thumb / 填充由上游 pending 原生跟手，受控值仍给引擎音量。
+    let live = signal(None::<f64>);
+    let shown = move || live.get().unwrap_or_else(volume);
     view()
         .flex_row()
         .items_center()
@@ -13,7 +18,7 @@ pub(crate) fn volume_row() -> View {
                 .on_press(|_: &()| toggle_mute())
                 .child(icon_dyn(
                     move || {
-                        if volume() <= 0.0 {
+                        if shown() <= 0.0 {
                             Icon::Mute
                         } else {
                             Icon::Volume
@@ -32,13 +37,19 @@ pub(crate) fn volume_row() -> View {
                 white_a(0.2),
                 white_a(0.9),
                 white_a(1.0),
-                set_volume,
-                set_volume,
+                move |f| {
+                    live.set(Some(f));
+                    set_volume_live(f);
+                },
+                move |f| {
+                    set_volume(f);
+                    live.set(None);
+                },
             )
             .flex_1(),
         )
         .child(
-            text(move || format!("{}", (volume() * 100.0).round()))
+            text(move || format!("{}", (shown() * 100.0).round()))
                 .w(px(26.0))
                 .text_right()
                 .text_size(px(11.0))

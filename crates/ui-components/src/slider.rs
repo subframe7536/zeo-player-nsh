@@ -39,7 +39,10 @@ pub struct SliderStyle {
     /// 细侧的可点厚度（横向是高、竖向是宽）；`None` 表示两个方向都由
     /// 调用方的 `w`/`h` 定（EQ 推子要整块作拖动区）。
     pub hit: Option<f32>,
-    /// 键盘 / 无障碍步进（0..1 的比例）。
+    /// 上游 `step` 同时管指针吸附与键盘 / 无障碍步进：0 表示指针走任意
+    /// 位置（thumb 跟手逐点、宽滑条不再按百分比跳格），键盘步进退到上游
+    /// 的 1% 默认值——本模块的 0..1 滑块键盘步长正好也是 1%，行为不变。
+    /// 只有语义上真有刻度的（EQ 推子 0.5 dB）才给非零值。
     pub step: f64,
 }
 
@@ -52,7 +55,7 @@ impl SliderStyle {
         track: 4.0,
         thumb_d: 12.0,
         hit: Some(18.0),
-        step: 0.01,
+        step: 0.0,
     };
     /// 竖向滑块，填充从底部长起（音量弹层）。
     pub const VERTICAL: SliderStyle = SliderStyle {
@@ -123,7 +126,7 @@ pub fn scrub(
     // 测试拖动走的是命中视图的「自身 + 祖先」链，盖在上面的滑块是外层视图
     // 的子级、不在链里，收不到手势。
     view().child(area).child(
-        overlay_slider(vertical, 0.01, a11y, fraction, on_move, on_release)
+        overlay_slider(vertical, 0.0, a11y, fraction, on_move, on_release)
             .absolute()
             .inset_0(),
     )

@@ -203,6 +203,17 @@ impl Player {
         self.engine.send(EngineCmd::SetVolume(volume));
     }
 
+    /// 拖动音量滑条中的即时音量：只写共享状态，不发命令——
+    /// `EngineCmd::SetVolume` 每次都会重发媒体会话（快照 + 原生
+    /// `set_state`），拖动一秒上百次会把原生调用打满；抬起时由
+    /// `set_volume` 收尾发布。
+    pub fn set_volume_live(&self, volume: f64) {
+        self.engine.shared.volume.store(
+            (volume.clamp(0.0, 1.0) as f32).to_bits(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
     /// 播放当前队列的第 `index` 首。
     pub fn jump(&self, index: usize) {
         self.engine.send(EngineCmd::Jump(index as i64));

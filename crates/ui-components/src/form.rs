@@ -25,6 +25,10 @@ pub fn input_field(small: bool) -> Input {
     input()
         .h(px(if small { 32.0 } else { 36.0 }))
         .px(px(8.0))
+        // 两端平台的单行输入都把行盒垂直居在内容盒里：加 2pt 底边距
+        // 把内容盒中心抬高约 1pt，抵消字形墨水在行盒里偏下的观感
+        // （见 upstream.md「单行输入文字偏下」）。
+        .pb(px(2.0))
         .rounded(px(RADIUS_MD))
         .border_1()
         .border_color(input_c)
@@ -205,6 +209,21 @@ pub fn dialog_footer() -> View {
 /// 弹窗（nsh-base `dialog`，浮在一切之上；Esc 关闭）：半透明遮罩
 /// （shadcn `bg-black/50`），点遮罩关闭，内容居中。
 pub fn modal(content: View, on_close: impl Fn() + Copy + 'static) -> AnyElement {
+    // data_table 等拿键盘的组件已先绑了自己的 Esc（清内置选中 → 放键盘
+    // 两层），弹层的 `on_cancel` 要等它们让完才轮得到。给弹层挂一条更新
+    // 的 pass_through 绑定：按键查找「最新优先」先命中它，于是旧的组件
+    // 键位不再消费 Esc，按键继续走默认路径到 `on_cancel`——Esc 一次即
+    // 关（见 upstream.md「组件键位层盖过弹层取消」）。handler 空转：关
+    // 闭仍由 `on_cancel` 负责，pass_through 也让录键等下层消费者照常拿
+    // 到这键。
+    on_key_with(
+        "escape",
+        KeyOptions {
+            pass_through: true,
+            ..KeyOptions::default()
+        },
+        |_| {},
+    );
     nsh_base::dialog()
         .animation(ModalAnimation::Fade)
         .on_cancel(move || on_close())

@@ -64,6 +64,10 @@ pub enum Icon {
     History,
     /// 列显示设置（三栏）。
     Columns,
+    /// 乱码修复（拼写检查）。
+    SpellCheck,
+    /// 按模板重命名（文件 + 笔）。
+    FileRename,
 }
 
 impl Icon {
@@ -222,6 +226,14 @@ impl Icon {
             // columns-3
             Icon::Columns => {
                 r#"<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/>"#
+            }
+            // spell-check
+            Icon::SpellCheck => {
+                r#"<path d="m6 16 6-12 6 12"/><path d="M8 12h8"/><path d="M4 21c1.1 0 1.1-1 2.3-1s1.1 1 2.3 1c1.1 0 1.1-1 2.3-1 1.1 0 1.1 1 2.3 1 1.1 0 1.1-1 2.3-1 1.1 0 1.1 1 2.3 1"/>"#
+            }
+            // file-pen
+            Icon::FileRename => {
+                r#"<path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10.378 12.622a1 1 0 0 1 3.003-3.003L17.36 13.64a2 2 0 0 1-.506.854l-2.87.837a.5.5 0 0 1-.62-.62l.836-2.87a2 2 0 0 1 .854-.506z"/>"#
             }
         }
     }

@@ -11,17 +11,6 @@ pub(crate) enum Tri {
     Clear,
 }
 
-/// 英文大小写格式化。
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum CaseOp {
-    /// 首字母大写（每个 ASCII 字母词）。
-    Title,
-    /// 全部小写。
-    Lower,
-    /// 全部大写。
-    Upper,
-}
-
 /// 批量封面改动。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) enum CoverMode {
@@ -54,69 +43,40 @@ pub(crate) const TRI_FIELDS: &[TagField] = &[
     TagField::Rating,
 ];
 
-/// 批量草稿。三个工具都是「实时」的：填了就生效（空 / 不改动 = 不启用），
-/// 效果即时预览在工具行下方，随「应用」一并写回——没有「暂存」这一步。
+/// 批量草稿：三态字段与封面改动，随「应用」一并写回——没有「暂存」这一步。
+/// 乱码修复与模板重命名不在草稿里：它们是工具栏入口的独立弹窗，各自预览、
+/// 各自应用（见 `tools.rs` / `batch_rename.rs`）。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct BatchDraft {
     pub(crate) modes: HashMap<TagField, Tri>,
     pub(crate) values: HashMap<TagField, String>,
-    /// 英文大小写格式化（None = 不改；作用于标题 / 歌手 / 专辑）。
-    pub(crate) case: Option<CaseOp>,
-    /// 自动乱码修复：尽力把别的编码被误读的文本转回 UTF-8，认不准保持原样
-    /// （作用于 [`ENCODING_FIELDS`] 与歌词 / 注释）。
-    pub(crate) fix_encoding: bool,
-    /// 文件名模板（空 = 不改名）。
-    pub(crate) rename_tpl: String,
     pub(crate) cover: CoverMode,
     pub(crate) applying: bool,
     pub(crate) message: Option<String>,
 }
 
-/// 大小写下拉的选项（`None` = 不改动）。
-const CASE_CHOICES: [(&str, Option<CaseOp>); 4] = [
-    ("不改动", None),
-    ("首字母大写", Some(CaseOp::Title)),
-    ("全部小写", Some(CaseOp::Lower)),
-    ("全部大写", Some(CaseOp::Upper)),
-];
+impl BatchDraft {
+    /// 草稿里有没有要写的改动（「应用到 N 首」可按与否）：三态非
+    /// 「保持原值」、封面不是「保持」。
+    pub(crate) fn has_changes(&self) -> bool {
+        self.modes.values().any(|m| *m != Tri::Keep) || self.cover != CoverMode::Keep
+    }
+}
 
 pub(crate) fn batch_panel(
     paths: Rc<Vec<String>>,
     displayed: Memo<Rc<Vec<TrackEntry>>>,
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
-    selected: Signal<BTreeSet<String>>,
     close: Rc<dyn Fn()>,
 ) -> View {
     let draft = signal(BatchDraft::default());
+    // 应用成功的反馈计数器：非 0 时「应用到 N 首」钮显示 ✓（见顶栏按钮）。
+    let applied = signal(0u64);
     let m = paths.len();
 
-    // 效果预览：只算所选里的前几首（显示序），每次按键重算也便宜；
-    // 全量校验（重名 / 磁盘冲突）在「应用」时做。
+    // 导出预览只取所选里的前几首（显示序）；全量遍历在导出时做。
     let path_set: Rc<std::collections::HashSet<String>> = Rc::new(paths.iter().cloned().collect());
     let sample = computed(move || Rc::new(displayed.with(|v| sample_of(v, &path_set))));
-    // 乱码修复预览要样本的完整歌词 / 注释（视图行里只有截断预览）：开了修复才从
-    // 文件读，只在「是否开启 / 样本」变时重读，不随每次按键。
-    let encoding_on = computed(move || draft.with(|d| d.fix_encoding));
-    let sample_texts = computed(move || {
-        let mut texts = SampleTexts::new();
-        if encoding_on.get() {
-            for t in sample.get().iter() {
-                if let Ok(fields) = zeo_metadata::write::read_fields(std::path::Path::new(&t.path))
-                {
-                    texts.insert(t.path.clone(), fields);
-                }
-            }
-        }
-        Rc::new(texts)
-    });
-    let preview = computed(move || {
-        let sample = sample.get();
-        let map = rows.get();
-        let texts = sample_texts.get();
-        draft.with(|d| Rc::new(build_preview(d, &sample, m, &map, &texts)))
-    });
-    let template_err = computed(move || draft.with(|d| template_error(&d.rename_tpl)));
-    let rename_open = signal(false);
     // 导出（歌词 / 封面）弹窗：开关与导出选项随面板存活。
     let lyrics_open = signal(false);
     let cover_open = signal(false);
@@ -129,64 +89,6 @@ pub(crate) fn batch_panel(
         sample,
     });
 
-    // 工具块：控件行 + 下方的效果预览 / 提示；块之间留 14pt。
-    let tools = view()
-        .gap(px(14.0))
-        .child(
-            view()
-                .child(wrap_row(
-                    "大小写",
-                    vec![
-                        select(
-                            move || {
-                                let now = draft.with(|d| d.case);
-                                CASE_CHOICES
-                                    .iter()
-                                    .find(|(_, op)| *op == now)
-                                    .map_or("不改动", |(name, _)| name)
-                                    .to_owned()
-                            },
-                            "大小写",
-                            CASE_CHOICES
-                                .iter()
-                                .map(|(name, op)| {
-                                    let op = *op;
-                                    SelectOption::new(name, move || draft.update(|d| d.case = op))
-                                })
-                                .collect(),
-                            128.0,
-                        )
-                        .into_element(),
-                    ],
-                ))
-                .child(preview_block(
-                    move || preview.with(|p| p.case.clone()),
-                    "作用于标题 / 歌手 / 专辑",
-                )),
-        )
-        .child(
-            view()
-                .child(wrap_row(
-                    "乱码修复",
-                    vec![check_with_label(
-                        "自动修复为 UTF-8",
-                        move || draft.with(|d| d.fix_encoding),
-                        move |on| draft.update(|d| d.fix_encoding = on),
-                    )],
-                ))
-                .child(preview_block(
-                    move || preview.with(|p| p.encoding.clone()),
-                    "尽力识别 GBK / Big5 / Shift-JIS 等被误读的标签文本（含歌词、注释），认不准的保持原样",
-                )),
-        )
-        .child(
-            view()
-                .child(wrap_row("重命名", vec![rename_button(draft, rename_open)]))
-                .child(preview_block(
-                    move || preview.with(|p| p.rename.clone()),
-                    "点按钮设置模板；只改文件名，同名 .lrc 与封面一起改",
-                )),
-        );
     // 建立所选路径的 TrackEntry 快速查找表（一次 pass），避免三态字段
     // 计算占位符与批量应用时对全表进行 O(M × N) 线性扫描。
     let selected_entries: Rc<HashMap<String, TrackEntry>> = Rc::new({
@@ -225,7 +127,6 @@ pub(crate) fn batch_panel(
                     .text_color(muted_fg())
             },
         ))
-        .child(section("工具", vec![tools]))
         .child(section("字段", vec![fields]))
         // 封面只有一行，行首标签就是标题，不再另起节标题。
         .child(cover_mode_row(draft))
@@ -252,34 +153,47 @@ pub(crate) fn batch_panel(
                     .line_height(px(12.0))
                     .text_color(muted_fg())
                     .into_element(),
-                text_button(
-                    Variant::Default,
-                    Size::Xs,
-                    None,
-                    format!("应用到 {m} 首"),
-                    move || {
-                        apply_batch(
-                            paths.clone(),
-                            selected_entries.clone(),
-                            displayed,
-                            rows,
-                            selected,
-                            draft,
-                        )
-                    },
-                )
-                .accessibility_label("应用批量修改")
-                // 模板写错时不让按（报错已在重命名行下方标红）。
-                .disabled(move || draft.with(|d| d.applying) || template_err.get().is_some())
+                dynamic(move || {
+                    // 应用成功：文字换 ✓ 三秒再还原（`applied` 是计数器，
+                    // 三秒内又应用成功只重启计时），不在下方另出「已保存」。
+                    if applied.get() != 0 {
+                        return shell(Variant::Default, Size::Xs)
+                            .accessibility_label("应用成功")
+                            .disabled(true)
+                            .child(icon_dyn(
+                                || Icon::Check,
+                                Size::Xs.glyph(),
+                                move || foreground(Variant::Default),
+                            ))
+                            .into_element();
+                    }
+                    let (paths, entries) = (paths.clone(), selected_entries.clone());
+                    text_button(
+                        Variant::Default,
+                        Size::Xs,
+                        None,
+                        format!("应用到 {m} 首"),
+                        move || {
+                            apply_batch(
+                                paths.clone(),
+                                entries.clone(),
+                                displayed,
+                                rows,
+                                draft,
+                                applied,
+                            )
+                        },
+                    )
+                    .accessibility_label("应用批量修改")
+                    // 草稿里没有任何改动时不让按（点了只会得到「没有要应用的修改」）。
+                    .disabled(move || draft.with(|d| d.applying || !d.has_changes()))
+                    .into_element()
+                })
                 .into_element(),
             ],
             close,
         ))
         .child(scroll().key("batch").flex_1().min_h(px(0.0)).child(form))
-        .child(when(
-            move || rename_open.get(),
-            move || rename_dialog(draft, preview, template_err, rename_open),
-        ))
         .child(when(move || lyrics_open.get(), {
             let source = export_source.clone();
             move || {

@@ -4,7 +4,22 @@ use std::collections::HashSet;
 
 use zeo_ui_components::form::{dialog_content, dialog_footer, dialog_header, modal};
 
-/// 标签历史弹窗（入口在「显示列」下拉末尾，只在选中恰好一首时能打开）：列出写过这首曲目的历史批次——每次保存 /
+/// 工具栏「显示列」旁的历史入口：外框钮只放历史图标（悬停出「标签历史」
+/// 提示），只在选中恰好一首时可点（`can` 为假时禁用置灰），点开
+/// [`history_dialog`]。
+pub(crate) fn history_button(open: Signal<bool>, can: Memo<bool>) -> AnyElement {
+    tipped(
+        shell(Variant::Outline, Size::IconSm)
+            .accessibility_label("标签历史")
+            .disabled(move || !can.get())
+            .on_press(move |_: &()| open.set(true))
+            .child(icon(Icon::History, 14.0, muted_fg)),
+        "标签历史",
+    )
+    .into_element()
+}
+
+/// 标签历史弹窗（入口是「显示列」旁的工具栏图标钮，只在选中恰好一首时能打开）：列出写过这首曲目的历史批次——每次保存 /
 /// 批量应用写回前自动记下被改字段的旧值（含封面）——每批一键还原。还原本身
 /// 也记成新批次，刷新后出现在最上面（可以再还原回去）。
 ///

@@ -86,17 +86,15 @@ pub(crate) fn cover_mode_row(draft: Signal<BatchDraft>) -> View {
     )
 }
 
-/// 「应用」：按当前显示序生成每首的 `TagEdits`（编号 / 大小写覆盖同名
-/// 字段），后台顺序写回；成功行失效重读。设了重命名模板就在标签写完后
-/// 接着改名（模板按应用后的标签渲染）：全部文件名先整批校验，有一条
-/// 不可用就整个不应用，先于任何写盘。
+/// 「应用」：按当前显示序生成每首的 `TagEdits`，后台顺序写回；成功行失效
+/// 重读。改名不在这里：模板重命名是工具栏入口的独立弹窗（`batch_rename`）。
 pub(crate) fn apply_batch(
     paths: Rc<Vec<String>>,
     selected_entries: Rc<HashMap<String, TrackEntry>>,
     displayed: Memo<Rc<Vec<TrackEntry>>>,
     rows: Signal<HashMap<String, Arc<MetaRow>>>,
-    selected: Signal<BTreeSet<String>>,
     draft: Signal<BatchDraft>,
+    applied: Signal<u64>,
 ) {
     let d = draft.get_untracked();
     // 编号按当前显示序（不是选择集的字典序）。
@@ -107,28 +105,13 @@ pub(crate) fn apply_batch(
         .map(|t| t.path.clone())
         .collect();
     let map = rows.get_untracked();
-    let items = batch_edits(
-        &order,
-        &d.modes,
-        &d.values,
-        d.case,
-        d.fix_encoding,
-        &d.cover,
-        |p, f| {
-            selected_entries
-                .get(p)
-                .map(|t| current_value(t, &map, f))
-                .unwrap_or_default()
-        },
-    );
-    let renames = match plan_renames(&d.rename_tpl, &order, &items, &selected_entries, &map) {
-        Ok(planned) => planned,
-        Err(message) => {
-            draft.update(|d| d.message = Some(message));
-            return;
-        }
-    };
-    if items.is_empty() && renames.is_empty() {
+    let items = batch_edits(&order, &d.modes, &d.values, false, &d.cover, |p, f| {
+        selected_entries
+            .get(p)
+            .map(|t| current_value(t, &map, f))
+            .unwrap_or_default()
+    });
+    if items.is_empty() {
         draft.update(|d| d.message = Some("没有要应用的修改".to_owned()));
         return;
     }
@@ -136,55 +119,36 @@ pub(crate) fn apply_batch(
         d.applying = true;
         d.message = None;
     });
-    let has_tag_items = !items.is_empty();
     let after_tags = move |saved: store::BatchSaved| {
         let errors = saved.errors;
         // 失败的路径仍保留在选中集里；写成功的行失效，加载器按新指纹重读。
         forget_rows(saved.written.iter(), rows);
-        let tag_note = has_tag_items.then(|| {
-            if errors.is_empty() {
-                match saved.written.len() {
-                    0 => "标签没有需要修改的内容".to_owned(),
-                    n => format!("已更新 {n} 首"),
-                }
-            } else {
+        // 全成功不复述「已更新」——顶栏按钮换 ✓ 三秒；有失败仍走状态行说清。
+        let ok = errors.is_empty();
+        draft.update(|d| {
+            d.applying = false;
+            d.message = (!ok).then(|| {
                 let lines: Vec<String> = errors
                     .iter()
                     .map(|(p, e)| format!("{}：{e}", zeo_ui_views_base::last_segment(p)))
                     .collect();
                 format!("{} 首失败：{}", errors.len(), brief(&lines))
-            }
-        });
-        // 标签没写成的不改名：它们的内容还是旧的，改了名也对不上预览。
-        let todo: Vec<rename::Planned> = renames
-            .into_iter()
-            .filter(|p| !errors.iter().any(|(e, _)| *e == p.src))
-            .collect();
-        let rename_total = todo.len();
-        let finish = move |rename_note: Option<String>| {
-            draft.update(|d| {
-                d.applying = false;
-                let notes: Vec<String> = tag_note.into_iter().chain(rename_note).collect();
-                d.message = Some(notes.join("；"));
             });
-        };
-        if todo.is_empty() {
-            finish(None);
-            return;
-        }
-        rename_files(todo, rows, selected, move |failures| {
-            finish(Some(if failures.is_empty() {
-                format!("已重命名 {rename_total} 个文件")
-            } else {
-                format!("{} 个重命名失败：{}", failures.len(), brief(&failures))
-            }))
         });
+        if ok && let Some(prev) = applied.try_get() {
+            // try_*：面板在后台写盘期间被关掉时信号已随 owner 析构。
+            let seq = prev + 1;
+            applied.try_set(seq);
+            spawn(async move {
+                timer(std::time::Duration::from_secs(3)).await;
+                // 三秒内又应用成功（seq 已前进）就不复位，由新的计时器管。
+                if applied.try_get() == Some(seq) {
+                    applied.try_set(0);
+                }
+            });
+        }
     };
-    if items.is_empty() {
-        after_tags(store::BatchSaved::default());
-    } else {
-        store::save_tags_batch(items, "批量修改", after_tags);
-    }
+    store::save_tags_batch(items, "批量修改", after_tags);
 }
 
 /// 标签写成功的文件：丢掉它们的行缓存与单选面板缓存，加载器按新指纹重读。
@@ -241,24 +205,14 @@ fn put_edit(fields: &mut Vec<(TagField, Edit)>, field: TagField, edit: Edit) {
     }
 }
 
-/// 该字段此刻的值：前面的改动（三态 / 乱码修复）已经定了新值就用它，
-/// 否则是 `old`——后面的步骤（大小写）作用在前面步骤的结果上。
-fn effective_value(fields: &[(TagField, Edit)], field: TagField, old: String) -> String {
-    match fields.iter().find(|(k, _)| *k == field).map(|(_, e)| e) {
-        Some(Edit::Set(v)) => v.clone(),
-        Some(Edit::Clear) => String::new(),
-        _ => old,
-    }
-}
-
-/// 批量草稿 → 每首一份 `TagEdits`（纯函数）：三态按字段展开（「保持原
-/// 值」= `Edit::Keep`），乱码修复、大小写依次在其后覆盖同名字段（三态已定值的
-/// 字段不做乱码修复；大小写作用在修复后的值上）；全空的跳过。
+/// 批量改动 → 每首一份 `TagEdits`（纯函数）：三态按字段展开（「保持原
+/// 值」= `Edit::Keep`），乱码修复在其后覆盖同名字段（三态已定值的字段不做
+/// 乱码修复）；全空的跳过。批量面板传 `fix_encoding = false`——独立的
+/// 乱码修复弹窗传 `true` 且三态为空。
 pub(crate) fn batch_edits(
     paths: &[String],
     modes: &HashMap<TagField, Tri>,
     values: &HashMap<TagField, String>,
-    case: Option<CaseOp>,
     fix_encoding: bool,
     cover: &CoverMode,
     field_of: impl Fn(&str, TagField) -> String,
@@ -299,15 +253,6 @@ pub(crate) fn batch_edits(
                     }
                 }
             }
-            if let Some(op) = case {
-                for f in [TagField::Title, TagField::Artist, TagField::Album] {
-                    let old = effective_value(&fields, f, field_of(path, f));
-                    let new = case_convert(&old, op);
-                    if new != old {
-                        put_edit(&mut fields, f, Edit::Set(new));
-                    }
-                }
-            }
             let cover = match cover {
                 CoverMode::Keep => None,
                 CoverMode::Replace { data, mime, .. } => Some(CoverEdit::Replace {
@@ -325,30 +270,4 @@ pub(crate) fn batch_edits(
             (!edits.is_empty()).then(|| (path.clone(), edits))
         })
         .collect()
-}
-
-/// 英文大小写：Title = 每个 ASCII 字母词首字母大写其余小写（数字与
-/// 非 ASCII 原样保留）；Lower / Upper 整串转。
-pub(crate) fn case_convert(s: &str, op: CaseOp) -> String {
-    match op {
-        CaseOp::Lower => s.to_lowercase(),
-        CaseOp::Upper => s.to_uppercase(),
-        CaseOp::Title => {
-            let mut out = String::with_capacity(s.len());
-            let mut word_start = true;
-            for c in s.chars() {
-                if c.is_ascii_alphabetic() {
-                    out.push(if word_start {
-                        c.to_ascii_uppercase()
-                    } else {
-                        c.to_ascii_lowercase()
-                    });
-                } else {
-                    out.push(c);
-                }
-                word_start = !c.is_ascii_alphanumeric();
-            }
-            out
-        }
-    }
 }

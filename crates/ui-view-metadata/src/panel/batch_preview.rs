@@ -48,14 +48,6 @@ impl PreviewLine {
     }
 }
 
-/// 各工具的效果预览；空 = 该工具没启用。
-#[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) struct Preview {
-    pub(crate) case: Vec<PreviewLine>,
-    pub(crate) encoding: Vec<PreviewLine>,
-    pub(crate) rename: Vec<PreviewLine>,
-}
-
 /// 一首曲目某字段的当前值：视图行已加载用行值，否则回落索引条目。
 pub(crate) fn current_value(
     t: &TrackEntry,
@@ -68,29 +60,16 @@ pub(crate) fn current_value(
     }
 }
 
-/// 文件名模板能看到的字段：当前值叠上这批改动（三态 / 乱码修复 / 大小写）
-/// 之后的结果——模板里的 `{artist}` 取的是应用后的歌手。
+/// 文件名模板能看到的字段：视图行 / 索引条目的当前值（模板里的
+/// `{artist}` 取的是此刻的歌手）。
 pub(crate) fn effective_fields(
     t: &TrackEntry,
     rows: &HashMap<String, Arc<MetaRow>>,
-    edits: Option<&TagEdits>,
 ) -> HashMap<TagField, String> {
-    let mut fields: HashMap<TagField, String> = TEMPLATE_FIELDS
+    TEMPLATE_FIELDS
         .iter()
         .map(|f| (*f, current_value(t, rows, *f)))
-        .collect();
-    for (field, edit) in edits.into_iter().flat_map(|e| e.fields.iter()) {
-        match edit {
-            Edit::Set(v) => {
-                fields.insert(*field, v.clone());
-            }
-            Edit::Clear => {
-                fields.insert(*field, String::new());
-            }
-            Edit::Keep | Edit::Redecode => {}
-        }
-    }
-    fields
+        .collect()
 }
 
 /// 重命名模板的报错（空模板 = 不改名，不算错）。
@@ -101,30 +80,24 @@ pub(crate) fn template_error(tpl: &str) -> Option<String> {
     rename::Template::parse(tpl).err()
 }
 
-/// 按顺序给 `tracks` 出改名计划：`items` 是同一批的标签改动，模板按应用
-/// 后的字段渲染。预览传样本、应用传全部。
+/// 按顺序给 `tracks` 出改名计划：模板按当前标签值渲染。预览传样本、
+/// 应用传全部。
 pub(crate) fn plan_with<'a>(
     template: &rename::Template,
     tracks: impl Iterator<Item = &'a TrackEntry>,
-    items: &[(String, TagEdits)],
     rows: &HashMap<String, Arc<MetaRow>>,
 ) -> Vec<rename::Planned> {
-    let edits: HashMap<&str, &TagEdits> = items.iter().map(|(p, e)| (p.as_str(), e)).collect();
     let inputs: Vec<(String, HashMap<TagField, String>)> = tracks
-        .map(|t| {
-            let fields = effective_fields(t, rows, edits.get(t.path.as_str()).copied());
-            (t.path.clone(), fields)
-        })
+        .map(|t| (t.path.clone(), effective_fields(t, rows)))
         .collect();
     rename::plan(&inputs, template)
 }
 
-/// 全部所选的改名计划（「应用」用）：任何一条不可用就整批拒绝（Err 带
-/// 条数与第一条原因），先于任何写盘；通过的只留真要改名的。
+/// 全部所选的改名计划（弹窗「重命名」用）：任何一条不可用就整批拒绝
+/// （Err 带条数与第一条原因），先于任何写盘；通过的只留真要改名的。
 pub(crate) fn plan_renames(
     tpl: &str,
     order: &[String],
-    items: &[(String, TagEdits)],
     entries: &HashMap<String, TrackEntry>,
     rows: &HashMap<String, Arc<MetaRow>>,
 ) -> Result<Vec<rename::Planned>, String> {
@@ -132,12 +105,7 @@ pub(crate) fn plan_renames(
         return Ok(Vec::new());
     }
     let template = rename::Template::parse(tpl)?;
-    let planned = plan_with(
-        &template,
-        order.iter().filter_map(|p| entries.get(p)),
-        items,
-        rows,
-    );
+    let planned = plan_with(&template, order.iter().filter_map(|p| entries.get(p)), rows);
     let bad: Vec<(&rename::Planned, &String)> = planned
         .iter()
         .filter_map(|p| match &p.status {
@@ -165,44 +133,20 @@ fn file_name(path: &str) -> String {
         .unwrap_or_default()
 }
 
-/// 当前草稿在样本上的效果：`total` 是所选总数（「… 共 N 首」用）。
-/// `texts`：所选样本从文件读出的完整歌词 / 注释（乱码修复预览用，开了修复才读，
-/// 见 `batch_panel` 的 `sample_texts`）。
+/// 乱码修复预览要样本的完整歌词 / 注释（视图行里只有截断预览，拿预览去
+/// 修会把原文截掉——所以从文件读）。`路径 → 字段 → 全文`。
 pub(crate) type SampleTexts = HashMap<String, HashMap<TagField, String>>;
 
-pub(crate) fn build_preview(
-    d: &BatchDraft,
-    sample: &[TrackEntry],
+/// 给预览行数追加「… 共 N 首」（只看了样本时的说明）。
+pub(crate) fn more_note(
+    mut lines: Vec<PreviewLine>,
     total: usize,
-    rows: &HashMap<String, Arc<MetaRow>>,
-    texts: &SampleTexts,
-) -> Preview {
-    let more = |mut lines: Vec<PreviewLine>| {
-        if !lines.is_empty() && total > sample.len() {
-            lines.push(PreviewLine::ok(format!("… 共 {total} 首")));
-        }
-        lines
-    };
-    Preview {
-        case: more(case_preview(d.case, d.fix_encoding, sample, rows)),
-        encoding: more(encoding_preview(d, sample, rows, texts)),
-        rename: more(rename_preview(d, sample, rows)),
+    seen: usize,
+) -> Vec<PreviewLine> {
+    if !lines.is_empty() && total > seen {
+        lines.push(PreviewLine::ok(format!("… 共 {total} 首")));
     }
-}
-
-/// 乱码修复之后的字段值（没开修复 / 修不了就是当前值）：大小写作用在它上面。
-fn after_encoding(
-    t: &TrackEntry,
-    rows: &HashMap<String, Arc<MetaRow>>,
-    field: TagField,
-    fix_encoding: bool,
-) -> String {
-    let old = current_value(t, rows, field);
-    if fix_encoding && ENCODING_FIELDS.contains(&field) {
-        fix_mojibake(&old).unwrap_or(old)
-    } else {
-        old
-    }
+    lines
 }
 
 /// 每首取 `fields` 里第一个会变的字段，`字段：旧 → 新`；都不变就写「无变化」。
@@ -222,27 +166,6 @@ fn first_change_lines(
         .collect()
 }
 
-/// 大小写：标题 / 歌手 / 专辑里第一个会变的字段（作用在乱码修复之后的值上）。
-fn case_preview(
-    op: Option<CaseOp>,
-    fix_encoding: bool,
-    sample: &[TrackEntry],
-    rows: &HashMap<String, Arc<MetaRow>>,
-) -> Vec<PreviewLine> {
-    let Some(op) = op else {
-        return Vec::new();
-    };
-    first_change_lines(
-        sample,
-        &[TagField::Title, TagField::Artist, TagField::Album],
-        |t, f| {
-            let old = after_encoding(t, rows, f, fix_encoding);
-            let new = case_convert(&old, op);
-            (new != old).then_some((old, new))
-        },
-    )
-}
-
 /// 预览里的一行文字：多行文本（歌词 / 注释）只取第一条非空行、截到 30 字。
 fn one_line(text: &str) -> String {
     let line = text.lines().map(str::trim).find(|l| !l.is_empty());
@@ -255,25 +178,19 @@ fn one_line(text: &str) -> String {
     }
 }
 
-/// 乱码修复：覆盖字段（含歌词 / 注释）里第一个能修复的，`乱码 → 修复后`；
-/// 三态已定值的字段不修复，预览也跳过。
-fn encoding_preview(
-    d: &BatchDraft,
+/// 乱码修复预览：覆盖字段（含歌词 / 注释）里第一个能修复的，`乱码 → 修复后`。
+/// 歌词 / 注释的完整文本来自 `texts`（文件读出来的）。
+pub(crate) fn encoding_preview(
     sample: &[TrackEntry],
     rows: &HashMap<String, Arc<MetaRow>>,
     texts: &SampleTexts,
 ) -> Vec<PreviewLine> {
-    if !d.fix_encoding {
-        return Vec::new();
-    }
     let fields: Vec<TagField> = ENCODING_FIELDS
         .iter()
         .chain(ENCODING_FILE_FIELDS.iter())
         .copied()
-        .filter(|f| d.modes.get(f).copied().unwrap_or(Tri::Keep) == Tri::Keep)
         .collect();
     first_change_lines(sample, &fields, |t, f| {
-        // 歌词 / 注释的完整文本来自文件（视图行里是截断预览）。
         let old = if ENCODING_FILE_FIELDS.contains(&f) {
             texts.get(&t.path)?.get(&f)?.clone()
         } else {
@@ -283,36 +200,20 @@ fn encoding_preview(
     })
 }
 
-/// 重命名：`旧文件名 → 新文件名`，冲突 / 不可用标红并带原因。
-fn rename_preview(
-    d: &BatchDraft,
+/// 重命名预览：`旧文件名 → 新文件名`，冲突 / 不可用标红并带原因。
+pub(crate) fn rename_preview(
+    tpl: &str,
     sample: &[TrackEntry],
     rows: &HashMap<String, Arc<MetaRow>>,
 ) -> Vec<PreviewLine> {
-    if d.rename_tpl.trim().is_empty() {
+    if tpl.trim().is_empty() {
         return Vec::new();
     }
-    let template = match rename::Template::parse(&d.rename_tpl) {
+    let template = match rename::Template::parse(tpl) {
         Ok(t) => t,
         Err(message) => return vec![PreviewLine::bad(message)],
     };
-    let order: Vec<String> = sample.iter().map(|t| t.path.clone()).collect();
-    let by_path: HashMap<&str, &TrackEntry> = sample.iter().map(|t| (t.path.as_str(), t)).collect();
-    let items = batch_edits(
-        &order,
-        &d.modes,
-        &d.values,
-        d.case,
-        d.fix_encoding,
-        &CoverMode::Keep,
-        |p, f| {
-            by_path
-                .get(p)
-                .map(|t| current_value(t, rows, f))
-                .unwrap_or_default()
-        },
-    );
-    plan_with(&template, sample.iter(), &items, rows)
+    plan_with(&template, sample.iter(), rows)
         .iter()
         .map(|p| {
             let (old, new) = (file_name(&p.src), file_name(&p.dest));
@@ -349,19 +250,6 @@ pub(crate) fn preview_list(lines: impl Fn() -> Vec<PreviewLine> + 'static) -> An
             }))
             .into_element()
     })
-}
-
-/// 工具行下方的效果预览：预览行后面跟一行常驻提示，与控件列左对齐。
-pub(crate) fn preview_block(
-    lines: impl Fn() -> Vec<PreviewLine> + 'static,
-    hint: &'static str,
-) -> AnyElement {
-    view()
-        .pl(px(80.0))
-        .pt(px(6.0))
-        .child(preview_list(lines))
-        .child(text(hint).text_size(px(11.0)).text_color(faint()))
-        .into_element()
 }
 
 /// 所选里取前 [`PREVIEW_N`] 首（显示序）。

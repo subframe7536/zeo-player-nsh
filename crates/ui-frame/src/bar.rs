@@ -14,8 +14,8 @@ use zeo_ui_components::icons::{Icon, icon_dyn};
 use zeo_ui_components::slider::{SliderStyle, slider};
 use zeo_ui_store::theme::*;
 use zeo_ui_store::{
-    cover_for_always, format_time, player, progress_fraction, seek_to, set_volume, shown_time,
-    store, toggle_mute,
+    cover_for_always, format_time, player, progress_fraction, seek_to, set_volume, set_volume_live,
+    shown_time, store, toggle_mute,
 };
 
 /// 播放条左右两段的宽度：窗口变窄时一起收缩（等宽，播放控制保持居中），
@@ -240,6 +240,10 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .justify_end()
         .gap(px(6.0))
         .child(when(fits_volume, move || {
+            // 拖动中的本地音量：图标跟手，`s.playback` 与媒体会话留到
+            // 抬起 `set_volume` 一次（同全屏播放页的音量行）。
+            let live = signal(None::<f64>);
+            let shown = move || live.get().unwrap_or_else(volume);
             view()
                 .flex_row()
                 .items_center()
@@ -247,7 +251,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 .child(tipped(
                     icon_button(
                         move || {
-                            if volume() <= 0.0 {
+                            if shown() <= 0.0 {
                                 Icon::Mute
                             } else {
                                 Icon::Volume
@@ -268,8 +272,14 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                         input(),
                         muted_fg(),
                         fg(),
-                        set_volume,
-                        set_volume,
+                        move |f| {
+                            live.set(Some(f));
+                            set_volume_live(f);
+                        },
+                        move |f| {
+                            set_volume(f);
+                            live.set(None);
+                        },
                     )
                     .w(px(96.0)),
                 )
@@ -330,8 +340,10 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
 fn volume_popover(open: Signal<bool>) -> AnyElement {
     let s = store();
     let volume = move || s.playback.with(|p| p.volume);
+    let live = signal(None::<f64>);
+    let shown = move || live.get().unwrap_or_else(volume);
     let glyph = move || {
-        if volume() <= 0.0 {
+        if shown() <= 0.0 {
             Icon::Mute
         } else {
             Icon::Volume
@@ -386,8 +398,14 @@ fn volume_popover(open: Signal<bool>) -> AnyElement {
                         input(),
                         muted_fg(),
                         fg(),
-                        set_volume,
-                        set_volume,
+                        move |f| {
+                            live.set(Some(f));
+                            set_volume_live(f);
+                        },
+                        move |f| {
+                            set_volume(f);
+                            live.set(None);
+                        },
                     )
                     .h(px(112.0)),
                 )

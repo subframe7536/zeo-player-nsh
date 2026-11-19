@@ -182,7 +182,7 @@ fn folder_stem(
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    template.render(&effective_fields(t, rows, None), &stem)
+    template.render(&effective_fields(t, rows), &stem)
 }
 
 /// 预览：前几首导出后的文件名；歌词再附第一首的整理效果。

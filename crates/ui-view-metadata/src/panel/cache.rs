@@ -69,7 +69,7 @@ pub(crate) fn panel(
                     .into_element();
             }
             if let Some(paths) = batch.get() {
-                return batch_panel(paths, displayed, rows, selected, close.clone()).into_element();
+                return batch_panel(paths, displayed, rows, close.clone()).into_element();
             }
             view().into_element()
         }))
