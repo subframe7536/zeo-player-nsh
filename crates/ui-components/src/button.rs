@@ -101,7 +101,7 @@ pub fn shell(variant: Variant, size: Size) -> ButtonElement {
         .rounded(px(RADIUS_MD))
         .transition_colors()
         .duration(150.0)
-        .focus(move |st| st.ring(px(3.0)).ring_color(ring.opacity(0.5)))
+        .focus_visible(move |st| st.ring(px(3.0)).ring_color(ring.opacity(0.5)))
         .disabled_style(|st| st.opacity(0.5));
     let b = if size.is_icon() {
         b.w(px(h))
@@ -198,7 +198,7 @@ pub fn on_dark(side: f32) -> ButtonElement {
         .duration(150.0)
         .hover(|st| st.bg(white_a(0.08)))
         .active(|st| st.opacity(0.6))
-        .focus(|st| st.ring(px(3.0)).ring_color(white_a(0.4)))
+        .focus_visible(|st| st.ring(px(3.0)).ring_color(white_a(0.4)))
 }
 
 /// shadcn 的 `rounded-md`（`--radius` 0.625rem 减 2 px）。

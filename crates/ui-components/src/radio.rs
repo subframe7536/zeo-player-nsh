@@ -59,7 +59,7 @@ fn base(
         .checked(on)
         .accessibility_label(label)
         .on_change(move |_: &bool| pick())
-        .focus(move |st| st.ring(px(3.0)).ring_color(ring.opacity(0.5)))
+        .focus_visible(move |st| st.ring(px(3.0)).ring_color(ring.opacity(0.5)))
         .disabled_style(|st| st.opacity(0.5))
 }
 
