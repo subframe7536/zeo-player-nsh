@@ -448,3 +448,53 @@ fn shortcut_capture_records_keys_through_key_down() {
     app.wait_for("导航").unwrap();
     app.press_key("escape").unwrap();
 }
+
+/// 数据目录里 library.json 的 genre_separators（保存在后台线程，调用方轮询）。
+fn saved_genre_separators() -> Option<Vec<String>> {
+    let file =
+        std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap()).join("library.json");
+    std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| serde_json::from_value(v["genre_separators"].clone()).ok())
+}
+
+/// 设置弹窗 →「其他」→「标签分隔符」多选框：输入符号点「添加」新增成 chip
+/// 并落盘，点 chip 的 × 移除；结束时回到出厂的 `;`。
+#[test]
+fn genre_separator_multiselect_adds_and_removes() {
+    let mut app = start(1200.0, 800.0);
+    app.press("设置").unwrap();
+    app.press("id:settings-nav >> role:button[其他]").unwrap();
+    app.wait_for("label:标签分隔符").unwrap();
+    let saved = |want: &[&str]| {
+        for _ in 0..40 {
+            if saved_genre_separators()
+                .is_some_and(|v| v.iter().map(String::as_str).eq(want.iter().copied()))
+            {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    };
+    // 输入的符号不在列表里：最上面出现「添加“・”」项，点它新增。
+    app.type_text("label:标签分隔符", "・").unwrap();
+    app.wait_for("role:option[添加“・”]").unwrap();
+    app.press("role:option[添加“・”]").unwrap();
+    app.wait_for("label:移除「・」").unwrap();
+    assert!(
+        saved(&[";", "・"]),
+        "应新增「・」: {:?}",
+        saved_genre_separators()
+    );
+    // 共享全局配置：移除后回到出厂值。
+    app.press("label:移除「・」").unwrap();
+    app.wait_for_gone("label:移除「・」", Duration::from_secs(2))
+        .unwrap();
+    assert!(
+        saved(&[";"]),
+        "应移除「・」: {:?}",
+        saved_genre_separators()
+    );
+}
