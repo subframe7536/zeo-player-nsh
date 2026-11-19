@@ -33,7 +33,7 @@ pub const PAGE_HEADER_PB: f32 = 20.0;
 /// 标题与副标题（歌手 / 说明）之间的竖向间距。
 pub const STACK_GAP: f32 = 4.0;
 /// 浮动播放条的最大宽度：窗口更宽时栏体居中、两侧留白。
-pub const BAR_MAX_W: f32 = 1100.0;
+pub const BAR_MAX_W: f32 = 880.0;
 /// 卡片内边距、圆角、封面圆角与封面到文字的间距（首页卡与分组网格共用）。
 pub const CARD_PAD: f32 = 8.0;
 pub const CARD_RADIUS: f32 = 12.0;
