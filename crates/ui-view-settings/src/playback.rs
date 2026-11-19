@@ -4,7 +4,7 @@ use nsh_core::prelude::*;
 
 use super::{pref_row, setting_section};
 use zeo_ui_components::button::{Size, Variant, text_button};
-use zeo_ui_components::form::{SelectOption, input_field, select};
+use zeo_ui_components::form::{SelectOption, input_field, select, switch};
 use zeo_ui_components::slider::{SliderStyle, slider};
 use zeo_ui_store::store;
 use zeo_ui_store::theme::*;
@@ -14,24 +14,22 @@ pub(crate) fn playback_section() -> View {
     let s = store();
     setting_section(
         "淡入淡出",
-        "播放、暂停、拖动进度和切歌时，音量在这段时间里渐变，不会突然响起或戛然而止。一首自然播完接下一首时无缝接上。",
-        None,
+        "播放、暂停与切歌时音量渐变，自然接曲无缝衔接；0 为关闭，最大 5000。",
+        Some(
+            int_field(
+                "淡入淡出时长",
+                "毫秒",
+                5000,
+                move || s.library.with(|l| l.config.fade_ms),
+                zeo_ui_store::set_fade_ms,
+            )
+            .into_element(),
+        ),
     )
-    .child(int_row(
-        "淡入淡出时长",
-        "0 为关闭，最大 5000 毫秒。",
-        "淡入淡出时长",
-        "毫秒",
-        5000,
-        move || s.library.with(|l| l.config.fade_ms),
-        zeo_ui_store::set_fade_ms,
-    ))
 }
 
-/// 整数输入行：标题 + 说明 | 草稿制数字输入 + 单位（非法回退，提交钳到 `max`）。
-fn int_row(
-    title: &'static str,
-    desc: &'static str,
+/// 整数输入组：草稿制数字输入 + 单位（非法回退，提交钳到 `max`）。
+fn int_field(
     label: &'static str,
     unit: &'static str,
     max: u32,
@@ -61,6 +59,29 @@ fn int_row(
         .on_blur(move || commit());
     view()
         .flex_row()
+        .items_center()
+        .gap(px(10.0))
+        .child(field)
+        .child(
+            text(unit)
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .text_color(muted_fg()),
+        )
+}
+
+/// 整数输入行：标题 + 说明 | 输入组。
+fn int_row(
+    title: &'static str,
+    desc: &'static str,
+    label: &'static str,
+    unit: &'static str,
+    max: u32,
+    get: impl Fn() -> u32 + Copy + 'static,
+    set: impl Fn(u32) + Copy + 'static,
+) -> View {
+    view()
+        .flex_row()
         .flex_wrap()
         .items_center()
         .gap(px(16.0))
@@ -78,13 +99,7 @@ fn int_row(
                 )
                 .child(text(desc).text_size(px(12.0)).text_color(muted_fg())),
         )
-        .child(field)
-        .child(
-            text(unit)
-                .text_size(px(13.0))
-                .line_height(px(13.0))
-                .text_color(muted_fg()),
-        )
+        .child(int_field(label, unit, max, get, set))
 }
 
 /// 播放统计：听过多少算一次播放（用于首页的统计与排行）。
@@ -92,12 +107,12 @@ pub(crate) fn stats_section() -> View {
     let s = store();
     setting_section(
         "播放统计",
-        "听过多少才算一次播放（用于首页的统计与排行）。两个条件任一满足即计；填 0 表示不用该条件；都是 0 则开始播放即计一次。",
+        "两个条件任一满足即计一次播放；填 0 停用该条件，全 0 则开播即计。",
         None,
     )
     .child(int_row(
         "最少播放百分比",
-        "听到整首的这个比例就算播放过一次。",
+        "听到整首的这个比例即计一次。",
         "最少播放百分比",
         "%",
         100,
@@ -109,7 +124,7 @@ pub(crate) fn stats_section() -> View {
     ))
     .child(int_row(
         "最少播放时长",
-        "实际播出这么多秒就算播放过一次（拖动进度条不计入）。",
+        "实际播出这么多秒即计一次（拖动不计）。",
         "最少播放时长",
         "秒",
         3600,
@@ -124,12 +139,18 @@ pub(crate) fn stats_section() -> View {
 /// 输出设备：拔下耳机或切换系统默认输出设备时的行为。
 pub(crate) fn device_section() -> View {
     let s = store();
-    setting_section("输出设备", "拔下耳机或切换系统默认输出设备时的行为。", None).child(pref_row(
+    setting_section(
         "设备变化时暂停",
-        "关闭后会在新的默认设备上继续播放。设备全部断开时总会暂停。",
-        move || s.library.with(|l| l.config.pause_on_device_change),
-        zeo_ui_store::set_pause_on_device_change,
-    ))
+        "关闭后在新默认设备上继续播放；全断开时总会暂停。",
+        Some(
+            switch(
+                move || s.library.with(|l| l.config.pause_on_device_change),
+                "设备变化时暂停",
+                zeo_ui_store::set_pause_on_device_change,
+            )
+            .into_element(),
+        ),
+    )
 }
 
 /// dB 输入行：标题 + 说明 | 草稿制数字输入 + `dB`（−15…+15，非法回退）。
@@ -201,23 +222,24 @@ pub(crate) fn replaygain_section() -> View {
     use zeo_engine::audio::ReplayGainMode;
     let s = store();
     let cfg = move || s.library.with(|l| l.config.replaygain);
-    const MODES: &[(ReplayGainMode, &str)] = &[
-        (ReplayGainMode::Off, "关闭"),
-        (ReplayGainMode::Track, "按曲目"),
-        (ReplayGainMode::Album, "按专辑"),
+    const MODES: &[(ReplayGainMode, &str, &str)] = &[
+        (ReplayGainMode::Off, "关闭", "不调整响度"),
+        (ReplayGainMode::Track, "按曲目", "每首各自拉平"),
+        (ReplayGainMode::Album, "按专辑", "同张专辑同响度"),
     ];
     let on = move || cfg().mode != ReplayGainMode::Off;
     setting_section(
         "ReplayGain",
-        "按曲目或专辑里的 ReplayGain 标签调整音量，让不同专辑听起来一样响。只读取已有标签，不会扫描计算。",
+        "按曲目标签统一响度（只读已有标签，不扫描计算）。",
         None,
     )
     .child(
-        zeo_ui_components::radio::group_row().children(MODES.iter().map(
-            |&(mode, label)| {
-                zeo_ui_components::radio::item(
+        zeo_ui_components::radio::group_cards().children(MODES.iter().map(
+            |&(mode, label, hint)| {
+                zeo_ui_components::radio::card(
                     move || cfg().mode == mode,
                     label,
+                    hint,
                     move || edit_replaygain(|c| c.mode = mode),
                 )
             },
@@ -398,66 +420,71 @@ pub(crate) fn eq_section() -> View {
     let s = store();
     let cfg = move || s.library.with(|l| l.config.eq);
     let on = move || cfg().enabled;
-    setting_section("均衡器", "按频段提升或衰减音量。拖动立即生效。", None)
-        .child(pref_row(
-            "启用均衡器",
-            "对正在播放的音频实时应用下面的频段增益。",
-            move || s.library.with(|l| l.config.eq.enabled),
-            eq_enabled_set,
-        ))
-        .child(when(on, move || {
-            let mut faders = view().flex_1().flex_row().child(eq_fader(
-                "前级",
-                "均衡器 前级",
-                move || s.library.with(|l| l.config.eq.preamp_db),
-                |c, db| c.preamp_db = db,
+    setting_section(
+        "均衡器",
+        "按频段提升或衰减音量，拖动立即生效。",
+        Some(
+            switch(
+                move || s.library.with(|l| l.config.eq.enabled),
+                "均衡器",
+                eq_enabled_set,
+            )
+            .into_element(),
+        ),
+    )
+    .child(when(on, move || {
+        let mut faders = view().flex_1().flex_row().child(eq_fader(
+            "前级",
+            "均衡器 前级",
+            move || s.library.with(|l| l.config.eq.preamp_db),
+            |c, db| c.preamp_db = db,
+        ));
+        for (i, label) in EQ_LABELS.iter().enumerate() {
+            faders = faders.child(eq_fader(
+                label,
+                EQ_A11Y[i],
+                move || s.library.with(|l| l.config.eq.bands[i]),
+                move |c, db| c.bands[i] = db,
             ));
-            for (i, label) in EQ_LABELS.iter().enumerate() {
-                faders = faders.child(eq_fader(
-                    label,
-                    EQ_A11Y[i],
-                    move || s.library.with(|l| l.config.eq.bands[i]),
-                    move |c, db| c.bands[i] = db,
-                ));
-            }
-            let options: Vec<SelectOption> = zeo_engine::eq::PRESETS
-                .iter()
-                .map(|&(name, bands)| SelectOption::new(name, move || edit_eq(|c| c.bands = bands)))
-                .collect();
-            view()
-                .gap(px(16.0))
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(10.0))
-                        .child(select(
-                            move || eq_preset_name(&s.library.with(|l| l.config.eq.bands)),
-                            "预设",
-                            options,
-                            160.0,
-                        ))
-                        .child(view().flex_1())
-                        .child(text_button(
-                            Variant::Ghost,
-                            Size::Sm,
-                            None,
-                            "重置",
-                            || {
-                                edit_eq(|c| {
-                                    c.preamp_db = 0.0;
-                                    c.bands = [0.0; 10];
-                                })
-                            },
-                        )),
-                )
-                .child(
-                    view()
-                        .flex_row()
-                        .w_full()
-                        .gap(px(10.0))
-                        .child(db_scale())
-                        .child(faders),
-                )
-        }))
+        }
+        let options: Vec<SelectOption> = zeo_engine::eq::PRESETS
+            .iter()
+            .map(|&(name, bands)| SelectOption::new(name, move || edit_eq(|c| c.bands = bands)))
+            .collect();
+        view()
+            .gap(px(16.0))
+            .child(
+                view()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(select(
+                        move || eq_preset_name(&s.library.with(|l| l.config.eq.bands)),
+                        "预设",
+                        options,
+                        160.0,
+                    ))
+                    .child(view().flex_1())
+                    .child(text_button(
+                        Variant::Ghost,
+                        Size::Sm,
+                        None,
+                        "重置",
+                        || {
+                            edit_eq(|c| {
+                                c.preamp_db = 0.0;
+                                c.bands = [0.0; 10];
+                            })
+                        },
+                    )),
+            )
+            .child(
+                view()
+                    .flex_row()
+                    .w_full()
+                    .gap(px(10.0))
+                    .child(db_scale())
+                    .child(faders),
+            )
+    }))
 }

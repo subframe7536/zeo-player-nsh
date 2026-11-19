@@ -2,27 +2,39 @@
 
 use nsh_core::prelude::*;
 
-use super::{pref_row, setting_section};
+use super::setting_section;
 use zeo_ui_store::store;
 
-/// 封面来源：本地同名图片 / 内嵌封面的优先序。
-pub(crate) fn covers_source_section() -> View {
+/// 本地同名图片优先于内嵌封面。
+pub(crate) fn local_first_section() -> View {
     let s = store();
     setting_section(
-        "封面来源",
-        "封面可以来自曲目同目录的同名图片，或音频文件的内嵌封面。",
-        None,
-    )
-    .child(pref_row(
         "本地图片优先",
-        "使用同目录的同名图片（jpg / jpeg / png / webp）作为封面；关闭则优先内嵌封面。",
-        move || s.library.with(|l| l.config.prefer_local_covers),
-        zeo_ui_store::set_prefer_local_covers,
-    ))
-    .child(pref_row(
+        "同目录的同名图片（jpg / jpeg / png / webp）优先于内嵌封面。",
+        Some(
+            zeo_ui_components::form::switch(
+                move || s.library.with(|l| l.config.prefer_local_covers),
+                "本地图片优先",
+                zeo_ui_store::set_prefer_local_covers,
+            )
+            .into_element(),
+        ),
+    )
+}
+
+/// 列表封面开关：关掉不加载封面，大曲库滚动更省内存。
+pub(crate) fn list_covers_section() -> View {
+    let s = store();
+    setting_section(
         "在列表中显示封面",
-        "关闭后曲目行、网格与队列只显示标题首字，不再解码封面，滚动大曲库更省内存。",
-        move || s.library.with(|l| l.config.show_covers),
-        zeo_ui_store::set_show_covers,
-    ))
+        "关闭后列表不加载封面（显示首字占位），大曲库滚动更省内存。",
+        Some(
+            zeo_ui_components::form::switch(
+                move || s.library.with(|l| l.config.show_covers),
+                "在列表中显示封面",
+                zeo_ui_store::set_show_covers,
+            )
+            .into_element(),
+        ),
+    )
 }

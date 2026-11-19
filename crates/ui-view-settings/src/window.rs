@@ -21,7 +21,7 @@ pub(crate) fn window_section() -> View {
     setting_section(
         "关闭窗口时",
         if supported {
-            "最小化到托盘后音乐继续播放，界面释放以节省内存；托盘图标可以打开窗口、播放 / 暂停、切歌和退出。"
+            "最小化到托盘后继续播放，界面释放省内存；托盘图标可开窗口、切歌、退出。"
         } else {
             "这个平台还没有托盘，关闭窗口即退出。"
         },
@@ -32,14 +32,14 @@ pub(crate) fn window_section() -> View {
             .child(option(
                 CloseAction::Ask,
                 "每次询问",
-                "每次关闭都询问，除非勾了「记住选择」",
+                "可勾「记住选择」不再询问",
             ))
             .child(option(CloseAction::Tray, "最小化到托盘", "继续播放"))
             .child(option(CloseAction::Quit, "退出", "停止播放并退出"))
     }))
     .child(pref_row(
         "记住窗口大小和位置",
-        "重新打开时恢复上次的窗口大小与位置；关掉后已存的位置丢弃。",
+        "关闭后窗口大小与位置不再保存。",
         move || s.library.with(|l| l.config.remember_frame),
         zeo_ui_store::set_remember_frame,
     ))

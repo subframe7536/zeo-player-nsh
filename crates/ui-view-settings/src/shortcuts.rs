@@ -317,7 +317,7 @@ fn global_block(
                     .pb(px(4.0)),
             )
             .child(
-                text("窗口最小化到托盘也生效；媒体控制键由系统接管（Windows 低级键盘钩子 / macOS 媒体会话），不在此列。")
+                text("窗口最小化到托盘也生效；媒体控制键由系统接管，不在此列。")
                     .text_size(px(11.0))
                     .line_height(px(15.0))
                     .text_color(faint())
@@ -371,7 +371,7 @@ pub(crate) fn shortcuts_section() -> View {
             move || {
                 let answer = nsh_base::alert_dialog()
                     .title("还原默认快捷键？")
-                    .description("所有自定义键位与全局快捷键都会被清除，恢复为默认绑定。")
+                    .description("所有自定义键位都会清除，恢复默认绑定。")
                     .cancel("cancel", "取消")
                     .destructive("reset", "还原")
                     .show();

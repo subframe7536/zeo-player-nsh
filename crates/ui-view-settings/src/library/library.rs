@@ -124,7 +124,7 @@ pub(crate) fn library_section() -> View {
 
     setting_section(
         "曲库",
-        "索引保存在本机，启动时自动扫描。「重建曲库」会清空标签和封面缓存，从文件重新读取全部曲目。",
+        "索引保存在本机；「重建曲库」清空标签与封面缓存、从文件重新读取。",
         Some(actions.into_element()),
     )
     .child(when(scanning, bar).otherwise(stats))

@@ -12,6 +12,9 @@ pub(crate) fn grouped(n: u64) -> String {
     out
 }
 
+/// 随机推荐一批的首数：进页抽一次、「换一批」重抽，右侧编号列表同批。
+pub(crate) const FEATURED_N: usize = 5;
+
 /// 抽 `n` 首：Fisher–Yates 洗牌取前 n（xorshift64 种子，同
 /// `engine::audio`，不引 rand）。
 pub(crate) fn pick(tracks: &[TrackEntry], n: usize) -> Vec<TrackEntry> {

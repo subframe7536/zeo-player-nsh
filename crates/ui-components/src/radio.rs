@@ -119,7 +119,10 @@ pub fn card(
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(fg()),
                 )
-                .child(text(hint).text_size(px(14.0)).text_color(muted_fg())),
+                .child(
+                    (!hint.is_empty())
+                        .then(|| text(hint).text_size(px(14.0)).text_color(muted_fg())),
+                ),
         )
 }
 

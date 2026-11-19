@@ -8,7 +8,7 @@ use zeo_ui_components::button::RADIUS_MD;
 use zeo_ui_components::form::trigger_chevron;
 use zeo_ui_components::icons::{Icon, icon};
 use zeo_ui_store::theme::*;
-use zeo_ui_store::{Same, accent, set_theme_color, store};
+use zeo_ui_store::{Same, set_theme_color, store};
 
 /// 外观：跟随系统 / 固定浅色 / 固定深色（同一行右侧的下拉）。
 pub(crate) fn appearance_section() -> View {
@@ -53,18 +53,10 @@ fn appearance_select() -> AnyElement {
         .collect::<Vec<_>>();
     select_with_trigger(current, "外观", options, 110.0, Some(trigger))
 }
-pub const PRESETS: &[(u32, &'static str)] = &[
-    (0xe5263f, "红"),
-    (0xea580c, "橙"),
-    (0x16a34a, "绿"),
-    (0x2563eb, "蓝"),
-    (0x9333ea, "紫"),
-];
-
-/// 主题色：支持配置「黑白」、「封面」、「自定义」（预设强调色与十六进制颜色代码）。
+/// 主题色：「黑白」/「封面」/「自定义」卡片；选中「自定义」时标题右侧的
+/// 色块打开取色器弹层（HSB 区域 + 色相条 + HEX 字段，无预设）。
 /// 欢迎指南的「主题色」一步也复用它（`zeo-ui-view-welcome`）。
 pub fn accent_section() -> View {
-    use zeo_ui_components::form::input_field;
     use zeo_ui_components::radio;
 
     let s = store();
@@ -79,164 +71,130 @@ pub fn accent_section() -> View {
     let is_cover = move || matches!(current_theme(), ThemeColor::Cover);
     let is_custom = move || matches!(current_theme(), ThemeColor::Custom(_));
 
-    let active_rgb = move || match current_theme() {
-        ThemeColor::Custom(rgb) => rgb,
-        _ => last_custom.get(),
-    };
-
-    let hex_draft = signal(format!("#{:06X}", active_rgb()));
-    let computed_rgb = computed(active_rgb);
-    effect(move || {
-        hex_draft.set(format!("#{:06X}", computed_rgb.get()));
-    });
-
-    let radio_group = radio::group_row()
-        .child(radio::item(is_neutral, "黑白", move || {
-            set_theme_color(ThemeColor::Neutral)
-        }))
-        .child(radio::item(is_cover, "封面", move || {
-            set_theme_color(ThemeColor::Cover)
-        }))
-        .child(radio::item(is_custom, "自定义", move || {
-            set_theme_color(ThemeColor::Custom(last_custom.get()))
-        }));
-
-    let cover_hint = move || {
-        view()
-            .flex_row()
-            .items_center()
-            .gap(px(10.0))
-            .child(
-                view()
-                    .size(px(20.0))
-                    .rounded_full()
-                    .bg(move || accent().unwrap_or_else(muted))
-                    .transition_colors()
-                    .duration(300.0)
-                    .items_center()
-                    .justify_center()
-                    .child(icon(Icon::Disc, 12.0, move || {
-                        if accent().is_some() {
-                            AdaptiveColor::rgb(0xffffff, 0xffffff)
-                        } else {
-                            muted_fg()
-                        }
-                    })),
-            )
-            .child(
-                text(move || {
-                    if accent().is_some() {
-                        "当前曲目封面主色调（已启用动态强调色与底色微调）"
-                    } else {
-                        "提取当前曲目封面主色调；未播放或无封面时使用黑白"
-                    }
-                })
-                .text_size(px(12.0))
-                .line_height(px(12.0))
-                .text_color(muted_fg()),
-            )
-    };
-
-    let neutral_hint = move || {
-        view().flex_row().items_center().gap(px(10.0)).child(
-            text("使用主题默认的黑白色调，在浅色外观下为主黑色、深色外观下为主白色。")
-                .text_size(px(12.0))
-                .line_height(px(12.0))
-                .text_color(muted_fg()),
-        )
-    };
-
-    let custom_panel = move || {
-        view().gap(px(12.0)).child(
-            view()
-                .flex_row()
-                .flex_wrap()
-                .items_center()
-                .gap(px(16.0))
-                .child(
-                    // 预设颜色圆形色块
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(8.0))
-                        .children(PRESETS.iter().map(|&(rgb, label)| {
-                            let on = move || is_custom() && active_rgb() == rgb;
-                            nsh_base::button()
-                                .size(px(24.0))
-                                .rounded_full()
-                                .items_center()
-                                .justify_center()
-                                .bg(move || custom_accent(rgb))
-                                .transition_colors()
-                                .duration(300.0)
-                                .accessibility_label(SharedString::from(format!("主题色：{label}")))
-                                .selected(on)
-                                .hover(|st| st.opacity(0.85))
-                                .active(|st| st.opacity(0.7))
-                                .on_press(move |_: &()| {
-                                    last_custom.set(rgb);
-                                    set_theme_color(ThemeColor::Custom(rgb));
-                                })
-                                .child(
-                                    icon(Icon::Check, 12.0, move || {
-                                        AdaptiveColor::rgb(0xffffff, 0xffffff)
-                                    })
-                                    .opacity(move || if on() { 1.0_f32 } else { 0.0_f32 }),
-                                )
-                                .into_element()
-                        })),
-                )
-                .child(view().w(px(1.0)).h(px(18.0)).bg(border()).flex_shrink_0())
-                .child(
-                    // 自定义 HEX 输入与预览色块
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(
-                            view()
-                                .size(px(24.0))
-                                .rounded(px(6.0))
-                                .border_1()
-                                .border_color(border())
-                                .bg(move || custom_accent(active_rgb()))
-                                .transition_colors()
-                                .duration(300.0)
-                                .shadow_xs(),
-                        )
-                        .child(
-                            input_field(true)
-                                .w(px(96.0))
-                                .value(move || hex_draft.get())
-                                .placeholder("#2563EB")
-                                .label("自定义颜色代码")
-                                .on_change(move |t: &str| {
-                                    hex_draft.set(t.to_owned());
-                                    let clean = t.trim().trim_start_matches('#');
-                                    if clean.len() == 6 {
-                                        if let Ok(rgb) = u32::from_str_radix(clean, 16) {
-                                            last_custom.set(rgb);
-                                            set_theme_color(ThemeColor::Custom(rgb));
-                                        }
-                                    }
-                                })
-                                .on_blur(move || {
-                                    hex_draft.set(format!("#{:06X}", active_rgb()));
-                                }),
-                        ),
-                ),
-        )
-    };
+    let radio_group = radio::group_cards()
+        .child(radio::card(
+            is_neutral,
+            "黑白",
+            "浅色下主黑、深色下主白",
+            move || set_theme_color(ThemeColor::Neutral),
+        ))
+        .child(radio::card(
+            is_cover,
+            "封面",
+            "取当前曲目封面主色调",
+            move || set_theme_color(ThemeColor::Cover),
+        ))
+        .child(radio::card(
+            is_custom,
+            "自定义",
+            "预设色或颜色代码",
+            move || set_theme_color(ThemeColor::Custom(last_custom.get())),
+        ));
 
     setting_section(
         "主题色",
-        "按钮与选中态的强调色：支持黑白、跟随当前曲目封面或自定义颜色。",
-        None,
+        "按钮与选中态的颜色。",
+        Some(when(is_custom, move || custom_picker(last_custom)).into_element()),
     )
     .child(radio_group)
-    .child(when(is_neutral, neutral_hint))
-    .child(when(is_cover, cover_hint))
-    .child(when(is_custom, custom_panel))
+}
+
+/// 「自定义」取色器：标题右侧的色块触发器 + 弹层（HSB 区域 + 色相条 +
+/// HEX 字段，无预设）。拖动中只写 `s.accent` 实时预览（不广播
+/// `s.library`、不落盘，同 `apply_eq_live`），`on_change_end` 才走
+/// `set_theme_color` 全量收尾。
+fn custom_picker(last_custom: Signal<u32>) -> AnyElement {
+    let s = store();
+    nsh_base::popover()
+        .placement(Placement::Bottom)
+        .align(Align::End)
+        .offset(px(8.0))
+        .popup_style(|st| {
+            st.p(px(12.0))
+                .rounded(px(10.0))
+                .border_1()
+                .border_color(border())
+                .bg(nsh_base::theme().popover)
+                .shadow_lg()
+        })
+        .trigger(
+            view()
+                .size(px(28.0))
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(border())
+                .bg(move || custom_accent(last_custom.get()))
+                .transition_colors()
+                .duration(150.0)
+                .shadow_xs()
+                .role(AccessibilityRole::Button)
+                .label("自定义颜色"),
+        )
+        .child(
+            nsh_base::color_picker()
+                .value(move || Some(rgb(last_custom.get()).to_hsla()))
+                .on_change(move |e: &nsh_base::ColorPickerEvent| {
+                    if let nsh_base::ColorPickerEvent::Change(v, _) = e {
+                        let rgb_v = u32::from(v.to_rgb()) >> 8;
+                        last_custom.set(rgb_v);
+                        s.accent.set(Some(custom_accent(rgb_v)));
+                    }
+                })
+                .on_change_end(move |e: &nsh_base::ColorPickerEvent| {
+                    if let nsh_base::ColorPickerEvent::ChangeEnd(v, _) = e {
+                        let rgb_v = u32::from(v.to_rgb()) >> 8;
+                        last_custom.set(rgb_v);
+                        set_theme_color(ThemeColor::Custom(rgb_v));
+                    }
+                })
+                .child(
+                    view()
+                        .gap(px(10.0))
+                        .child(
+                            nsh_base::color_area()
+                                .accessibility_label("自定义颜色")
+                                .w(px(216.0))
+                                .h(px(140.0))
+                                .panel_style(|st| st.rounded(px(6.0)))
+                                .fill_thumb(true)
+                                .thumb_style(|st| {
+                                    st.size(px(14.0))
+                                        .rounded_full()
+                                        .border_2()
+                                        .border_color(AdaptiveColor::rgb(0xffffff, 0xffffff))
+                                        .shadow_xs()
+                                }),
+                        )
+                        .child(
+                            nsh_base::color_slider()
+                                .accessibility_label("色相")
+                                .w(px(216.0))
+                                .h(px(16.0))
+                                .justify_center()
+                                .track_style(|st| st.h(px(10.0)).rounded_full())
+                                .fill_thumb(true)
+                                .thumb_style(|st| {
+                                    st.size(px(14.0))
+                                        .rounded_full()
+                                        .border_2()
+                                        .border_color(AdaptiveColor::rgb(0xffffff, 0xffffff))
+                                        .shadow_xs()
+                                }),
+                        )
+                        .child(
+                            nsh_base::color_field()
+                                .accessibility_label("自定义颜色代码")
+                                .h(px(32.0))
+                                .px(px(10.0))
+                                .rounded(px(RADIUS_MD))
+                                .border_1()
+                                .border_color(nsh_base::theme().input)
+                                .bg(nsh_base::theme().card)
+                                .shadow_xs(),
+                        ),
+                ),
+        )
+        .into_element()
 }
 /// 字体：系统字体或任一已安装字体（同一行右侧的下拉，带搜索与逐字体预览）。
 /// 字体列表懒加载：打开弹层才读取已安装字体；关闭或离开设置页时整块销毁
@@ -244,7 +202,7 @@ pub fn accent_section() -> View {
 pub(crate) fn font_section() -> View {
     setting_section(
         "字体",
-        "整个界面（包括歌词）换用所选字体，立即生效。",
+        "整个界面换用所选字体，立即生效。",
         Some(font_select()),
     )
 }

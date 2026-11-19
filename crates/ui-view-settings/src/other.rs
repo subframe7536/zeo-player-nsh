@@ -3,7 +3,7 @@
 use nsh_core::prelude::*;
 
 use super::setting_section;
-use zeo_ui_components::button::{Size, Variant, outline_button, text_button};
+use zeo_ui_components::button::{Size, Variant, text_button};
 use zeo_ui_components::icons::{Icon, icon};
 use zeo_ui_store::store;
 use zeo_ui_store::theme::*;
@@ -116,41 +116,55 @@ fn separators_section(
         out
     });
 
-    let custom = view()
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .child(
-            zeo_ui_components::form::input_field(true)
-                .w(px(160.0))
-                .value(move || draft.get())
-                .placeholder("其它分隔符，如 ・")
-                .on_change(move |text: &str| draft.set(text.to_owned()))
-                .on_submit(move |_: &str| add_custom())
-                .on_blur(move || add_custom()),
-        )
-        .child(outline_button(Icon::Plus, "添加", add_custom))
-        .child(view().flex_1())
-        .child(text_button(
-            Variant::Ghost,
-            Size::Sm,
-            None,
-            "恢复默认",
-            move || {
-                set_separators(defaults.iter().map(|s| (*s).to_owned()).collect());
-            },
-        ));
-
-    setting_section(title, desc, None)
-        .child(view().flex_row().flex_wrap().gap(px(8.0)).child(chips))
-        .child(custom)
+    setting_section(
+        title,
+        desc,
+        Some(
+            text_button(
+                Variant::Outline,
+                Size::Sm,
+                None,
+                "恢复默认",
+                move || {
+                    set_separators(defaults.iter().map(|s| (*s).to_owned()).collect());
+                },
+            )
+            .into_element(),
+        ),
+    )
+    .child(
+        // chips + 行尾输入：与 32px 高的 chips 同排同高。
+        view()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .gap(px(8.0))
+            .child(chips)
+            .child(
+                zeo_ui_components::form::input_field(true)
+                    .w(px(128.0))
+                    .h(px(32.0))
+                    .value(move || draft.get())
+                    .placeholder("其它分隔符，如 ・")
+                    .on_change(move |text: &str| draft.set(text.to_owned()))
+                    .on_submit(move |_: &str| add_custom())
+                    .on_blur(move || add_custom()),
+            )
+            .child(text_button(
+                Variant::Outline,
+                Size::Sm,
+                Some(Icon::Plus),
+                "添加",
+                add_custom,
+            )),
+    )
 }
 
 pub(crate) fn artist_separators_section() -> View {
     let s = store();
     separators_section(
         "艺术家分隔符",
-        "曲目有多个艺术家时，按下面选中的分隔符拆开，并在艺术家浏览中分别呈现。修改后立即生效，不用重新扫描。",
+        "多值艺术家按选中的分隔符拆分，立即生效。",
         move || s.library.with(|l| l.config.artist_separators.clone()),
         zeo_ui_store::set_artist_separators,
         zeo_types::config::DEFAULT_ARTIST_SEPARATORS,
@@ -161,7 +175,7 @@ pub(crate) fn genre_separators_section() -> View {
     let s = store();
     separators_section(
         "标签分隔符",
-        "标签解析自曲目的流派（genre）信息。一个流派里有多个值时，按下面选中的分隔符拆开，并去掉首尾空格。修改后立即生效，不用重新扫描。",
+        "多值流派按选中的分隔符拆分（去首尾空格），立即生效。",
         move || s.library.with(|l| l.config.genre_separators.clone()),
         zeo_ui_store::set_separators,
         zeo_types::config::DEFAULT_SEPARATORS,

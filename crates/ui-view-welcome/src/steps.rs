@@ -28,7 +28,7 @@ pub(crate) fn welcome() -> View {
                 .mt(px(12.0)),
         )
         .child(
-            text("本地优先的音乐播放器：扫描你电脑上的音乐文件夹，离线播放，整理标签与歌词，数据都留在本机。")
+            text("本地音乐播放器：扫描你电脑上的音乐文件夹，离线播放，整理标签与歌词，数据都留在本机。")
                 .text_size(px(16.0))
                 .text_color(muted_fg())
                 .text_center()

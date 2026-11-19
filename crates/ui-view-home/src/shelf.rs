@@ -160,7 +160,8 @@ pub(crate) fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement
         let art = move || cover_for(&path.get(), 400.0);
         let title = first.display_title().to_owned();
         let queue = list.clone();
-        let reroll = move || featured.set(Rc::new(pick(&store().tracks.get_untracked(), 6)));
+        let reroll =
+            move || featured.set(Rc::new(pick(&store().tracks.get_untracked(), FEATURED_N)));
         // 列表行：序号 + 曲名 + 右对齐歌手；点行即以本批为队列从该行播。
         // 列直接当卡片的 flex 子项，属性直达——`when` 的 Region 夹在
         // 中间时内层 flex 属性够不到、行撑不满会留下右缘空档。整列
@@ -175,7 +176,7 @@ pub(crate) fn featured_card(featured: Signal<Rc<Vec<TrackEntry>>>) -> AnyElement
             .justify_center()
             .gap(px(2.0))
             .style_when(move || content_break() < 880.0, |s| s.hidden());
-        for (i, t) in list.iter().take(6).enumerate() {
+        for (i, t) in list.iter().take(FEATURED_N).enumerate() {
             let row_track = t.clone();
             let row_list = list.clone();
             rows = rows.child(

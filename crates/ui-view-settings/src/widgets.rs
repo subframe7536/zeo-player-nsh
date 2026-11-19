@@ -25,7 +25,8 @@ pub(crate) fn setting_section(
                     )
                     .child(text(body).text_size(px(13.0)).text_color(muted_fg())),
             )
-            .child(action.map(|a| view().flex_row().gap(px(8.0)).child(a))),
+            // `ml(auto)`：标题列太宽把操作挤到第二行时，它仍贴右缘。
+            .child(action.map(|a| view().flex_row().gap(px(8.0)).ml(auto()).child(a))),
     )
 }
 

@@ -23,7 +23,7 @@ pub(crate) fn app_section() -> View {
     };
     setting_section(
         "应用信息",
-        "本地优先的桌面音乐播放器，纯 Rust NSH 应用。",
+        "本地音乐播放器。",
         Some(text_button(Variant::Outline, Size::Sm, None, "项目主页", open_repo).into_element()),
     )
     .child(
@@ -145,27 +145,21 @@ pub(crate) fn update_section() -> View {
         })
         .into_element()
     };
-    let desc = move || {
-        if zeo_ui_store::updates_supported() {
-            "从 GitHub Releases 检查新版本；下载的归档校验 SHA-256 后原地替换，重启生效。"
-        } else {
-            "开发运行没有更新渠道（打包构建里从 GitHub Releases 检查新版本）。"
-        }
-    };
+    let desc = "开发运行没有更新渠道；打包构建从 GitHub Releases 检查新版本。";
     let section = setting_section(
         "应用更新",
-        "新版本从 GitHub Releases 下载，校验后原地替换。",
+        "从 GitHub Releases 检查与下载，校验后原地替换。",
         Some(action()),
     );
     let section = if zeo_ui_store::updates_supported() {
         section.child(status()).child(notes()).child(pref_row(
             "自动检查更新",
-            "启动时在后台检查一次（不打扰、可关）。",
+            "启动时后台检查一次。",
             move || s.library.with(|l| l.config.auto_check_updates),
             zeo_ui_store::set_auto_check_updates,
         ))
     } else {
-        section.child(text(desc()).text_size(px(13.0)).text_color(muted_fg()))
+        section.child(text(desc).text_size(px(13.0)).text_color(muted_fg()))
     };
     section
 }
@@ -446,7 +440,7 @@ pub(crate) fn welcome_section() -> View {
     };
     setting_section(
         "欢迎指南",
-        "重新查看首次启动时的引导：添加音乐文件夹、选择主题色与功能一览。",
+        "重新查看首次启动的引导页。",
         Some(text_button(Variant::Outline, Size::Sm, None, "重新查看", reopen).into_element()),
     )
 }

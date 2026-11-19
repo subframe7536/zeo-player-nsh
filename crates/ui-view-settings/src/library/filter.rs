@@ -48,21 +48,17 @@ pub(crate) fn filter_section() -> View {
             )
             .into_element()
     };
-    setting_section(
-        "音频过滤",
-        "低于时长或大小阈值的音频不进曲库（采样、铃声、碎片文件等），修改后自动重新扫描。",
-        None,
-    )
-    .child(row(
-        "最小时长",
-        DURATIONS,
-        |c| c.min_duration_secs,
-        zeo_ui_store::set_min_duration_secs,
-    ))
-    .child(row(
-        "最小大小",
-        SIZES,
-        |c| c.min_size_kb,
-        zeo_ui_store::set_min_size_kb,
-    ))
+    setting_section("音频过滤", "低于阈值的音频不进曲库，修改后自动重扫。", None)
+        .child(row(
+            "最小时长",
+            DURATIONS,
+            |c| c.min_duration_secs,
+            zeo_ui_store::set_min_duration_secs,
+        ))
+        .child(row(
+            "最小大小",
+            SIZES,
+            |c| c.min_size_kb,
+            zeo_ui_store::set_min_size_kb,
+        ))
 }

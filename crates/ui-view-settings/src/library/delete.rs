@@ -3,12 +3,18 @@ use super::*;
 /// 「删除文件」节：曲目右键「删除文件…」是否经过回收站。
 pub(crate) fn delete_section() -> View {
     let s = store();
-    setting_section("删除文件", "曲目右键菜单「删除文件…」的行为。", None).child(pref_row(
+    setting_section(
         "直接删除文件",
-        "开启后删除文件不经过回收站（不可恢复）；关闭时文件先移到回收站。",
-        move || s.library.with(|l| l.config.delete_permanently),
-        zeo_ui_store::set_delete_permanently,
-    ))
+        "右键「删除文件…」时不经过回收站，不可恢复。",
+        Some(
+            form::switch(
+                move || s.library.with(|l| l.config.delete_permanently),
+                "直接删除文件",
+                zeo_ui_store::set_delete_permanently,
+            )
+            .into_element(),
+        ),
+    )
 }
 /// 文件夹监视开关与状态。
 pub(crate) fn watch_row() -> View {
@@ -18,15 +24,12 @@ pub(crate) fn watch_row() -> View {
         s.library.with(|l| {
             let w = &l.watcher;
             if !l.config.watch {
-                return "关闭时，文件夹里的变化要手动「扫描更新」才会出现。".to_owned();
+                return "关闭时文件夹变化要手动「扫描更新」。".to_owned();
             }
             if let Some(error) = &w.error {
                 return error.clone();
             }
-            let mut text = format!(
-                "正在监视 {} 个文件夹，新增、修改、删除或改名音频文件后自动扫描",
-                w.roots
-            );
+            let mut text = format!("正在监视 {} 个文件夹，有变化自动扫描", w.roots);
             if let Some(at) = w.last_rescan {
                 let ago = zeo_types::config::unix_now().saturating_sub(at);
                 let when = match ago {

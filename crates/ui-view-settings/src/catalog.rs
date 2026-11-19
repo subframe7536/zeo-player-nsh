@@ -45,15 +45,21 @@ pub(crate) const SECTIONS: &[Section] = &[
     },
     Section {
         pane: Pane::Library,
-        title: "删除文件",
+        title: "直接删除文件",
         keys: "删除 文件 回收站 永久删除 直接删除 曲目 右键 菜单",
         build: library::delete_section,
     },
     Section {
         pane: Pane::Covers,
-        title: "封面来源",
+        title: "本地图片优先",
         keys: "封面 图片 本地 同名 内嵌 优先 来源 cover jpg jpeg png webp 专辑",
-        build: covers::covers_source_section,
+        build: covers::local_first_section,
+    },
+    Section {
+        pane: Pane::Covers,
+        title: "在列表中显示封面",
+        keys: "封面 列表 显示 开关 省内存 解码 滚动 占位 首字",
+        build: covers::list_covers_section,
     },
     Section {
         pane: Pane::Playback,
@@ -69,7 +75,7 @@ pub(crate) const SECTIONS: &[Section] = &[
     },
     Section {
         pane: Pane::Playback,
-        title: "输出设备",
+        title: "设备变化时暂停",
         keys: "输出 设备 耳机 拔出 暂停 默认设备 声卡 蓝牙",
         build: playback::device_section,
     },
@@ -111,7 +117,7 @@ pub(crate) const SECTIONS: &[Section] = &[
     },
     Section {
         pane: Pane::Lyrics,
-        title: "歌词来源",
+        title: "本地歌词优先",
         keys: "歌词 本地 lrc 同名 内嵌 优先 来源",
         build: lyrics::lyrics_source_section,
     },

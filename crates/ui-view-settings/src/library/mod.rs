@@ -6,7 +6,7 @@ pub(crate) use nsh_core::prelude::*;
 
 pub(crate) use zeo_ui_views_base::{SEP, add_dropped, last_segment, total_duration, url_to_path};
 
-pub(crate) use crate::{note, pref_row, setting_section};
+pub(crate) use crate::{note, setting_section};
 
 pub(crate) use zeo_library::config::library_store;
 

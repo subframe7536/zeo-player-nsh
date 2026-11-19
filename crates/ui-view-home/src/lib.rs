@@ -56,7 +56,7 @@ pub fn Home() -> impl IntoElement {
                 || b.iter().any(|t| !tracks.iter().any(|x| x.path == t.path))
         });
         if stale {
-            featured.set(Rc::new(pick(&tracks, 6)));
+            featured.set(Rc::new(pick(&tracks, FEATURED_N)));
         }
     });
 
