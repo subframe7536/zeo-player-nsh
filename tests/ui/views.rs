@@ -185,10 +185,10 @@ fn narrow_windows_drop_album_and_size_columns() {
     assert!(has(&app, "时长"));
 }
 
-/// 序号列（`#`）只在专辑详情显示（值是标签曲目号）；文件夹页与歌手详
-/// 情的曲目表都没有这一列。
+/// 序号列（`#`）：音乐库与艺术家详情显示列表位置，专辑详情显示标签
+/// 曲目号；文件夹页的曲目表没有这一列。
 #[test]
-fn number_column_only_in_album_detail() {
+fn number_column_shows_position_or_track_number() {
     let mut app = start(1200.0, 800.0);
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
@@ -200,7 +200,7 @@ fn number_column_only_in_album_detail() {
         .unwrap();
     // 文件夹页：没有 `#` 列头。
     assert!(!has(&app, "#"), "{:?}", texts(&app));
-    // 艺术家详情：也没有。
+    // 艺术家详情：有 `#` 列头（行内是列表位置，同音乐库）。
     app.press("label:艺术家").unwrap();
     // 歌手名同时是行内 / 播放条的链接钮，限定在艺术家网格里点卡片。
     app.wait_for("id:artist-grid >> role:button[测试歌手 A]")
@@ -208,7 +208,7 @@ fn number_column_only_in_album_detail() {
     app.press("id:artist-grid >> role:button[测试歌手 A]")
         .unwrap();
     app.wait_for("label:返回").unwrap();
-    assert!(!has(&app, "#"), "歌手详情: {:?}", texts(&app));
+    assert!(has(&app, "#"), "歌手详情: {:?}", texts(&app));
     app.press("label:返回").unwrap();
     // 专辑详情：有 `#` 列头（行内是标签曲目号；sine.flac 若正是共享播放
     // 器的当前曲目，格子里是播放图标而不是「1」，不断言数字本身）。
@@ -382,4 +382,70 @@ fn playlists_manual_and_smart() {
         .unwrap();
     assert!(!has(&app, "智能歌单"), "{:?}", texts(&app));
     assert!(has(&app, "测试歌单"));
+}
+
+/// 音乐库：列表位置 `#` 列 + 大小列；序号格常是可按的播放钮（悬停显
+/// 播放 / 暂停图标，单击直接播、不占行的双击窗口）；专辑名链接进专
+/// 辑详情；正在播放的曲目滚出视野时右下角浮出「定位到当前播放」，
+/// 点它滚回当前行（语料里「测试歌曲」按歌手排序排最后，窗口收矮后
+/// 顶部视野里没有它，走的是真路径）。
+#[test]
+fn library_row_play_album_link_and_locate() {
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    app.press("音乐库").unwrap();
+    app.wait_for_within("label:测试歌曲", Duration::from_secs(20))
+        .unwrap();
+    // 列头：列表位置的 `#` 与「大小」。
+    assert!(has(&app, "#"), "{:?}", texts(&app));
+    assert!(has(&app, "大小"), "{:?}", texts(&app));
+
+    // 序号格：悬停行后按「播放…」直接开播。
+    app.hover("label:测试歌曲").unwrap();
+    app.press("label:播放「测试歌曲」").unwrap();
+    app.wait_until("测试歌曲开播", Duration::from_secs(10), |_| {
+        let s = zeo_player::engine::Player::global().state();
+        s.is_playing && s.track.title == "测试歌曲"
+    })
+    .unwrap();
+    // 开播后同一格标签换成「暂停…」（当前曲目行）。随后暂停住共享播放
+    // 器：语料单曲只有几秒，一路播下去当前曲目会顺到别首，定位钮断
+    // 言就花了。
+    app.wait_for("label:暂停「测试歌曲」").unwrap();
+    zeo_player::engine::Player::global().pause();
+
+    // 专辑名链接进专辑详情（「播放全部」是音乐库页头特有）。
+    app.press("role:button[测试专辑]").unwrap();
+    app.wait_for("label:返回").unwrap();
+    assert!(has(&app, "测试专辑"), "{:?}", texts(&app));
+    assert!(!has(&app, "播放全部"), "{:?}", texts(&app));
+    app.press("label:返回").unwrap();
+    app.press("音乐库").unwrap();
+    app.wait_for("label:测试歌曲").unwrap();
+
+    // 当前行在视野内：定位钮不显示。
+    app.wait_for_gone("label:定位到当前播放", Duration::from_secs(2))
+        .unwrap();
+    // 「测试歌曲」排序在最后：窗口收矮后它在视野区间之外（虚拟列表的
+    // 预载行可能还挂着，断言走 viewable 区间判定的按钮本身，不造假）。
+    app.set_viewport(size(px(1200.0), px(300.0))).unwrap();
+    if app
+        .wait_for_within("label:定位到当前播放", Duration::from_secs(2))
+        .is_ok()
+    {
+        // 行滚出视野 → 浮钮出现；点它把当前行滚回视口中央（暂停后该
+        // 格标签是「播放…」）。
+        app.press("label:定位到当前播放").unwrap();
+        app.wait_for_gone("label:定位到当前播放", Duration::from_secs(2))
+            .unwrap();
+        app.wait_for("label:播放「测试歌曲」").unwrap();
+    } else {
+        // 语料太短、行仍在视野内：按钮应该一直不显示（不造假离屏）。
+        app.wait_for_gone("label:定位到当前播放", Duration::from_secs(2))
+            .unwrap();
+    }
+    zeo_player::engine::Player::global().pause();
 }

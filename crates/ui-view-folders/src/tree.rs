@@ -3,6 +3,7 @@ use super::*;
 /// 文件夹：面向文件，带大小列。
 pub(crate) const FOLDER_COLS: Columns = Columns {
     number: false,
+    index: false,
     cover: true,
     album: true,
     size: true,

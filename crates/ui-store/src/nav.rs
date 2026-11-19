@@ -107,6 +107,26 @@ pub fn open_artist(name: &str) {
     navigate(Nav::Artists);
 }
 
+/// 专辑的分组 key（专辑页 `group_by` 与曲目行的专辑名链接共用）：
+/// `album_artist` 非空用它、否则 `display_artist()`，`\0` 拼上专辑名。
+pub fn album_key(t: &TrackEntry) -> String {
+    let artist = if t.album_artist.is_empty() {
+        t.display_artist()
+    } else {
+        t.album_artist.as_str()
+    };
+    format!("{artist}\u{0}{}", t.display_album())
+}
+
+/// 打开「专辑」页并选中曲目所属专辑（曲目行的专辑名链接）。先退出
+/// 全屏：全屏播放页里也能直接用。
+pub fn open_album(t: &TrackEntry) {
+    let s = store();
+    s.album_sel.set(Some(album_key(t)));
+    s.full_screen.set(false);
+    navigate(Nav::Albums);
+}
+
 /// 当前曲目的歌手名列表：`NowPlaying.artist`（引擎已回落
 /// "Unknown Artist"）按设置的艺术家分隔符拆开；拆不出时整串当一个名。
 pub fn artist_names() -> Vec<String> {

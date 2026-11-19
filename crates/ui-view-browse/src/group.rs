@@ -3,6 +3,7 @@ use super::*;
 /// 专辑详情：头部已有封面与专辑名；序号列显示标签曲目号。
 pub(crate) const ALBUM_COLS: Columns = Columns {
     number: true,
+    index: false,
     cover: false,
     album: false,
     size: false,

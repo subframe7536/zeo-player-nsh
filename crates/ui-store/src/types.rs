@@ -160,6 +160,9 @@ pub struct Store {
     /// 「歌手」页当前点开的歌手（分组 key，即歌手标签原文）；首页
     /// 「热门艺术家」深链进详情也写它。
     pub artist_sel: Signal<Option<String>>,
+    /// 「专辑」页当前点开的专辑（分组 key，见 [`crate::album_key`]）；
+    /// 曲目行的专辑名链接深链进详情写它。
+    pub album_sel: Signal<Option<String>>,
     /// 艺术家分隔符（`config.artist_separators` 的 memo）：拆歌手名的
     /// 各处（链接、热门艺术家、深链回落）读它而不是整个 `library`，
     /// memo 相等性让无关配置写不往下传。

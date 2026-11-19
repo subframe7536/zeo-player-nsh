@@ -62,6 +62,10 @@ pub enum Icon {
     /// 关于页的「i」圆标。
     Info,
     Keyboard,
+    /// 暂停（曲目行序号格悬停时替换波形）。
+    Pause,
+    /// 定位到当前播放（音乐库右下角浮钮）。
+    Locate,
     /// 标签历史（时钟回拨）。
     History,
     /// 列显示设置（三栏）。
@@ -224,6 +228,14 @@ impl Icon {
             }
             // check
             Icon::Check => r#"<path d="M20 6 9 17l-5-5"/>"#,
+            // pause
+            Icon::Pause => {
+                r#"<rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/>"#
+            }
+            // locate-fixed
+            Icon::Locate => {
+                r#"<line x1="2" x2="5" y1="12" y2="12"/><line x1="19" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="5"/><line x1="12" x2="12" y1="19" y2="22"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/>"#
+            }
             // history
             Icon::History => {
                 r#"<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>"#

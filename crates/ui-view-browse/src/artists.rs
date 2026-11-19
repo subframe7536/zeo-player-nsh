@@ -65,10 +65,11 @@ pub fn Artists() -> impl IntoElement {
                     Rc::new(move || selected.set(None)),
                     move || items.with_untracked(|v| play_list(v, 0)),
                 )
-                .child(track_columns(Columns::ALL).mx(px(-12.0)));
+                // 详情列表与音乐库同列（序号 / 大小，见 `Columns::LIBRARY`）。
+                .child(track_columns(Columns::LIBRARY).mx(px(-12.0)));
                 view()
                     .flex_1()
-                    .child(track_list(items, Columns::ALL, header.into_element()))
+                    .child(track_list(items, Columns::LIBRARY, header.into_element()))
                     .into_element()
             }
             None => {

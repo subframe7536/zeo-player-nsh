@@ -1,5 +1,5 @@
 //! 歌手名链接：曲目行副标题、播放条副标题与全屏播放页共用的可点歌手名——
-//! 点名字进「艺术家」详情，", " 分隔符不可点。
+//! 点名字进「艺术家」详情，" / " 分隔符不可点。
 
 use nsh_core::prelude::*;
 
@@ -36,11 +36,12 @@ pub fn artist_links_colored(
         for (i, name) in names.iter().enumerate() {
             if i > 0 {
                 row = row.child(
-                    text(", ")
+                    text("/")
                         .text_size(px(size))
                         .line_height(px(size))
-                        .text_color(normal())
-                        .flex_shrink_0(),
+                        .text_color(move || normal().opacity(0.45))
+                        .flex_shrink_0()
+                        .mx(px(4.0)),
                 );
             }
             let hov = signal(false);

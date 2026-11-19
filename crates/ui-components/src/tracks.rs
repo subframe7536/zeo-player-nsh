@@ -18,8 +18,12 @@ use zeo_ui_store::{
 /// 曲目列表显示哪些列。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Columns {
-    /// 序号列（`#`）：只有专辑详情显示（曲目号取自标签）；其它列表没有。
+    /// 序号列（`#`）显示标签曲目号：只有专辑详情开；`index` 开时
+    /// 显示列表位置（1 起）。
     pub number: bool,
+    /// 序号列（`#`）显示列表位置（1 起）；`number` 显示标签曲目号，
+    /// 只有专辑详情用。
+    pub index: bool,
     pub cover: bool,
     pub album: bool,
     pub size: bool,
@@ -30,15 +34,25 @@ pub struct Columns {
 impl Columns {
     pub const ALL: Columns = Columns {
         number: false,
+        index: false,
         cover: true,
         album: true,
         size: false,
         format: false,
     };
+    /// 音乐库：列表位置的序号列 + 大小列。
+    pub const LIBRARY: Columns = Columns {
+        number: false,
+        index: true,
+        cover: true,
+        album: true,
+        size: true,
+        format: false,
+    };
 }
 
 /// 列宽（列头、曲目行、文件夹行共用，保证对齐）。
-pub const W_NUMBER: f32 = 28.0;
+pub const W_NUMBER: f32 = 32.0;
 pub const W_COVER: f32 = 40.0;
 pub const W_ALBUM: f32 = 220.0;
 pub const W_SIZE: f32 = 72.0;
@@ -52,7 +66,7 @@ pub fn content_break() -> f32 {
 }
 
 /// 窄窗口里依次收起：专辑列（< 760 pt）、大小列（< 600 pt）、序号列
-/// （< 420 pt；序号列只在专辑详情存在）。
+/// （< 420 pt；序号列只有专辑详情与音乐库有）。
 pub fn fits_album() -> bool {
     content_break() >= 760.0
 }
@@ -161,7 +175,7 @@ pub fn track_columns(cols: Columns) -> View {
         .mx(px(20.0))
         .border_b_1()
         .border_b_color(border())
-        .child(cols.number.then(|| {
+        .child((cols.number || cols.index).then(|| {
             when(fits_number, move || {
                 view().w(px(W_NUMBER)).items_center().child(label("#"))
             })
@@ -197,8 +211,9 @@ pub const ROW: f32 = 56.0;
 /// 双击窗口（行内按压只选中曲目所在的行，双击才播放）。
 const DOUBLE_CLICK: Duration = Duration::from_millis(450);
 
-/// 一行曲目：序号（当前曲目为音波，仅 `cols.number` 的列表有此列）、
-/// 封面、曲名 + 歌手、专辑、时长、喜欢按钮。双击播放（`on_play`）；
+/// 一行曲目：序号（`cols.number` 显示标签曲目号、`cols.index` 显示列表
+/// 位置；当前曲目为音波，悬停变播放 / 暂停钮）、封面、曲名 + 歌手、
+/// 专辑（可点进专辑页）、时长、喜欢按钮。双击播放（`on_play`）；
 /// `track` 随单元格复用而变化。
 pub fn track_row(
     track: Memo<Option<TrackEntry>>,
@@ -244,6 +259,7 @@ pub fn track_row_selectable(
     let hovering = signal(false);
     // 单击不播放：记下曲目与时间，同一首在 `DOUBLE_CLICK` 内再按一次才播。
     let on_play = Rc::new(on_play);
+    let on_play_cell = on_play.clone();
     let last = Rc::new(RefCell::new(None::<(String, Instant)>));
     let sel_bg = selected.clone();
     let sel_hover = selected.clone();
@@ -299,29 +315,64 @@ pub fn track_row_selectable(
                 *last.borrow_mut() = None;
             }
         })
-        .child(cols.number.then(|| {
+        .child((cols.number || cols.index).then(|| {
+            // 序号格常是可按的播放钮：内层 press 不到行，单击只播一次。
             when(fits_number, move || {
+                let on_play_cell = on_play_cell.clone();
                 view()
                     .w(px(W_NUMBER))
+                    .h(px(28.0))
                     .items_center()
                     .justify_center()
+                    .rounded(px(6.0))
+                    .role(AccessibilityRole::Button)
+                    .label(move || {
+                        SharedString::from(if playing() {
+                            format!("暂停「{}」", title())
+                        } else {
+                            format!("播放「{}」", title())
+                        })
+                    })
+                    .hover(|st| st.bg(hover()))
+                    .active(|st| st.opacity(0.6))
+                    .on_press(move |_: &()| {
+                        if current.get() {
+                            zeo_ui_store::toggle();
+                        } else {
+                            on_play_cell();
+                        }
+                    })
                     .child(
                         when(
-                            move || current.get(),
+                            move || hovering.get(),
                             move || {
                                 icon_dyn(
-                                    move || if playing() { Icon::Wave } else { Icon::Play },
+                                    move || if playing() { Icon::Pause } else { Icon::Play },
                                     14.0,
-                                    primary,
+                                    fg,
                                 )
                             },
                         )
                         .otherwise(move || {
-                            text(move || number.get())
-                                .text_size(px(13.0))
-                                .line_height(px(13.0))
-                                .tabular_nums()
-                                .text_color(faint())
+                            when(
+                                move || current.get(),
+                                move || {
+                                    icon_dyn(
+                                        move || {
+                                            if playing() { Icon::Wave } else { Icon::Play }
+                                        },
+                                        14.0,
+                                        primary,
+                                    )
+                                },
+                            )
+                            .otherwise(move || {
+                                text(move || number.get())
+                                    .text_size(px(13.0))
+                                    .line_height(px(13.0))
+                                    .tabular_nums()
+                                    .text_color(faint())
+                            })
                         }),
                     )
             })
@@ -393,13 +444,33 @@ pub fn track_row_selectable(
                 ),
         )
         .child(cols.album.then(|| {
+            // 专辑名是进专辑详情的链接，只包住文字本身（同 `artist_links`）。
             when(fits_album, move || {
-                view().w(px(W_ALBUM)).child(
-                    text(field(|t| t.display_album().to_owned()))
-                        .number_of_lines(1)
-                        .text_size(px(13.0))
-                        .line_height(px(13.0))
-                        .text_color(muted_fg()),
+                let album_name = field(|t| t.display_album().to_owned());
+                let hov = signal(false);
+                view().w(px(W_ALBUM)).items_start().child(
+                    view()
+                        .max_w(percentage(1.0))
+                        .cursor(Cursor::Pointer)
+                        .role(AccessibilityRole::Button)
+                        .label(move || SharedString::from(album_name()))
+                        .on_mouse_enter(move |_: &MouseEvent| hov.set(true))
+                        .on_mouse_leave(move |_: &MouseEvent| hov.set(false))
+                        .on_press(move |_: &()| {
+                            track.with_untracked(|t| {
+                                if let Some(t) = t.as_ref() {
+                                    zeo_ui_store::open_album(t);
+                                }
+                            });
+                        })
+                        .child(
+                            text(field(|t| t.display_album().to_owned()))
+                                .number_of_lines(1)
+                                .text_size(px(13.0))
+                                .line_height(px(13.0))
+                                .text_color(move || if hov.get() { fg() } else { muted_fg() })
+                                .transition_colors(),
+                        ),
                 )
             })
         }))

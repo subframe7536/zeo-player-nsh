@@ -25,7 +25,7 @@ pub(crate) use zeo_ui_components::tracks::{Columns, content_break, track_columns
 
 pub(crate) use zeo_ui_store::theme::*;
 
-pub(crate) use zeo_ui_store::{cover_for, covers_on, format_total, play_list, store};
+pub(crate) use zeo_ui_store::{album_key, cover_for, covers_on, format_total, play_list, store};
 
 mod albums;
 mod artists;

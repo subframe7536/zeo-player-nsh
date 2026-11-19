@@ -3,7 +3,7 @@ use super::*;
 #[component]
 pub fn Albums() -> impl IntoElement {
     let s = store();
-    let selected = signal(None::<String>);
+    let selected = s.album_sel;
     let groups = computed(move || {
         let tracks = s.tracks.get();
         Rc::new(group_by(&tracks, |t| {
@@ -13,7 +13,7 @@ pub fn Albums() -> impl IntoElement {
                 t.album_artist.clone()
             };
             let album = t.display_album().to_owned();
-            vec![(format!("{artist}\u{0}{}", album), album, artist)]
+            vec![(album_key(t), album, artist)]
         }))
     });
     view().flex_1().child(dynamic(move || {

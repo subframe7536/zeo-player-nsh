@@ -106,6 +106,7 @@ pub fn install() -> Store {
         accent: signal(None),
         tint: signal(None),
         artist_sel: signal(None),
+        album_sel: signal(None),
         artist_seps,
         sidebar_section: signal(lib.config().sidebar_section),
         genre_sel: signal(None),
