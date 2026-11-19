@@ -56,9 +56,6 @@ fn edit_dialog_layout_probe() {
     );
 
     // 底色（测试主题为浅色）：标题输入框 = card 白（不随封面染色）。
-    // tab 的选中凸起画在列表的 indicator 上：tablist 里唯一无 label 的
-    // 孩子，card 白底 + 1pt 边框，与选中 tab「基础」同 frame；tab 自身
-    // 一律透明。
     let style_of = |label: &str| {
         p.labels
             .iter()
@@ -66,96 +63,39 @@ fn edit_dialog_layout_probe() {
             .and_then(|(id, _)| p.styles.get(id).copied())
             .unwrap_or_else(|| panic!("找不到 {label} 的样式"))
     };
-    let tab_of = |p: &Probed, label: &str| {
-        p.labels
-            .iter()
-            .find(|(_, l)| l.as_str() == label)
-            .map(|(id, _)| *id)
-            .unwrap_or_else(|| panic!("找不到 {label}"))
-    };
     const WHITE: u32 = 0xFFFF_FFFF;
     let (input_bg, ..) = style_of("标题");
     assert_eq!(input_bg, WHITE, "输入框底色应为 card 白（不随封面染色）");
-    let list_id = *p.parents.get(&tab_of(&p, "基础")).expect("tab 没有父节点");
-    let indicator_id = p
-        .parents
-        .iter()
-        .filter(|(_, parent)| **parent == list_id)
-        .map(|(id, _)| *id)
-        .find(|id| !p.labels.contains_key(id))
-        .expect("tablist 里没有 indicator");
-    let (ind_bg, ind_border, ind_bw) = p
-        .styles
-        .get(&indicator_id)
-        .copied()
-        .expect("indicator 没有样式");
-    assert_eq!(ind_bg, WHITE, "indicator 应为 card 白");
-    assert!(
-        ind_bw >= 1.0 && ind_border != 0,
-        "indicator 应有可见边框（bw={ind_bw}, color={ind_border:#x}）"
-    );
-    let same_frame = |p: &Probed, a: NodeId, b: NodeId| {
-        let (ax, ay, asz) = abs(p, a).expect("没有 frame");
-        let (bx, by, bsz) = abs(p, b).expect("没有 frame");
-        (ax - bx).abs() <= 1.0
-            && (ay - by).abs() <= 1.0
-            && (asz.width.0 - bsz.width.0).abs() <= 1.0
-            && (asz.height.0 - bsz.height.0).abs() <= 1.0
-    };
-    assert!(
-        same_frame(&p, indicator_id, tab_of(&p, "基础")),
-        "indicator 应与选中 tab「基础」同 frame"
-    );
-    let (unsel_bg, ..) = style_of("封面");
-    assert_eq!(unsel_bg, 0, "未选中 tab 应透明");
 
-    // --- 封面栏 ------------------------------------------------------------
-    // 「保存到」+ 提示在顶部；预览 192×192 的（封面 + 按钮列）内容块在
-    // 剩余高度里垂直居中、水平居中。语料有 sine.png 同名图片 → 默认
-    // 「同名图片」目标，预览源就是同名文件本身。
-    drop(p);
-    app.press("label:封面").unwrap();
-    app.wait_for("label:更换图片…").unwrap();
-    // indicator 的跟随弹簧约 362ms，等它落定。
-    app.wait(Duration::from_millis(500)).unwrap();
-    let p = probed.lock().unwrap();
-
-    // indicator 跟到新选中的「封面」，仍与同 frame。
-    assert!(
-        same_frame(&p, indicator_id, tab_of(&p, "封面")),
-        "indicator 应跟到选中 tab「封面」"
-    );
-
-    // 「保存到」下拉存在且显示「同名图片」（同名文件已有时默认写它）。
-    assert!(
-        p.labels.values().any(|l| l == "封面保存位置"),
-        "封面栏应有「保存到」下拉"
-    );
-    assert!(
-        p.texts.values().any(|t| t == "同名图片"),
-        "已有同名图片时「保存到」应默认同名图片"
-    );
-
-    // 「更换图片…」按钮 → 按钮列 → 行；行里除按钮列外的孩子即封面框。
+    // --- 文件卡片 ------------------------------------------------------------
+    // 「更换封面…」按钮 → 操作行 → 信息列 → 卡片行；卡片行里除信息列
+    // 外的孩子即封面框，96×96。语料有 sine.png 同名图片 → 默认「同名
+    // 图片」目标，预览源就是同名文件本身。
     let btn_id = *p
         .labels
         .iter()
-        .find(|(_, l)| l.as_str() == "更换图片…")
+        .find(|(_, l)| l.as_str() == "更换封面…")
         .map(|(id, _)| id)
-        .expect("找不到「更换图片…」按钮");
-    let btn_col = *p.parents.get(&btn_id).expect("按钮没有父节点");
-    let row_id = *p.parents.get(&btn_col).expect("按钮列没有父节点");
+        .expect("找不到「更换封面…」按钮");
+    let action_id = *p.parents.get(&btn_id).expect("按钮没有父节点");
+    let col_id = *p.parents.get(&action_id).expect("操作行没有父节点");
+    let card_id = *p.parents.get(&col_id).expect("信息列没有父节点");
     let cover_id = p
         .parents
         .iter()
-        .filter(|(_, parent)| **parent == row_id)
+        .filter(|(_, parent)| **parent == card_id)
         .map(|(id, _)| *id)
-        .find(|id| *id != btn_col)
-        .expect("封面行里没有第二个孩子");
-    let (_, cy, cs) = abs(&p, cover_id).expect("封面框没有 frame");
+        .find(|id| *id != col_id)
+        .expect("文件卡片里没有第二个孩子");
+    assert_eq!(
+        p.test_ids.get(&cover_id).map(String::as_str),
+        Some("cover"),
+        "卡片行的另一个孩子应是封面框"
+    );
+    let (_, _, cs) = abs(&p, cover_id).expect("封面框没有 frame");
     assert!(
-        (cs.width.0 - 192.0).abs() <= 2.0 && (cs.height.0 - 192.0).abs() <= 2.0,
-        "封面预览应为 192×192，实际 {:.0}×{:.0}",
+        (cs.width.0 - 96.0).abs() <= 2.0 && (cs.height.0 - 96.0).abs() <= 2.0,
+        "封面预览应为 96×96，实际 {:.0}×{:.0}",
         cs.width.0,
         cs.height.0
     );
@@ -176,63 +116,19 @@ fn edit_dialog_layout_probe() {
     }
     assert!(has_sidecar_img, "同名图片目标的预览应取同名文件 sine.png");
 
-    // 祖先链上第一个带 ScrollContent 的节点 = 448 视口。
-    let mut scroll_vp = None;
-    let mut cur = row_id;
-    for _ in 0..16 {
-        if p.scrolls.contains_key(&cur) {
-            scroll_vp = p.frames.get(&cur).map(|f| {
-                let (x, y, _) = abs(&p, cur).unwrap_or_default();
-                (x, y, f.size)
-            });
-            break;
-        }
-        match p.parents.get(&cur) {
-            Some(&parent) => cur = parent,
-            None => break,
-        }
-    }
-    let (vx, vy, vs) = scroll_vp.expect("封面栏不在 scroll 里");
-
-    // 顶部控件底缘 = 「保存到」下拉与各提示行里最低的那个。
-    let mut top_ref = 0.0f32;
-    if let Some((_, y, s)) = p
-        .labels
-        .iter()
-        .find(|(_, l)| l.as_str() == "封面保存位置")
-        .and_then(|(id, _)| abs(&p, *id))
-    {
-        top_ref = top_ref.max(y + s.height.0);
-    }
-    for (id, t) in &p.texts {
-        let is_hint = [
-            "保存到同名",
-            "保存时新建",
-            "同名图片在",
-            "检测到同名",
-            "保存后替换",
-        ]
-        .iter()
-        .any(|pre| t.starts_with(pre));
-        if is_hint && let Some((_, y, s)) = abs(&p, *id) {
-            top_ref = top_ref.max(y + s.height.0);
-        }
-    }
-    assert!(top_ref > 0.0, "封面栏顶部应有「保存到」控件");
-    let top_gap = cy - top_ref;
-    let bottom_gap = (vy + vs.height.0) - (cy + cs.height.0);
+    // 「保存到」下拉存在且显示「同名图片」（同名文件已有时默认写它）；
+    // 「删除封面」按钮也在卡片里。
     assert!(
-        (top_gap - bottom_gap).abs() <= 28.0,
-        "封面内容块应在剩余高度居中：上 {top_gap:.0}，下 {bottom_gap:.0}"
+        p.labels.values().any(|l| l == "封面保存位置"),
+        "文件卡片应有「保存到」下拉"
     );
-
-    // 水平方向也居中：行（封面 + 按钮列）的中心 ≈ 视口中心。
-    let (rx, _, rs) = abs(&p, row_id).expect("封面行没有 frame");
     assert!(
-        (rx + rs.width.0 / 2.0 - (vx + vs.width.0 / 2.0)).abs() <= 24.0,
-        "封面内容块应水平居中：行中心 {:.0}，视口中心 {:.0}",
-        rx + rs.width.0 / 2.0,
-        vx + vs.width.0 / 2.0
+        p.texts.values().any(|t| t == "同名图片"),
+        "已有同名图片时「保存到」应默认同名图片"
+    );
+    assert!(
+        p.labels.values().any(|l| l == "删除封面"),
+        "文件卡片应有「删除封面」按钮"
     );
 
     // 「保存到」弹层与 trigger 同宽：打开下拉，选项行宽 + 弹层内边距

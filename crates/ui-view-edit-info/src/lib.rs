@@ -1,5 +1,6 @@
-//! 「编辑元数据」弹窗：单曲目的标签编辑，分「基础元数据 / 封面 / 歌词」
-//! 三栏；保存走 `store::save_tags`（原子写回 + 索引刷新 + 当前曲重载）。
+//! 「编辑元数据」弹窗：单曲目的标签编辑，一个滚动表单放文件卡片
+//! （封面 + 文件信息 + 封面保存目标）、标签字段与歌词；保存走
+//! `store::save_tags`（原子写回 + 索引刷新 + 当前曲重载）。
 
 pub(crate) use std::collections::HashMap;
 
@@ -9,13 +10,13 @@ pub(crate) use nsh_core::prelude::*;
 
 pub(crate) use zeo_metadata::write::{self, CoverEdit, Edit, TagEdits, TagField};
 
-pub(crate) use zeo_ui_components::button::{RADIUS_MD, Size, Variant, text_button};
+pub(crate) use zeo_ui_components::button::{RADIUS_MD, Size, Variant, icon_button, text_button};
 
 pub(crate) use zeo_ui_components::cover::cover;
 
 pub(crate) use zeo_ui_components::form::{
     SelectOption, dialog_content, dialog_footer, dialog_header, input_field, modal, select,
-    tab_list, tab_trigger, trigger_chevron,
+    trigger_chevron,
 };
 
 pub(crate) use zeo_ui_components::icons::{Icon, icon};
@@ -100,35 +101,32 @@ pub fn edit_info_dialog() -> AnyElement {
         saving: false,
         error: None,
     });
-    let tab = signal(0u8);
     let close = move || s.edit_info.set(None);
-    let content = dialog_content(480.0)
-        .child(dialog_header("编辑元数据", None))
+    let content = dialog_content(580.0)
         .child(
-            tab_list()
-                .child(
-                    tab_trigger(move || tab.get() == 0, None, "基础", move || tab.set(0)).flex_1(),
-                )
-                .child(
-                    tab_trigger(move || tab.get() == 1, None, "封面", move || tab.set(1)).flex_1(),
-                )
-                .child(
-                    tab_trigger(move || tab.get() == 2, None, "歌词", move || tab.set(2)).flex_1(),
-                ),
+            view()
+                .flex_row()
+                .items_center()
+                .justify_between()
+                .child(dialog_header("编辑元数据", None))
+                .child(icon_button(|| Icon::Close, 16.0, "关闭", muted_fg, close)),
         )
         .child(
-            // 固定高度：取最高的「基础」栏（9 行 ×36 + 间距 + 内边距 ≈ 440），
-            // 切栏时弹窗不伸缩；窗口太矮时收缩、滚动兜底。内容内缩 4pt：
-            // focus ring 画在控件外侧 3pt，贴视口边会被裁掉。
+            // 单个滚动表单（文件卡片 + 字段 + 歌词）：固定 560 高，窗口
+            // 太矮时收缩、滚动兜底。内容内缩 4pt：focus ring 画在控件
+            // 外侧 3pt，贴视口边会被裁掉。
             scroll()
-                .h(px(448.0))
+                .h(px(560.0))
                 .min_h(px(160.0))
                 .flex_shrink(1.0)
-                .child(view().p(px(4.0)).child(dynamic(move || match tab.get() {
-                    1 => cover_pane(draft).into_element(),
-                    2 => lyrics_pane(draft).into_element(),
-                    _ => basic_pane(draft).into_element(),
-                }))),
+                .child(
+                    view()
+                        .p(px(4.0))
+                        .gap(px(20.0))
+                        .child(file_card(draft))
+                        .child(fields(draft))
+                        .child(lyrics_block(draft)),
+                ),
         )
         .child(when(
             move || draft.with(|d| d.error.is_some()),

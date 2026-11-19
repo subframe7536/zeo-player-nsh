@@ -1,10 +1,10 @@
 use super::*;
 
-/// 「封面」栏：「保存到」选同名图片文件或内嵌标签（默认跟已有文件
-/// 走），两目标各自的改动草稿互不影响——`.lrc` / 内嵌歌词同款。
-/// 192px 预览（新图 / 目标的现有封面 / 占位符）+ 更换 / 移除按钮
-/// 在剩余高度里整体居中（栏高固定给最高的「基础」栏）。
-pub(crate) fn cover_pane(draft: Signal<TagDraft>) -> View {
+/// 文件卡片：96px 封面预览（当前目标的草稿 / 现有侧车或内嵌缩略图 /
+/// 占位符）+ 文件名、目录与技术参数 + 更换 / 删除封面按钮与「保存
+/// 到」目标（同名图片文件或内嵌标签，默认跟已有文件走；两目标各自
+/// 的改动草稿互不影响——`.lrc` / 内嵌歌词同款）。
+pub(crate) fn file_card(draft: Signal<TagDraft>) -> View {
     let has_art = untracked(|| {
         draft.with(|d| {
             zeo_metadata::read_meta(Path::new(&d.path))
@@ -14,6 +14,21 @@ pub(crate) fn cover_pane(draft: Signal<TagDraft>) -> View {
     });
     let art_exists = untracked(|| draft.with(|d| d.art_exists));
     let file_mode = move || draft.with(|d| d.cover_target);
+    // 文件名 / 目录 / 技术参数打开时读一次，不跟草稿走。
+    let (name, dir, tech) = untracked(|| {
+        draft.with(|d| {
+            let p = Path::new(&d.path);
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| d.path.clone());
+            let dir = p
+                .parent()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            (name, dir, tech_line(p))
+        })
+    });
     let src = move || {
         let d = draft.get();
         let (edit, picked) = if d.cover_target {
@@ -95,99 +110,131 @@ pub(crate) fn cover_pane(draft: Signal<TagDraft>) -> View {
         })
     };
     view()
-        .min_h(px(440.0))
-        .gap(px(8.0))
-        .child(target_row(
-            draft,
-            "封面保存位置",
-            |d, v| d.cover_target = v,
-            file_mode,
-            "同名图片",
-        ))
-        .child(when(
-            move || file_mode(),
-            move || {
-                text(if art_exists {
-                    "保存到同名图片文件；「移除封面」会删除它。"
-                } else {
-                    "保存时新建同名图片文件。"
-                })
-                .text_size(px(12.0))
-                .text_color(faint())
-            },
-        ))
-        .child(when(
-            move || file_mode(),
-            move || {
-                text("同名图片在「封面来源」本地优先时先于内嵌封面显示。")
-                    .text_size(px(12.0))
-                    .text_color(faint())
-            },
-        ))
-        .child(when(
-            move || !file_mode(),
-            move || {
-                text("保存后替换文件里的全部内嵌图片。")
-                    .text_size(px(12.0))
-                    .text_color(faint())
-            },
-        ))
-        .child(when(
-            move || !file_mode() && art_exists,
-            move || {
-                text("检测到同名图片——「封面来源」本地优先时，显示它而不是内嵌封面。")
-                    .text_size(px(12.0))
-                    .text_color(faint())
-            },
-        ))
+        .flex_row()
+        .items_start()
+        .gap(px(16.0))
+        .p(px(12.0))
+        .rounded(px(10.0))
+        .border_1()
+        .border_color(border())
+        .bg(muted().opacity(0.4))
+        .child(cover(src, Some(96.0), 8.0))
         .child(
-            view().flex_1().items_center().justify_center().child(
-                view()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(20.0))
-                    .child(cover(src, Some(192.0), 10.0))
-                    .child(
-                        view()
-                            .gap(px(8.0))
-                            .child(
-                                text_button(
-                                    Variant::Outline,
-                                    Size::Default,
-                                    None,
-                                    "更换图片…",
-                                    pick,
-                                )
-                                .w(px(112.0)),
+            view()
+                .flex_1()
+                .min_w(px(0.0))
+                .gap(px(6.0))
+                .child(
+                    text(name)
+                        .text_size(px(14.0))
+                        .line_height(px(14.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(fg())
+                        .number_of_lines(1),
+                )
+                .child(
+                    text(dir)
+                        .text_size(px(12.0))
+                        .line_height(px(12.0))
+                        .text_color(faint())
+                        .number_of_lines(1),
+                )
+                .child(
+                    text(tech)
+                        .text_size(px(12.0))
+                        .line_height(px(12.0))
+                        .text_color(muted_fg())
+                        .number_of_lines(1),
+                )
+                .child(
+                    view()
+                        .flex_row()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(px(8.0))
+                        .mt(px(4.0))
+                        .child(text_button(
+                            Variant::Outline,
+                            Size::Sm,
+                            None,
+                            "更换封面…",
+                            pick,
+                        ))
+                        .child(
+                            text_button(
+                                Variant::Ghost,
+                                Size::Sm,
+                                Some(Icon::Trash),
+                                "删除封面",
+                                remove,
                             )
-                            .child(
-                                text_button(
-                                    Variant::Outline,
-                                    Size::Default,
-                                    None,
-                                    "移除封面",
-                                    remove,
-                                )
-                                .w(px(112.0))
-                                .disabled(move || {
-                                    draft.with(|d| {
-                                        if d.saving {
-                                            return true;
-                                        }
-                                        if d.cover_target {
-                                            !d.art_exists && d.cover_file.is_none()
-                                        } else {
-                                            !has_art && d.cover.is_none()
-                                        }
-                                    })
-                                }),
-                            ),
-                    ),
-            ),
+                            .disabled(move || {
+                                draft.with(|d| {
+                                    if d.saving {
+                                        return true;
+                                    }
+                                    if d.cover_target {
+                                        !d.art_exists && d.cover_file.is_none()
+                                    } else {
+                                        !has_art && d.cover.is_none()
+                                    }
+                                })
+                            }),
+                        )
+                        .child(view().flex_1())
+                        .child(target_row(
+                            draft,
+                            "封面保存位置",
+                            |d, v| d.cover_target = v,
+                            file_mode,
+                            "同名图片",
+                        )),
+                )
+                .child(dynamic(move || {
+                    let message = if file_mode() {
+                        if art_exists {
+                            "封面存为同名图片；删除封面会删掉这个文件。"
+                        } else {
+                            "保存时新建同名图片文件。"
+                        }
+                    } else if art_exists {
+                        "保存后替换内嵌图片。已有同名图片时，「封面来源」本地优先会显示同名图片。"
+                    } else {
+                        "保存后替换文件里的全部内嵌图片。"
+                    };
+                    text(message)
+                        .text_size(px(12.0))
+                        .text_color(faint())
+                        .into_element()
+                })),
         )
 }
 
-/// 「保存到」行：封面 / 歌词栏共用——标签 + 目标下拉（trigger 110，
+/// 技术参数行：`FLAC · 44.1 kHz · 16 bit · 3:45 · 29.2 MB`；读不出
+/// 的段跳过。
+fn tech_line(path: &Path) -> String {
+    let mut parts = Vec::new();
+    if let Ok(m) = zeo_metadata::read_meta(path) {
+        if let Some(codec) = &m.codec {
+            parts.push(codec.clone());
+        }
+        if let Some(rate) = m.sample_rate {
+            parts.push(format!("{:.1} kHz", rate as f64 / 1000.0));
+        }
+        if let Some(depth) = m.bit_depth {
+            parts.push(format!("{depth} bit"));
+        }
+        if m.duration > 0.0 {
+            parts.push(store::format_time(m.duration));
+        }
+    }
+    if let Ok(meta) = std::fs::metadata(path) {
+        parts.push(format!("{:.1} MB", meta.len() as f64 / 1_048_576.0));
+    }
+    parts.join(" · ")
+}
+
+/// 「保存到」行：封面 / 歌词块共用——标签 + 目标下拉（trigger 110，
 /// 弹层与 trigger 同宽）。`set` 写哪个目标字段（`cover_target` /
 /// `lrc_target`），`file_mode` 读当前目标；`file_name` 是文件目标
 /// 的显示名（「同名图片」/「.lrc 文件」），另一项固定「内嵌标签」。

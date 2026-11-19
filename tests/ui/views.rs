@@ -86,9 +86,9 @@ fn context_menus_replace_each_other() {
     assert_eq!(app.screen().count("role:menu").unwrap(), 0);
 }
 
-/// 「编辑元数据…」：曲目行右键菜单打开弹窗，「基础元数据」栏各输入框
-/// 预填当前标签值，流派渲染成标签 chip；切「封面」「歌词」栏各见其控件。
-/// 只开不保存（不动共享语料）。
+/// 「编辑元数据…」：曲目行右键菜单打开弹窗，单个滚动表单的各输入框
+/// 预填当前标签值，流派渲染成标签 chip；文件卡片有封面操作与「保存
+/// 到」目标，歌词区预填 .lrc 内容。只开不保存（不动共享语料）。
 #[test]
 fn edit_info_dialog_opens_with_current_tags() {
     let mut app = start(1200.0, 800.0);
@@ -105,7 +105,7 @@ fn edit_info_dialog_opens_with_current_tags() {
     app.wait_for("text:编辑元数据").unwrap();
     for (label, expect) in [
         ("标题", "测试歌曲"),
-        ("歌手", "测试歌手 A; 测试歌手 B"),
+        ("艺术家", "测试歌手 A; 测试歌手 B"),
         ("专辑", "测试专辑"),
         ("音轨号", "1"),
     ] {
@@ -145,11 +145,11 @@ fn edit_info_dialog_opens_with_current_tags() {
         Some("Rock, Indie, Dream Pop"),
         "combobox 的无障碍值应报已选标题（新增的 r 不在 items 里被略过）"
     );
-    // 「封面」栏有更换按钮；「歌词」栏默认写同名 .lrc（语料有
-    // sine.lrc），多行输入预填文件内容。
-    app.press("label:封面").unwrap();
-    app.wait_for("label:更换图片…").unwrap();
-    app.press("label:歌词").unwrap();
+    // 文件卡片：更换 / 删除封面按钮与「保存到」目标下拉都在（语料有
+    // sine.png 同名图片，默认写它）；歌词默认写同名 .lrc（语料有
+    // sine.lrc），多行输入预填文件内容——都在同一个滚动表单里，不用切栏。
+    app.wait_for("label:更换封面…").unwrap();
+    app.wait_for("label:删除封面").unwrap();
     app.wait_for("text:保存到").unwrap();
     let lyrics = app.screen().input_text("label:歌词").unwrap();
     assert!(
