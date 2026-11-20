@@ -340,11 +340,12 @@ fn font_select() -> AnyElement {
         .list_style(|st| st.max_h(px(216.0)))
         .item_class("focus:bg-hover")
         .item_style(|st| st.rounded(px(6.0)))
+        // 输入框不设行高：它按所选字体自己的自然行高量出高（各家字体
+        // 行高不一），写死行高会让更宽的行盒被裁掉，文字显示不全。
         .input_style(move |st| {
             st.flex_1()
                 .min_w(px(0.0))
                 .text_size(px(14.0))
-                .line_height(px(14.0))
                 .text_color(fg())
         })
         .trigger_button(trigger_chevron())

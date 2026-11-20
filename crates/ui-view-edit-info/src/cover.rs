@@ -161,25 +161,33 @@ pub(crate) fn file_card(draft: Signal<TagDraft>) -> View {
                             pick,
                         ))
                         .child(
-                            text_button(
-                                Variant::Ghost,
-                                Size::Sm,
-                                Some(Icon::Trash),
-                                "删除封面",
-                                remove,
-                            )
-                            .disabled(move || {
-                                draft.with(|d| {
-                                    if d.saving {
-                                        return true;
-                                    }
-                                    if d.cover_target {
-                                        !d.art_exists && d.cover_file.is_none()
-                                    } else {
-                                        !has_art && d.cover.is_none()
-                                    }
-                                })
-                            }),
+                            // 危险操作：ghost 外壳 + destructive 文字色
+                            // （shadcn 的 `text-destructive`）。
+                            shell(Variant::Ghost, Size::Sm)
+                                .accessibility_label("删除封面")
+                                .on_press(move |_: &()| remove())
+                                .child(icon(Icon::Trash, Size::Sm.glyph(), move || {
+                                    nsh_base::theme().destructive
+                                }))
+                                .child(
+                                    text("删除封面")
+                                        .text_size(px(14.0))
+                                        .line_height(px(14.0))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(move || nsh_base::theme().destructive),
+                                )
+                                .disabled(move || {
+                                    draft.with(|d| {
+                                        if d.saving {
+                                            return true;
+                                        }
+                                        if d.cover_target {
+                                            !d.art_exists && d.cover_file.is_none()
+                                        } else {
+                                            !has_art && d.cover.is_none()
+                                        }
+                                    })
+                                }),
                         )
                         .child(view().flex_1())
                         .child(target_row(

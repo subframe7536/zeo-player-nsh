@@ -22,25 +22,27 @@ pub const RADIUS_LG: f32 = 10.0;
 pub fn input_field(small: bool) -> Input {
     let t = nsh_base::theme();
     let (input_c, ring) = (t.input, t.ring);
-    input()
+    let field = input()
         .h(px(if small { 32.0 } else { 36.0 }))
         .px(px(8.0))
-        // 两端平台的单行输入都把行盒垂直居在内容盒里：加 2pt 底边距
-        // 把内容盒中心抬高约 1pt，抵消字形墨水在行盒里偏下的观感
-        // （见 upstream.md「单行输入文字偏下」）。
-        .pb(px(2.0))
         .rounded(px(RADIUS_MD))
         .border_1()
         .border_color(input_c)
         .shadow_xs()
         .text_size(px(14.0))
         .text_color(fg())
-        .bg(t.card)
-        .focus(move |st| {
-            st.border_color(ring)
-                .ring(px(3.0))
-                .ring_color(ring.opacity(0.5))
-        })
+        .bg(t.card);
+    // macOS 的单行输入把行盒垂直居在内容盒里，而字形墨水在行盒内偏下：
+    // 加 2pt 底边距把内容盒中心抬高约 1pt 抵消（见 upstream.md「单行
+    // 输入文字偏下」）。Windows 的 RichEdit 落位已正，同样抬高反而
+    // 显得文字偏上，不加。
+    #[cfg(target_os = "macos")]
+    let field = field.pb(px(2.0));
+    field.focus(move |st| {
+        st.border_color(ring)
+            .ring(px(3.0))
+            .ring_color(ring.opacity(0.5))
+    })
 }
 
 /// shadcn Switch：`w-[42px] h-[24px]` 轨道（`rounded-full bg-muted border border-border`，

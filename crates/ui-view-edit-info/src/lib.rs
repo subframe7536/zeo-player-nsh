@@ -10,7 +10,9 @@ pub(crate) use nsh_core::prelude::*;
 
 pub(crate) use zeo_metadata::write::{self, CoverEdit, Edit, TagEdits, TagField};
 
-pub(crate) use zeo_ui_components::button::{RADIUS_MD, Size, Variant, icon_button, text_button};
+pub(crate) use zeo_ui_components::button::{
+    RADIUS_MD, Size, Variant, icon_button, shell, text_button,
+};
 
 pub(crate) use zeo_ui_components::cover::cover;
 
