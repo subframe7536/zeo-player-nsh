@@ -4,14 +4,28 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Zeo Player — 本地音乐播放器</title>
-  <meta name="description" content="Zeo Player 是一个纯 Rust 写的本地音乐播放器，开源免费，支持 macOS 和 Windows。">
+  <meta name="description" content="Zeo Player 是一个纯 Rust 编写的本地音乐播放器，开源免费，支持 macOS 和 Windows。">
+  <link rel="canonical" href="https://subframe7536.github.io/zeo-player-nsh/">
+  <meta name="theme-color" content="#d9e3da" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#111613" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="zh_CN">
+  <meta property="og:site_name" content="Zeo Player">
+  <meta property="og:title" content="Zeo Player — 本地音乐播放器">
+  <meta property="og:description" content="纯 Rust 原生本地音乐播放器，支持 24 字段元数据大表、批量重命名、乱码修复、无缝播放与 10 段均衡器。开源免费，支持 macOS 和 Windows。">
+  <meta property="og:url" content="https://subframe7536.github.io/zeo-player-nsh/">
+  <meta property="og:image" content="https://subframe7536.github.io/zeo-player-nsh/assets/img-home.webp">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Zeo Player — 本地音乐播放器">
+  <meta name="twitter:description" content="纯 Rust 原生本地音乐播放器，开源免费，支持 macOS 和 Windows。">
+  <meta name="twitter:image" content="https://subframe7536.github.io/zeo-player-nsh/assets/img-home.webp">
   <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="tech-grid-bg"></div>
-  <div class="glow-orb orb-primary"></div>
-  <div class="glow-orb orb-secondary"></div>
+  <div class="tech-grid-bg" aria-hidden="true"></div>
+  <div class="glow-orb orb-primary" aria-hidden="true"></div>
+  <div class="glow-orb orb-secondary" aria-hidden="true"></div>
 
   <header class="navbar">
     <div class="nav-container">
@@ -20,15 +34,15 @@
         <span class="brand-name">Zeo Player</span>
       </a>
 
-      <nav class="nav-links">
+      <nav class="nav-links" aria-label="主导航">
         <a href="#features" class="nav-item">功能</a>
         <a href="#screenshots" class="nav-item">截图</a>
         <a href="#download" class="nav-item">下载</a>
       </nav>
 
       <div class="nav-actions">
-        <a href="https://github.com/subframe7536/zeo-player-nsh" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-icon" title="GitHub 仓库">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+        <a href="https://github.com/subframe7536/zeo-player-nsh" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-icon" title="GitHub 仓库" aria-label="GitHub 仓库">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
             <path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/>
           </svg>
         </a>
@@ -37,189 +51,207 @@
     </div>
   </header>
 
-  <section class="hero-section">
-    <div class="section-container hero-container">
-      <div class="hero-status-pill">
-        <span class="status-indicator"></span>
-        <span>开源免费 · 纯 Rust 原生应用 · macOS / Windows</span>
+  <main>
+    <section class="hero-section">
+      <div class="section-container hero-container">
+        <div class="hero-status-pill">
+          <span class="status-indicator" aria-hidden="true"></span>
+          <span>开源免费 · 纯 Rust 原生应用 · macOS / Windows</span>
+        </div>
+
+        <h1 class="hero-title">本地<span class="gradient-text">音乐播放器</span></h1>
+
+        <p class="hero-description">
+          纯 Rust 写的原生应用，没有内嵌浏览器，也不用登录账号。
+          曲库管理有 24 个字段的元数据大表、乱码修复和模板批量改名；播放有无缝接续、10 段均衡器和逐行歌词。
+        </p>
+
+        <div class="hero-actions">
+          <a href="#download" class="btn btn-primary btn-lg">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            <span>下载</span>
+          </a>
+          <a href="https://github.com/subframe7536/zeo-player-nsh" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-lg">
+            <span>GitHub 仓库</span>
+          </a>
+        </div>
+
+        <div class="workbench-window-frame">
+          <button type="button" class="shot-trigger" data-lightbox-src="assets/img-home.webp" data-lightbox-caption="Zeo Player 首页：按时段问候、随机推荐、最近播放与新添加曲目" aria-label="放大查看 Zeo Player 首页截图">
+            <img src="assets/img-home.webp" alt="Zeo Player 首页" class="workbench-img" fetchpriority="high" decoding="async">
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-container" id="features">
+      <div class="section-header">
+        <div class="section-eyebrow">FEATURES</div>
+        <h2 class="section-title">主要功能</h2>
       </div>
 
-      <h1 class="hero-title">本地<span class="gradient-text">音乐播放器</span></h1>
+      <div class="features-grid">
+        <div class="feature-group">
+          <h3 class="feature-group-title">界面和系统</h3>
+          <ul class="feature-list">
+            <li>
+              <strong>全屏播放页</strong>
+              背景跟随封面主色、波形进度条，歌词偏移可按单曲微调
+            </li>
+            <li>
+              <strong>命令面板</strong>
+              <code>⌘K</code> / <code>Ctrl+K</code> 呼出，键盘搜索曲目、跳转设置
+            </li>
+            <li>
+              <strong>自定义快捷键</strong>
+              应用内与全局快捷键全部可重绑，冲突时给出提示
+            </li>
+            <li>
+              <strong>外观与主题色</strong>
+              浅色 / 深色跟随系统，主题色支持黑白、跟随封面或自定义取色
+            </li>
+            <li>
+              <strong>系统集成与自更新</strong>
+              菜单栏 / 系统托盘常驻，Windows 支持 SMTC 媒体通知，应用内一键检查并原地更新
+            </li>
+          </ul>
+        </div>
 
-      <p class="hero-description">
-        纯 Rust 写的原生应用，没有内嵌浏览器，也不用登录账号。
-        曲库管理有 24 个字段的元数据大表和模板批量改名；播放有无缝接续、10 段均衡器和逐行歌词。
+        <div class="feature-group">
+          <h3 class="feature-group-title">曲库和标签</h3>
+          <ul class="feature-list">
+            <li>
+              <strong>元数据表格</strong>
+              24 个元数据字段，可批量修改，列可显隐、拖宽、排序，数万首曲目滚动流畅
+            </li>
+            <li>
+              <strong>乱码修复与标签历史</strong>
+              自动识别并修复 GBK / Big5 / Shift-JIS / EUC-KR 等编码乱码，保留最近 30 批快照随时回滚
+            </li>
+            <li>
+              <strong>批量重命名与导出</strong>
+              按模板批量改名（如 <code>{track:02d} - {artist} - {title}</code>），同名 <code>.lrc</code> 与封面图自动联动；支持批量导出歌词与转码封面
+            </li>
+            <li>
+              <strong>文件夹自动同步</strong>
+              自动监听文件夹变动，外部增删、移动文件即时同步；文件移动后仍保留播放记录与歌单
+            </li>
+            <li>
+              <strong>智能歌单</strong>
+              按标题、艺术家、专辑、标签、采样率等条件组合筛选
+            </li>
+          </ul>
+        </div>
+
+        <div class="feature-group">
+          <h3 class="feature-group-title">播放</h3>
+          <ul class="feature-list">
+            <li>
+              <strong>曲间无缝播放</strong>
+              自然播完时提前预载下一首，无停顿直接衔接
+            </li>
+            <li>
+              <strong>10 段均衡器</strong>
+              31 Hz–16 kHz，拖动平滑无爆音，带防削波
+            </li>
+            <li>
+              <strong>淡入淡出</strong>
+              播放、暂停与切歌时音量平滑渐变，时长可自定义
+            </li>
+            <li>
+              <strong>随机播放</strong>
+              按黄金比例摊开同一歌手的曲目，避免连续撞车
+            </li>
+            <li>
+              <strong>ReplayGain</strong>
+              按曲目或专辑标签统一响度
+            </li>
+            <li>
+              <strong>自动暂停</strong>
+              拔出耳机或蓝牙断开时自动暂停
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-container" id="screenshots">
+      <div class="section-header">
+        <div class="section-eyebrow">SCREENSHOTS</div>
+        <h2 class="section-title">界面截图</h2>
+        <p class="section-subtitle">点击任意截图可查看大图。</p>
+      </div>
+
+      <div class="shots-grid">
+        <figure class="shot-card">
+          <button type="button" class="shot-trigger" data-lightbox-src="assets/img-metadata-table.webp" data-lightbox-caption="元数据页：全库标签大表，右侧检查器直接编辑标签、封面和歌词" aria-label="放大查看元数据页截图">
+            <img src="assets/img-metadata-table.webp" alt="元数据页" loading="lazy" decoding="async">
+          </button>
+          <figcaption>元数据页：全库标签大表，右侧检查器直接编辑标签、封面和歌词</figcaption>
+        </figure>
+        <figure class="shot-card">
+          <button type="button" class="shot-trigger" data-lightbox-src="assets/img-now-playing.webp" data-lightbox-caption="全屏播放：背景跟随封面主色，逐行歌词和波形进度条" aria-label="放大查看全屏播放截图">
+            <img src="assets/img-now-playing.webp" alt="全屏播放" loading="lazy" decoding="async">
+          </button>
+          <figcaption>全屏播放：背景跟随封面主色，逐行歌词和波形进度条</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section-container" id="download">
+      <div class="section-header">
+        <div class="section-eyebrow">DOWNLOAD</div>
+        <h2 class="section-title">下载</h2>
+        <p class="section-subtitle">开源免费，通过 GitHub Releases 分发，支持应用内自动更新。</p>
+      </div>
+
+      <div class="download-cards-grid">
+        <div class="download-card">
+          <div class="download-platform-header">
+            <div class="platform-icon-box" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.36-.56.65-.96 1.7-0.84 2.72.99.08 1.96-.48 2.57-1.23z"/>
+              </svg>
+            </div>
+            <div>
+              <h3 class="platform-name">macOS</h3>
+              <div class="platform-tag">Apple Silicon · macOS 12+</div>
+            </div>
+          </div>
+          <p class="download-desc">AppKit 原生界面，支持菜单栏控制、Now Playing 和媒体键。</p>
+          <a href="https://github.com/subframe7536/zeo-player-nsh/releases/latest/download/ZeoPlayer-macOS.dmg" class="btn btn-primary btn-lg download-btn">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            <span>下载 macOS 版 (.dmg)</span>
+          </a>
+          <a href="https://github.com/subframe7536/zeo-player-nsh/releases" target="_blank" rel="noopener noreferrer" class="download-sublink">前往 GitHub Releases 查看全部版本</a>
+        </div>
+
+        <div class="download-card">
+          <div class="download-platform-header">
+            <div class="platform-icon-box" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+                <path d="M3 5.45l7.55-1.03v7.33H3V5.45zm0 13.1l7.55 1.03v-7.33H3v6.3zm8.45 1.15L21 21.3V11.75H11.45v7.95zm0-15.4l9.55 1.6v7.95H11.45V4.3z"/>
+              </svg>
+            </div>
+            <div>
+              <h3 class="platform-name">Windows</h3>
+              <div class="platform-tag">x64 · Windows 10 / 11</div>
+            </div>
+          </div>
+          <p class="download-desc">Win32 + Direct2D 原生界面，支持 SMTC 系统媒体通知和托盘控制。</p>
+          <a href="https://github.com/subframe7536/zeo-player-nsh/releases/latest/download/ZeoPlayer-Setup.exe" class="btn btn-primary btn-lg download-btn">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            <span>下载 Windows 安装包 (.exe)</span>
+          </a>
+          <a href="https://github.com/subframe7536/zeo-player-nsh/releases" target="_blank" rel="noopener noreferrer" class="download-sublink">前往 GitHub Releases 获取便携压缩包</a>
+        </div>
+      </div>
+
+      <p class="download-note">
+        支持 MP3、FLAC、WAV、AIFF、M4A（AAC / ALAC）、AAC、OGG Vorbis。
       </p>
-
-      <div class="hero-actions">
-        <a href="#download" class="btn btn-primary btn-lg">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          <span>下载</span>
-        </a>
-        <a href="https://github.com/subframe7536/zeo-player-nsh" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-lg">
-          <span>GitHub 仓库</span>
-        </a>
-      </div>
-
-      <div class="workbench-window-frame">
-        <img src="assets/img-home.webp" alt="Zeo Player 首页" class="workbench-img">
-      </div>
-    </div>
-  </section>
-
-  <section class="section-container" id="features">
-    <div class="section-header">
-      <div class="section-eyebrow">FEATURES</div>
-      <h2 class="section-title">主要功能</h2>
-    </div>
-
-    <div class="features-grid">
-      <div class="feature-group">
-        <h3 class="feature-group-title">界面和系统</h3>
-        <ul class="feature-list">
-          <li>
-            <strong>全屏播放页</strong>
-            背景跟随封面主色、波形进度条，歌词偏移可按单曲微调
-          </li>
-          <li>
-            <strong>命令面板</strong>
-            <code>⌘K</code> / <code>Ctrl+K</code> 呼出，键盘搜索曲目、跳转设置
-          </li>
-          <li>
-            <strong>自定义快捷键</strong>
-            全部可重绑，冲突时给出提示
-          </li>
-          <li>
-            <strong>系统集成</strong>
-            菜单栏 / 系统托盘常驻，Windows 支持 SMTC 媒体通知
-          </li>
-          <li>
-            <strong>主题色跟随封面</strong>
-            根据封面自动切换主题色
-          </li>
-        </ul>
-      </div>
-
-      <div class="feature-group">
-        <h3 class="feature-group-title">曲库和标签</h3>
-        <ul class="feature-list">
-          <li>
-            <strong>元数据表格</strong>
-            24 个元数据字段，可批量修改，列可显隐、拖宽、排序，数万首曲目滚动流畅
-          </li>
-          <li>
-            <strong>批量重命名</strong>
-            按模板批量重命名，如 <code>{track:02d} - {artist} - {title}</code>；同名 <code>.lrc</code> 歌词与封面图自动联动改名，改名前检查冲突
-          </li>
-          <li>
-            <strong>文件夹自动同步</strong>
-            自动监听文件夹变动，外部增删、移动文件即时同步；文件移动后仍能识别，播放记录与歌单保留
-          </li>
-          <li>
-            <strong>智能歌单</strong>
-            按标题、艺术家、专辑、标签、采样率等条件组合筛选
-          </li>
-        </ul>
-      </div>
-
-      <div class="feature-group">
-        <h3 class="feature-group-title">播放</h3>
-        <ul class="feature-list">
-          <li>
-            <strong>10 段均衡器</strong>
-            31 Hz–16 kHz，拖动平滑无爆音，带防削波
-          </li>
-          <li>
-            <strong>淡入淡出</strong>
-            切换歌曲淡入淡出
-          </li>
-          <li>
-            <strong>随机播放</strong>
-            更优的播放队列随机算法
-          </li>
-          <li>
-            <strong>ReplayGain</strong>
-            音量标准化
-          </li>
-          <li>
-            <strong>自动暂停</strong>
-            拔出耳机或蓝牙断开时自动暂停
-          </li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <section class="section-container" id="screenshots">
-    <div class="section-header">
-      <div class="section-eyebrow">SCREENSHOTS</div>
-      <h2 class="section-title">界面截图</h2>
-    </div>
-
-    <div class="shots-grid">
-      <figure class="shot-card">
-        <img src="assets/img-metadata-table.webp" alt="元数据页" loading="lazy">
-        <figcaption>元数据页：全库标签大表，右侧检查器直接编辑标签、封面和歌词</figcaption>
-      </figure>
-      <figure class="shot-card">
-        <img src="assets/img-now-playing.webp" alt="全屏播放" loading="lazy">
-        <figcaption>全屏播放：背景跟随封面主色，逐行歌词和波形进度条</figcaption>
-      </figure>
-    </div>
-  </section>
-
-  <section class="section-container" id="download">
-    <div class="section-header">
-      <div class="section-eyebrow">DOWNLOAD</div>
-      <h2 class="section-title">下载</h2>
-      <p class="section-subtitle">开源免费，通过 GitHub Releases 分发。</p>
-    </div>
-
-    <div class="download-cards-grid">
-      <div class="download-card">
-        <div class="download-platform-header">
-          <div class="platform-icon-box">
-            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
-              <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.36-.56.65-.96 1.7-0.84 2.72.99.08 1.96-.48 2.57-1.23z"/>
-            </svg>
-          </div>
-          <div>
-            <h3 class="platform-name">macOS</h3>
-            <div class="platform-tag">Apple Silicon / Intel · macOS 12+</div>
-          </div>
-        </div>
-        <p class="download-desc">AppKit 原生界面，支持菜单栏控制、Now Playing 和媒体键。</p>
-        <a href="https://github.com/subframe7536/zeo-player-nsh/releases" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-lg download-btn">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          <span>GitHub Releases 下载</span>
-        </a>
-      </div>
-
-      <div class="download-card">
-        <div class="download-platform-header">
-          <div class="platform-icon-box">
-            <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
-              <path d="M3 5.45l7.55-1.03v7.33H3V5.45zm0 13.1l7.55 1.03v-7.33H3v6.3zm8.45 1.15L21 21.3V11.75H11.45v7.95zm0-15.4l9.55 1.6v7.95H11.45V4.3z"/>
-            </svg>
-          </div>
-          <div>
-            <h3 class="platform-name">Windows</h3>
-            <div class="platform-tag">x64 · Windows 10 / 11</div>
-          </div>
-        </div>
-        <p class="download-desc">Win32 + Direct2D 原生界面，支持 SMTC 系统媒体通知和托盘控制。</p>
-        <a href="https://github.com/subframe7536/zeo-player-nsh/releases" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-lg download-btn">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          <span>GitHub Releases 下载</span>
-        </a>
-      </div>
-    </div>
-
-    <p class="download-note">
-      支持 MP3、FLAC、WAV、AIFF、M4A（AAC / ALAC）、AAC、OGG Vorbis。
-      想自己编译的话，克隆仓库后 <code>nsh run .</code> 即可，详见 README。
-    </p>
-  </section>
+    </section>
+  </main>
 
   <footer class="footer">
     <div class="footer-container">
@@ -234,16 +266,16 @@
       <div class="footer-col">
         <h4>链接</h4>
         <ul>
-          <li><a href="https://github.com/subframe7536/zeo-player-nsh" target="_blank" rel="noopener">GitHub 仓库</a></li>
-          <li><a href="https://github.com/subframe7536/zeo-player-nsh/releases" target="_blank" rel="noopener">Releases</a></li>
-          <li><a href="https://nsh.dev" target="_blank" rel="noopener">NSH 框架</a></li>
+          <li><a href="https://github.com/subframe7536/zeo-player-nsh" target="_blank" rel="noopener noreferrer">GitHub 仓库</a></li>
+          <li><a href="https://github.com/subframe7536/zeo-player-nsh/releases" target="_blank" rel="noopener noreferrer">Releases</a></li>
+          <li><a href="https://github.com/subframe7536/zeo-player-nsh/issues" target="_blank" rel="noopener noreferrer">问题反馈</a></li>
         </ul>
       </div>
 
       <div class="footer-col">
         <h4>支持平台</h4>
         <ul>
-          <li>macOS 12+（Apple Silicon / Intel）</li>
+          <li>macOS 12+（Apple Silicon）</li>
           <li>Windows 10 / 11（x64）</li>
         </ul>
       </div>
@@ -251,8 +283,45 @@
 
     <div class="footer-bottom">
       <span>© 2026 Zeo Player</span>
-      <span>Built with Rust & NSH</span>
+      <span>Open Source · Local First</span>
     </div>
   </footer>
+
+  <dialog class="lightbox" id="lightbox" aria-label="截图预览">
+    <div class="lightbox-inner">
+      <button type="button" class="lightbox-close" id="lightboxClose" aria-label="关闭预览">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+      <img src="" alt="" id="lightboxImg" class="lightbox-img">
+      <p class="lightbox-caption" id="lightboxCaption"></p>
+    </div>
+  </dialog>
+
+  <script>
+    (() => {
+      const dialog = document.getElementById("lightbox");
+      const img = document.getElementById("lightboxImg");
+      const caption = document.getElementById("lightboxCaption");
+      const closeBtn = document.getElementById("lightboxClose");
+      if (!dialog || !img || !caption || !closeBtn) return;
+
+      document.querySelectorAll("[data-lightbox-src]").forEach((trigger) => {
+        trigger.addEventListener("click", () => {
+          const src = trigger.getAttribute("data-lightbox-src");
+          const text = trigger.getAttribute("data-lightbox-caption") || "";
+          const innerImg = trigger.querySelector("img");
+          img.src = src;
+          img.alt = innerImg ? innerImg.alt : text;
+          caption.textContent = text;
+          dialog.showModal();
+        });
+      });
+
+      closeBtn.addEventListener("click", () => dialog.close());
+      dialog.addEventListener("click", (e) => {
+        if (e.target === dialog) dialog.close();
+      });
+    })();
+  </script>
 </body>
 </html>
