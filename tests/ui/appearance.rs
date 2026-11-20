@@ -29,58 +29,47 @@ fn appearance_select_switches_the_color_scheme() {
 /// 设置弹窗 →「外观」分类 →「主题色」：支持配置黑白、封面、自定义。
 #[test]
 fn accent_swatches_switch_and_persist_the_theme_color() {
-    let mut app = start(1200.0, 800.0);
+    // 写全局主题色：持锁跑全程（欢迎页用例会断言出厂选中项）。
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
     app.press("设置").unwrap();
     app.press("id:settings-nav >> role:button[外观]").unwrap();
     app.wait_for("id:settings-content >> text:主题色").unwrap();
     let radio = |label: &str| format!("id:settings-content >> role:radio[{label}]");
-    let swatch = |label: &str| format!("id:settings-content >> role:button[主题色：{label}]");
-    app.wait_until(
-        "「封面」选中（出厂默认）",
-        Duration::from_secs(2),
-        |s| s.selected(&radio("封面")).unwrap_or(false),
-    )
-    .unwrap();
-    app.press(&radio("自定义")).unwrap();
-    app.wait_for(&swatch("红")).unwrap();
-    app.press(&swatch("红")).unwrap();
-    app.wait_until("「红」选中", Duration::from_secs(2), |s| {
-        s.selected(&swatch("红")).unwrap_or(false)
-    })
-    .unwrap();
-    assert!(!app.screen().selected(&radio("封面")).unwrap());
     // 配置在线程里落盘：等它写完再断言。
     let file =
         std::path::Path::new(&std::env::var("ZEO_PLAYER_DATA_DIR").unwrap()).join("library.json");
     let saved = |color: &str| {
-        std::fs::read_to_string(&file)
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .is_some_and(|v| v["theme_color"] == color)
+        for _ in 0..40 {
+            if std::fs::read_to_string(&file)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .is_some_and(|v| v["theme_color"] == color)
+            {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
     };
-    for _ in 0..40 {
-        if saved("red") {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    assert!(saved("red"));
+    // 自定义卡：首次的自定义色是蓝（0x2563eb，落盘 "blue"）。
+    app.press(&radio("自定义")).unwrap();
+    assert!(app.screen().selected(&radio("自定义")).unwrap());
+    assert!(saved("blue"), "theme_color 应为 blue");
+    // 选中「自定义」后节头出现色块触发器：点开是取色弹层（HSB 区域 +
+    // 色相条 + 颜色代码）。
+    app.wait_for("id:settings-content >> label:自定义颜色")
+        .unwrap();
+    app.press("id:settings-content >> label:自定义颜色")
+        .unwrap();
+    app.wait_for("label:色相").unwrap();
+    // 点弹层外（下一张单选卡）收掉弹层，也顺手切到「黑白」。
     app.press(&radio("黑白")).unwrap();
-    for _ in 0..40 {
-        if saved("neutral") {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    assert!(saved("neutral"));
+    app.wait_for_gone("label:色相", Duration::from_secs(2))
+        .unwrap();
+    assert!(saved("neutral"), "theme_color 应为 neutral");
     app.press(&radio("封面")).unwrap();
-    for _ in 0..40 {
-        if saved("cover") {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    assert!(saved("cover"));
+    assert!(saved("cover"), "theme_color 应为 cover");
 }
 
 /// 「跟随封面」（出厂默认）：播放带封面的曲目后强调色换成封面主色调——

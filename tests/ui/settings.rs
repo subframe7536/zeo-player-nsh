@@ -155,8 +155,8 @@ fn equalizer_preset_applies_and_persists() {
     let mut app = start(1200.0, 800.0);
     app.press("设置").unwrap();
     app.press("id:settings-nav >> role:button[播放]").unwrap();
-    app.wait_for("label:启用均衡器").unwrap();
-    app.press("label:启用均衡器").unwrap();
+    app.wait_for("role:switch[均衡器]").unwrap();
+    app.press("role:switch[均衡器]").unwrap();
     // 开关打开后 9 段竖推子出现（各段当前值显示 +0.0 dB）。
     app.wait_for("+0.0 dB").unwrap();
     // 触发器按压偶发打不开弹层（抬起触摸落在刚挂上的弹层上算作外部
@@ -197,7 +197,7 @@ fn equalizer_preset_applies_and_persists() {
     );
     // 共享全局配置，用例结束前恢复：回平直、关开关。
     app.press("label:重置").unwrap();
-    app.press("label:启用均衡器").unwrap();
+    app.press("role:switch[均衡器]").unwrap();
     assert!(saved(false), "结束时恢复关闭: {:?}", saved_eq());
 }
 
@@ -262,15 +262,15 @@ fn eq_fader_drags_in_settings_scroll() {
     }
     app.press("设置").unwrap();
     app.press("id:settings-nav >> role:button[播放]").unwrap();
-    app.wait_for("label:启用均衡器").unwrap();
-    app.press("label:启用均衡器").unwrap();
+    app.wait_for("role:switch[均衡器]").unwrap();
+    app.press("role:switch[均衡器]").unwrap();
     app.wait_for("+0.0 dB").unwrap();
     app.drag("label:均衡器 1k", point(px(0.0), px(-37.0)))
         .unwrap();
     app.wait_for("+6.0 dB").unwrap();
     // 共享全局配置，用例结束前恢复：回平直、关开关。
     app.press("label:重置").unwrap();
-    app.press("label:启用均衡器").unwrap();
+    app.press("role:switch[均衡器]").unwrap();
 }
 
 /// 设置 →「歌词」分类的「全局歌词偏移」数字输入：正常值、钳到 ±30000、
