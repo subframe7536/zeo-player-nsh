@@ -41,7 +41,7 @@ pub(crate) use zeo_ui_components::cover::cover;
 
 pub(crate) use zeo_ui_components::form::{SelectOption, input_field, select, trigger_chevron};
 
-pub(crate) use zeo_ui_components::icons::{Icon, icon, icon_dyn};
+pub(crate) use zeo_icons::{Icon, icon, icon_dyn};
 
 pub(crate) use zeo_ui_store::theme::*;
 

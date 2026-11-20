@@ -6,7 +6,7 @@ pub(crate) use nsh_base::{CommandElement, CommandEntry, CommandItem, command};
 
 pub(crate) use nsh_core::prelude::*;
 
-pub(crate) use zeo_ui_components::icons::{Icon, icon};
+pub(crate) use zeo_icons::{Icon, icon};
 
 pub(crate) use zeo_ui_store::theme::{self, *};
 

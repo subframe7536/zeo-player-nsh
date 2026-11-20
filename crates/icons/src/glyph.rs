@@ -1,18 +1,4 @@
-//! 线条图标（24 × 24 SVG，data: URI）：基础图标用 Lucide（见 `Icon::body`），
-//! 播放 / 暂停键是自己画的形变图标（`play_pause`）。颜色写进 SVG，按（图标, 尺寸, 颜色）
-//! 缓存；绑定读当前外观，切换深浅色时换图。SVG 声明的宽高就是显示尺寸：
-//! 光栅化按自然尺寸出图再缩放会糊边、粗细不匀（Windows 上尤其明显）。
-
-use std::cell::RefCell;
-use std::collections::HashMap;
-
-use nsh_core::element::Image;
-use nsh_core::prelude::*;
-
-/// 形变时长与缓动（easeOutQuart 的近似）。
-const MORPH_MS: f32 = 320.0;
-const MORPH_EASE: Easing = Easing::Bezier(0.25, 1.0, 0.5, 1.0);
-use zeo_icons::{MORPH_STROKE, PAUSE_SHAPES, PLAY_SHAPES};
+//! 图标集：`Icon` 枚举与各图标的 SVG 内容（Lucide）。`render` 负责上色、缓存与出图。
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
@@ -80,7 +66,7 @@ impl Icon {
     /// 图标的 SVG 内容。基础图标取自 Lucide（lucide-static 1.66.0，ISC
     /// 许可，<https://lucide.dev>），按原样使用：24 格、描边 2、圆头圆角。
     /// 括号里是 Lucide 的图标名。
-    fn body(self) -> &'static str {
+    pub(crate) fn body(self) -> &'static str {
         match self {
             // play
             Icon::Play => {
@@ -248,146 +234,10 @@ impl Icon {
             Icon::SpellCheck => {
                 r#"<path d="m6 16 6-12 6 12"/><path d="M8 12h8"/><path d="M4 21c1.1 0 1.1-1 2.3-1s1.1 1 2.3 1c1.1 0 1.1-1 2.3-1 1.1 0 1.1 1 2.3 1 1.1 0 1.1-1 2.3-1 1.1 0 1.1 1 2.3 1"/>"#
             }
-            // file-pen
+            // codicon:rename
             Icon::FileRename => {
-                r#"<path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10.378 12.622a1 1 0 0 1 3.003-3.003L17.36 13.64a2 2 0 0 1-.506.854l-2.87.837a.5.5 0 0 1-.62-.62l.836-2.87a2 2 0 0 1 .854-.506z"/>"#
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 16 16"><path fill="currentColor" d="M6.5 2a.5.5 0 0 0 0 1h1v10h-1a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1h-1V3h1a.5.5 0 0 0 0-1zM4 4h2.5v1H4a1 1 0 0 0-1 1v3.997a1 1 0 0 0 1 1h2.5v1H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2m8 6.997H9.5v1H12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H9.5v1H12a1 1 0 0 1 1 1v3.997a1 1 0 0 1-1 1"/></svg>"#
             }
         }
     }
-}
-
-thread_local! {
-    static CACHE: RefCell<HashMap<(Icon, u32, u32), SharedString>> = RefCell::new(HashMap::new());
-}
-
-fn hex(color: Hsla) -> (u32, String) {
-    let c = color.to_rgb();
-    let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
-    let (r, g, b, a) = (byte(c.r), byte(c.g), byte(c.b), byte(c.a));
-    let key = (r << 24) | (g << 16) | (b << 8) | a;
-    (key, format!("rgba({r},{g},{b},{:.3})", c.a))
-}
-
-fn percent_encode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() * 2);
-    for byte in text.bytes() {
-        match byte {
-            b'A'..=b'Z'
-            | b'a'..=b'z'
-            | b'0'..=b'9'
-            | b'-'
-            | b'.'
-            | b'_'
-            | b' '
-            | b'='
-            | b'/'
-            | b':' => out.push(byte as char),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out.replace(' ', "%20")
-}
-
-/// `icon` in `color` as an image URI, drawn at `size` points.
-pub fn icon_uri(icon: Icon, size: f32, color: Hsla) -> SharedString {
-    let (key, css) = hex(color);
-    CACHE.with(|cache| {
-        cache
-            .borrow_mut()
-            .entry((icon, size.to_bits(), key))
-            .or_insert_with(|| {
-                let svg = format!(
-                    r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="{size}" height="{size}" fill="none" stroke="{css}" color="{css}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{}</svg>"#,
-                    icon.body()
-                );
-                format!("data:image/svg+xml,{}", percent_encode(&svg)).into()
-            })
-            .clone()
-    })
-}
-
-/// 一个 `size` 点的图标，颜色随 `tint`（可为绑定）。
-pub fn icon(name: Icon, size: f32, tint: impl Fn() -> AdaptiveColor + 'static) -> Image {
-    image(move || icon_uri(name, size, color(tint())))
-        .size(px(size))
-        .pointer_events(PointerEvents::None)
-}
-
-/// 图标名随状态变化（播放/暂停、静音）。
-pub fn icon_dyn(
-    name: impl Fn() -> Icon + 'static,
-    size: f32,
-    tint: impl Fn() -> AdaptiveColor + 'static,
-) -> Image {
-    image(move || icon_uri(name(), size, color(tint())))
-        .size(px(size))
-        .pointer_events(PointerEvents::None)
-}
-
-/// 应用图标的 SVG 版：直接用 resources/icon.svg，与应用图标同一份图形。
-/// 源文件根元素声明 1024 见方；把根标签换成带 viewBox 的显示尺寸
-/// （文件头注释：声明尺寸即光栅化尺寸，按 1024 出图再缩到十几点会糊）。
-fn logo_svg(size: f32) -> SharedString {
-    let svg = include_str!("../../../resources/icon.svg").replacen(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1024\" height=\"1024\" fill=\"none\">",
-        &format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1024 1024\" width=\"{size}\" height=\"{size}\" fill=\"none\">"),
-        1,
-    );
-    format!("data:image/svg+xml,{}", percent_encode(&svg)).into()
-}
-
-/// 应用图标（标题栏）：`size` 点的 logo。
-pub fn logo(size: f32) -> Image {
-    image(logo_svg(size))
-        .size(px(size))
-        .pointer_events(PointerEvents::None)
-}
-
-/// 播放 / 暂停键的图标：`playing` 为真时显示暂停，切换时顶点逐个移动
-/// 过去。顶点绑定在动画值上，由平台在绘制时读取，形变不重跑界面代码。
-/// 系统开了「减弱动态效果」时直接切换。
-pub fn play_pause(
-    size: f32,
-    playing: impl Fn() -> bool + 'static,
-    tint: impl Fn() -> AdaptiveColor + 'static,
-) -> CanvasView {
-    let target = |on: bool| if on { 1.0 } else { 0.0 };
-    let morph = animated_value(target(untracked(&playing)));
-    effect(move || {
-        let to = target(playing());
-        if untracked(reduce_motion) {
-            morph.set(to);
-        } else {
-            let _ = morph.timing(to, MORPH_MS, MORPH_EASE);
-        }
-    });
-    let lerp = move |a: f32, b: f32| morph.interpolate(&[0.0, 1.0], &[a, b]);
-    let points: [[(AnimatedNode, AnimatedNode); 4]; 2] = std::array::from_fn(|s| {
-        std::array::from_fn(|i| {
-            let (play, pause) = (PLAY_SHAPES[s][i], PAUSE_SHAPES[s][i]);
-            (lerp(play.0, pause.0), lerp(play.1, pause.1))
-        })
-    });
-    let scale = size / 24.0;
-    canvas(move || {
-        let c = color(tint());
-        let mut p = Painter::new()
-            .scale(scale, scale)
-            .fill_color(c)
-            .stroke_color(c)
-            .line_width(MORPH_STROKE)
-            .line_join(nsh_core::canvas::LineJoin::Round)
-            .begin_path();
-        for [a, b, c, d] in &points {
-            p = p
-                .move_to(&a.0, &a.1)
-                .line_to(&b.0, &b.1)
-                .line_to(&c.0, &c.1)
-                .line_to(&d.0, &d.1)
-                .close_path();
-        }
-        p.fill().stroke()
-    })
-    .size(px(size))
-    .pointer_events(PointerEvents::None)
 }

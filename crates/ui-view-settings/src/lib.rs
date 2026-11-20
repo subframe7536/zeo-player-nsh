@@ -28,8 +28,8 @@ mod window;
 use nsh_core::element::input;
 use nsh_core::prelude::*;
 
+use zeo_icons::{Icon, icon};
 use zeo_ui_components::button::icon_button;
-use zeo_ui_components::icons::{Icon, icon};
 pub(crate) use zeo_ui_store::Pane;
 use zeo_ui_store::store;
 use zeo_ui_store::theme::*;

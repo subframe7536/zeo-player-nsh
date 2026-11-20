@@ -3,9 +3,9 @@
 use nsh_core::prelude::*;
 
 use crate::step_header;
+use zeo_icons::{Icon, icon, logo};
 use zeo_library::config::library_store;
 use zeo_ui_components::button::{icon_button, outline_button};
-use zeo_ui_components::icons::{Icon, icon, logo};
 use zeo_ui_store::theme::*;
 use zeo_ui_store::{scan, store};
 use zeo_ui_views_base::{add_dropped, last_segment, url_to_path};

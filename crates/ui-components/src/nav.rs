@@ -3,7 +3,7 @@
 use nsh_core::prelude::*;
 use zeo_ui_store::theme::*;
 
-use crate::icons::{Icon, icon};
+use zeo_icons::{Icon, icon};
 
 /// 侧栏里的一行：图标 + 文字。`label` 用 `SharedString`：导航是静态串，
 /// 歌单是名字。不是按钮——只指示当前路由：无按下反馈，连点同项不跳变。

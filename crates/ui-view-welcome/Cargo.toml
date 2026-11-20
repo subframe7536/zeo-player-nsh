@@ -9,5 +9,6 @@ nsh-core.workspace = true
 zeo-library.workspace = true
 zeo-ui-views-base.workspace = true
 zeo-ui-store.workspace = true
+zeo-icons.workspace = true
 zeo-ui-components.workspace = true
 zeo-ui-view-settings.workspace = true

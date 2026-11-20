@@ -6435,6 +6435,9 @@ dependencies = [
 [[package]]
 name = "zeo-icons"
 version = "0.0.0"
+dependencies = [
+ "nsh-core",
+]
 
 [[package]]
 name = "zeo-keybinds"
@@ -6553,6 +6556,7 @@ dependencies = [
  "nsh-base",
  "nsh-core",
  "zeo-engine",
+ "zeo-icons",
  "zeo-types",
  "zeo-ui-components",
  "zeo-ui-store",
@@ -6566,6 +6570,7 @@ dependencies = [
  "nsh-base",
  "nsh-core",
  "zeo-engine",
+ "zeo-icons",
  "zeo-library",
  "zeo-metadata",
  "zeo-shell",
@@ -6603,6 +6608,7 @@ version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
+ "zeo-icons",
  "zeo-library",
  "zeo-types",
  "zeo-ui-components",
@@ -6616,6 +6622,7 @@ version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
+ "zeo-icons",
  "zeo-ui-components",
  "zeo-ui-store",
  "zeo-ui-views-base",
@@ -6629,6 +6636,7 @@ dependencies = [
  "nsh-core",
  "rfd",
  "zeo-engine",
+ "zeo-icons",
  "zeo-metadata",
  "zeo-ui-components",
  "zeo-ui-store",
@@ -6641,6 +6649,7 @@ version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
+ "zeo-icons",
  "zeo-library",
  "zeo-metadata",
  "zeo-playlists",
@@ -6659,6 +6668,7 @@ dependencies = [
  "nsh-base",
  "nsh-core",
  "zeo-db",
+ "zeo-icons",
  "zeo-library",
  "zeo-types",
  "zeo-ui-components",
@@ -6678,6 +6688,7 @@ dependencies = [
  "rfd",
  "zeo-db",
  "zeo-engine",
+ "zeo-icons",
  "zeo-library",
  "zeo-metadata",
  "zeo-player",
@@ -6695,6 +6706,7 @@ version = "0.0.0"
 dependencies = [
  "nsh-base",
  "nsh-core",
+ "zeo-icons",
  "zeo-playlists",
  "zeo-shell",
  "zeo-types",
@@ -6711,6 +6723,7 @@ dependencies = [
  "nsh-core",
  "rfd",
  "zeo-engine",
+ "zeo-icons",
  "zeo-library",
  "zeo-playlists",
  "zeo-shell",
@@ -6726,6 +6739,7 @@ name = "zeo-ui-view-welcome"
 version = "0.0.0"
 dependencies = [
  "nsh-core",
+ "zeo-icons",
  "zeo-library",
  "zeo-ui-components",
  "zeo-ui-store",
@@ -6738,6 +6752,7 @@ name = "zeo-ui-views"
 version = "0.0.0"
 dependencies = [
  "nsh-core",
+ "zeo-icons",
  "zeo-ui-components",
  "zeo-ui-store",
  "zeo-ui-view-browse",
@@ -6759,6 +6774,7 @@ dependencies = [
  "dunce",
  "nsh-base",
  "nsh-core",
+ "zeo-icons",
  "zeo-library",
  "zeo-playlists",
  "zeo-shell",
@@ -6771,6 +6787,7 @@ dependencies = [
 name = "zeo-updater"
 version = "0.0.0"
 dependencies = [
+ "nsh-core",
  "nsh-updater",
  "serde_json",
  "ureq",

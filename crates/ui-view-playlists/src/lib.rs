@@ -24,7 +24,7 @@ pub(crate) use zeo_ui_components::form::{
     select_trigger, tab_list, tab_trigger,
 };
 
-pub(crate) use zeo_ui_components::icons::{Icon, icon};
+pub(crate) use zeo_icons::{Icon, icon};
 
 pub(crate) use zeo_ui_components::page::{empty_state, page_header};
 

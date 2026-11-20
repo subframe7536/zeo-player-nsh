@@ -8,7 +8,7 @@ use nsh_core::prelude::*;
 
 use super::artists::artist_links;
 use super::cover::{cover_initial, initial_letter};
-use super::icons::{Icon, icon_dyn};
+use zeo_icons::{Icon, icon_dyn};
 use zeo_types::config::TrackEntry;
 use zeo_ui_store::theme::*;
 use zeo_ui_store::{

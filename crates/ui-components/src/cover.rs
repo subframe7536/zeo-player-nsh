@@ -2,7 +2,7 @@
 
 use nsh_core::prelude::*;
 
-use super::icons::{Icon, icon};
+use zeo_icons::{Icon, icon};
 use zeo_ui_store::theme::*;
 
 /// 封面：图片或占位（音符 + 柔和底色）。`size` 为 `None` 时铺满宽度、正方形。

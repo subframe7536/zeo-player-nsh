@@ -4,7 +4,7 @@
 
 use nsh_core::prelude::*;
 
-use zeo_ui_components::icons;
+use zeo_icons as icons;
 use zeo_ui_store::theme::*;
 
 pub fn title_bar() -> View {

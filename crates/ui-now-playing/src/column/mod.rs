@@ -16,7 +16,7 @@ pub(crate) use zeo_shell::{REVEAL_LABEL, reveal};
 pub(crate) use zeo_ui_components::artists::artist_links_colored;
 pub(crate) use zeo_ui_components::button::{on_dark, tipped};
 
-pub(crate) use zeo_ui_components::icons::{Icon, icon, icon_dyn};
+pub(crate) use zeo_icons::{Icon, icon, icon_dyn};
 
 pub(crate) use zeo_ui_components::slider::{SliderStyle, scrub, slider};
 

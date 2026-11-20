@@ -96,7 +96,9 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         let old: WNDPROC = std::mem::transmute::<isize, WNDPROC>(OLD_PROC.load(Ordering::Relaxed));
         CallWindowProcW(old, hwnd, msg, w, l)
     };
-    if msg == WM_DESTROY {
+    // 重启时放行：运行器的主循环要正常返回，才会跑 `run_at_exit` 与
+    // `spawn_after_exit` 拉起新进程。
+    if msg == WM_DESTROY && !super::RESTARTING.load(Ordering::Relaxed) {
         exit_now();
     }
     result

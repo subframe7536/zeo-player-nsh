@@ -70,7 +70,7 @@ pub fn page(id: u64) -> View {
             None,
             Some(actions.into_element()),
         ))
-        .child(track_columns(Columns::ALL));
+        .child(track_columns(Columns::LIBRARY));
     let empty = dynamic(move || {
         if smart() {
             empty_state(
@@ -98,10 +98,11 @@ pub fn page(id: u64) -> View {
         }
     });
     let from = untracked(|| list.with(|p| p.as_ref().filter(|p| !p.is_smart()).map(|p| p.id)));
-    view().flex_1().child(
-        zeo_ui_views_base::track_list_in(items, Columns::ALL, header.into_element(), from)
-            .empty(empty),
-    )
+    // 与音乐库同一套：页头 + 列头固定在顶部，列表带序号 / 大小列。
+    let list = zeo_ui_views_base::list_of_tracks(items, Columns::LIBRARY, None, from).empty(empty);
+    view()
+        .flex_1()
+        .child(zeo_ui_views_base::pinned_track_list(header, items, list))
 }
 
 // --- 编辑弹窗 -----------------------------------------------------------------

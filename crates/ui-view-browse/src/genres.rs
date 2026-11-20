@@ -61,10 +61,15 @@ pub fn Genres() -> impl IntoElement {
                     .into_element(),
                 ),
             ))
-            .child(track_columns(Columns::ALL).mx(px(-12.0)));
+            .child(track_columns(Columns::LIBRARY));
+        // 与音乐库同一套：页头 + 列头固定在顶部，列表带序号 / 大小列。
         view()
             .flex_1()
-            .child(track_list(items, Columns::ALL, header.into_element()))
+            .child(pinned_track_list(
+                header,
+                items,
+                track_list_bare(items, Columns::LIBRARY),
+            ))
             .into_element()
     }))
 }

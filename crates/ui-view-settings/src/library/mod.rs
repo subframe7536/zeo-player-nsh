@@ -13,7 +13,7 @@ pub(crate) use zeo_library::config::library_store;
 pub(crate) use zeo_ui_components::button::{icon_button, outline_button, pill_button};
 pub(crate) use zeo_ui_components::form;
 
-pub(crate) use zeo_ui_components::icons::{Icon, icon};
+pub(crate) use zeo_icons::{Icon, icon};
 
 pub(crate) use zeo_ui_store::theme::*;
 

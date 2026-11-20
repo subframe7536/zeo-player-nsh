@@ -32,6 +32,7 @@ pub(crate) use std::time::Duration;
 pub(crate) use nsh_base::context_menu;
 pub(crate) use nsh_core::prelude::*;
 
+pub(crate) use zeo_icons::{Icon, icon, icon_dyn};
 pub(crate) use zeo_library::config::library_store;
 pub(crate) use zeo_playlists::Condition;
 pub(crate) use zeo_shell::{REVEAL_LABEL, reveal};
@@ -42,7 +43,6 @@ pub(crate) use zeo_ui_components::button::{
 pub(crate) use zeo_ui_components::form::{
     dialog_content, dialog_footer, dialog_header, input_field, modal, tab_list, tab_trigger,
 };
-pub(crate) use zeo_ui_components::icons::{Icon, icon, icon_dyn};
 pub(crate) use zeo_ui_components::page::{empty_state, page_header};
 pub(crate) use zeo_ui_components::tracks::{
     Columns, ROW, format_bytes, track_columns, track_row_selectable,

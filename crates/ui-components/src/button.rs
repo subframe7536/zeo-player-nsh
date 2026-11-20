@@ -6,7 +6,7 @@ use nsh_base::{ButtonElement, button};
 use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
-use super::icons::{Icon, icon_dyn};
+use zeo_icons::{Icon, icon_dyn};
 use zeo_ui_store::theme::*;
 
 /// shadcn 的 `variant`。

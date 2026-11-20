@@ -9,9 +9,9 @@ use nsh_base::{button, popover};
 use nsh_core::prelude::*;
 
 use zeo_engine::audio::LoopMode;
+use zeo_icons::{Icon, icon, icon_dyn};
 use zeo_ui_components::button::{RADIUS_MD, icon_button};
 use zeo_ui_components::cover::{cover_initial, initial_letter};
-use zeo_ui_components::icons::{Icon, icon, icon_dyn};
 use zeo_ui_store::theme::*;
 use zeo_ui_store::{cover_for, covers_on, format_time, player, store};
 

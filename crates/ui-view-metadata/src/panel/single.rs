@@ -392,22 +392,7 @@ pub(crate) fn single_form(
                     draft,
                     full,
                 ),
-            ],
-        ))
-        .child(section(
-            "人员与版权",
-            vec![
-                field_row("作曲", TagField::Composer, draft, full),
-                field_row("指挥", TagField::Conductor, draft, full),
-                field_row("作词", TagField::Lyricist, draft, full),
-                field_row("发行商", TagField::Publisher, draft, full),
-                field_row("版权", TagField::Copyright, draft, full),
-                rating_row(draft, full),
-            ],
-        ))
-        .child(section(
-            "封面与歌词",
-            vec![
+                // 封面与歌词并入「基本信息」，紧随碟号。
                 cover_row(draft, full),
                 multi_row(
                     "歌词",
@@ -420,6 +405,17 @@ pub(crate) fn single_form(
                 ),
                 import_lyrics_row(draft, lyrics_remount),
                 multi_row("注释", TagField::Comment, draft, full, 64.0, 120.0, None),
+            ],
+        ))
+        .child(section(
+            "人员与版权",
+            vec![
+                field_row("作曲", TagField::Composer, draft, full),
+                field_row("指挥", TagField::Conductor, draft, full),
+                field_row("作词", TagField::Lyricist, draft, full),
+                field_row("发行商", TagField::Publisher, draft, full),
+                field_row("版权", TagField::Copyright, draft, full),
+                rating_row(draft, full),
             ],
         ))
         .child(section(

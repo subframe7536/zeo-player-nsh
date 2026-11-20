@@ -13,4 +13,5 @@ zeo-library.workspace = true
 zeo-playlists.workspace = true
 zeo-shell.workspace = true
 zeo-ui-store.workspace = true
+zeo-icons.workspace = true
 zeo-ui-components.workspace = true

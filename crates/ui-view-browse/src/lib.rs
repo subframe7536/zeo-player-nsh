@@ -8,7 +8,8 @@ pub(crate) use std::rc::Rc;
 pub(crate) use nsh_core::prelude::*;
 
 pub(crate) use zeo_ui_views_base::{
-    by_disc_track, compare, hero, no_library, total_duration, track_list,
+    by_disc_track, compare, hero, no_library, pinned_track_list, total_duration, track_list,
+    track_list_bare,
 };
 
 pub(crate) use zeo_types::config::TrackEntry;
@@ -17,7 +18,7 @@ pub(crate) use zeo_ui_components::button::pill_button;
 
 pub(crate) use zeo_ui_components::cover::cover_initial;
 
-pub(crate) use zeo_ui_components::icons::{Icon, icon};
+pub(crate) use zeo_icons::{Icon, icon};
 
 pub(crate) use zeo_ui_components::page::{empty_state, page_header};
 

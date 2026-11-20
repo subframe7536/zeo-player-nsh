@@ -63,6 +63,9 @@ static CLOSE_REQUESTED: std::sync::Mutex<std::collections::BTreeSet<u64>> =
     std::sync::Mutex::new(std::collections::BTreeSet::new());
 /// 真的要退出（托盘「退出」、选择「退出」）：关闭不再拦截。
 static QUITTING: AtomicBool = AtomicBool::new(false);
+/// 正在重启：窗口销毁后要让运行器接着拉起新进程，不能硬结束
+/// （Windows 的 `exit_now` 据此跳过）。
+static RESTARTING: AtomicBool = AtomicBool::new(false);
 /// 隐藏到托盘的实例集（0 是系统侧不指明实例的调用，所有实例都当隐藏）。
 static HIDDEN: std::sync::Mutex<std::collections::BTreeSet<u64>> =
     std::sync::Mutex::new(std::collections::BTreeSet::new());
@@ -236,6 +239,15 @@ pub fn quit() {
     nsh_core::element::desktop::quit();
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     std::process::exit(0);
+}
+
+/// 重启应用（更新装好后「重启生效」）：经 NSH 的 `desktop::restart` 让
+/// 运行器收尾后拉起新进程。先置 [`RESTARTING`]——Windows 的窗口过程在
+/// `WM_DESTROY` 里会 `exit_now` 硬杀进程，那样运行器的「退出后再启动」
+/// 永远走不到，重启就成了单纯退出。
+pub fn restart() {
+    RESTARTING.store(true, Ordering::Relaxed);
+    nsh_core::element::desktop::restart();
 }
 
 /// 把空闲内存还给系统（隐藏到托盘后调用）：界面拆掉释放的堆页

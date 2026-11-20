@@ -15,8 +15,8 @@ use nsh_core::prelude::*;
 
 use self::column::left_column;
 use self::lyrics::{LYRICS_BOTTOM, lyrics_column, lyrics_shown};
+use zeo_icons::{Icon, icon};
 use zeo_ui_components::button::{on_dark, tipped};
-use zeo_ui_components::icons::{Icon, icon};
 use zeo_ui_store::store;
 use zeo_ui_store::theme::*;
 

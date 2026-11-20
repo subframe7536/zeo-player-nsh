@@ -4,7 +4,7 @@
 
 use nsh_core::prelude::*;
 
-use zeo_ui_components::icons::{Icon, icon};
+use zeo_icons::{Icon, icon};
 use zeo_ui_components::nav::nav_row;
 use zeo_ui_store::theme::{self, *};
 use zeo_ui_store::{self as store, Nav};
@@ -134,12 +134,21 @@ fn body() -> View {
                 })),
         )
         .child(sidebar_lower_section())
-        .child(view().px(px(10.0)).pb(px(12.0)).child(nav_row(
-            Icon::Settings,
-            "设置".into(),
-            move || s.settings.get(),
-            move || s.settings.set(true),
-        )))
+        // 底部设置入口：上方加一条分隔线与更多顶部留白，和上面的列表区分开。
+        .child(
+            view()
+                .px(px(10.0))
+                .pt(px(12.0))
+                .pb(px(12.0))
+                .border_t_1()
+                .border_t_color(sidebar_border())
+                .child(nav_row(
+                    Icon::Settings,
+                    "设置".into(),
+                    move || s.settings.get(),
+                    move || s.settings.set(true),
+                )),
+        )
 }
 
 fn sidebar_rescan_button() -> AnyElement {

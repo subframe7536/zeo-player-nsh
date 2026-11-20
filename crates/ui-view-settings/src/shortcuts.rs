@@ -12,8 +12,8 @@ use nsh_core::keymap::{Key, Modifiers};
 use nsh_core::prelude::*;
 
 use super::search_box;
+use zeo_icons::Icon;
 use zeo_ui_components::button::{Size, Variant, icon_button, text_button};
-use zeo_ui_components::icons::Icon;
 use zeo_ui_store::theme::*;
 use zeo_ui_store::{BindScope, KeyAction, key_label_of, store};
 

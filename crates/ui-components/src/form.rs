@@ -8,7 +8,7 @@ use nsh_base::{
 use nsh_core::prelude::*;
 
 use super::button::RADIUS_MD;
-use super::icons::{Icon, icon};
+use zeo_icons::{Icon, icon};
 use zeo_ui_store::theme::*;
 
 /// shadcn 的 `rounded-lg`。

@@ -140,7 +140,7 @@ pub(crate) fn left_column(swap: &Swap) -> View {
         .transition_transform()
         .duration(120.0)
         .on_press(|_: &()| zeo_ui_store::toggle())
-        .child(zeo_ui_components::icons::play_pause(
+        .child(zeo_icons::play_pause(
             34.0,
             zeo_ui_store::shown_playing,
             || white_a(0.95),

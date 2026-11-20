@@ -19,7 +19,7 @@ pub(crate) use zeo_ui_components::form::{
     trigger_chevron,
 };
 
-pub(crate) use zeo_ui_components::icons::{Icon, icon};
+pub(crate) use zeo_icons::{Icon, icon};
 
 pub(crate) use zeo_ui_store::theme::*;
 

@@ -19,11 +19,10 @@ pub use zeo_ui_view_welcome::page as welcome_page;
 use std::rc::Rc;
 
 use nsh_core::prelude::*;
+use zeo_icons::Icon;
 use zeo_ui_components::button::pill_button;
-use zeo_ui_components::icons::{Icon, icon};
 use zeo_ui_components::page::page_header;
 use zeo_ui_components::tracks::{Columns, track_columns};
-use zeo_ui_store::theme::{BAR_SPACE, bar, border, fg, hover};
 use zeo_ui_store::{format_total, play_list, store};
 
 /// 音乐库：展示全部歌曲（页头与列头固定粘滞在顶部，参考艺术家和专辑）。
@@ -52,58 +51,6 @@ pub fn library() -> View {
                 Some(play_all.into_element()),
             ))
             .child(track_columns(Columns::LIBRARY));
-        // 视口内行区间 -> 「定位到当前播放」只在当前曲滚出视野时显示。
-        let list_ref = element_ref();
-        let viewable = signal(None::<(usize, usize)>);
-        let list = track_list_bare(items, Columns::LIBRARY)
-            .element_ref(&list_ref)
-            .on_viewable_items_change(move |v: &ViewableItems| viewable.set(v.viewable));
-        let current_index = computed(move || {
-            let path = s.track.with(|t| t.path.clone())?;
-            items.with(|v| v.iter().position(|t| t.path == path))
-        });
-        let show_locate = move || {
-            current_index.get().is_some_and(|i| match viewable.get() {
-                None => true,
-                Some((first, last)) => i < first || i > last,
-            })
-        };
-        view()
-            .flex_1()
-            .min_w(px(0.0))
-            .child(header)
-            .child(list)
-            .child(when(show_locate, move || {
-                let locate = view()
-                    .absolute()
-                    .right(px(32.0))
-                    .bottom(px(BAR_SPACE))
-                    .size(px(40.0))
-                    .rounded_full()
-                    .items_center()
-                    .justify_center()
-                    .border_1()
-                    .border_color(border())
-                    // 与浮动播放条同款底色：macOS 半透明 + 背
-                    // 景模糊，Windows 上不透明（`theme::bar`）。
-                    .bg(move || bar())
-                    .shadow_md()
-                    .hover(|st| st.bg(hover()))
-                    .active(|st| st.opacity(0.7))
-                    .transition_colors()
-                    .role(AccessibilityRole::Button)
-                    .label("定位到当前播放")
-                    .on_press(move |_: &()| {
-                        if let Some(i) = current_index.get() {
-                            // 50% 把当前行放到视口中央。
-                            list_ref.scroll_to_index(i as u32, percentage(0.5), px(0.0), true);
-                        }
-                    })
-                    .child(icon(Icon::Locate, 18.0, fg));
-                #[cfg(not(target_os = "windows"))]
-                let locate = locate.backdrop_blur(px(24.0));
-                locate
-            }))
-            .into_element()
+        pinned_track_list(header, items, track_list_bare(items, Columns::LIBRARY)).into_element()
     }))
 }

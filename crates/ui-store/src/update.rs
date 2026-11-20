@@ -91,7 +91,14 @@ pub fn download_and_install() {
 
 /// 安装好的版本重启生效（`ready` 状态的「重启并更新」按钮）。
 pub fn restart_to_update() {
-    nsh_core::element::desktop::restart();
+    zeo_shell::restart();
+}
+
+/// 启动时清理上次更新留下的旧文件（打包运行才有；后台线程）。
+pub fn remove_update_leftovers() {
+    if updates_supported() {
+        std::thread::spawn(zeo_updater::remove_leftovers);
+    }
 }
 
 /// 启动时的自动检查（「自动检查更新」开着才跑；静默——只在「关于」

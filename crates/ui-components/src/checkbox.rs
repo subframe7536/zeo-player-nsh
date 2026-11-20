@@ -8,7 +8,7 @@ use std::rc::Rc;
 use nsh_base::{CheckboxElement, checkbox as base_checkbox};
 use nsh_core::prelude::*;
 
-use super::icons::{Icon, icon};
+use zeo_icons::{Icon, icon};
 use zeo_ui_store::theme::*;
 
 /// 三态复选框：`checked` 与 `indeterminate` 都读自调用方状态（半选优先

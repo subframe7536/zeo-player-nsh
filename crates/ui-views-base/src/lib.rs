@@ -8,11 +8,11 @@ pub(crate) use std::rc::Rc;
 pub(crate) use nsh_base::{context_menu, menu_item, menu_separator, submenu};
 pub(crate) use nsh_core::prelude::*;
 
+pub(crate) use zeo_icons::{Icon, icon};
 pub(crate) use zeo_library::config::library_store;
 pub(crate) use zeo_playlists::Playlist;
 pub(crate) use zeo_types::config::TrackEntry;
 pub(crate) use zeo_ui_components::button::pill_button;
-pub(crate) use zeo_ui_components::icons::{Icon, icon};
 pub(crate) use zeo_ui_components::page::empty_state;
 pub(crate) use zeo_ui_components::tracks::{Columns, ROW, track_row};
 pub(crate) use zeo_ui_store::theme::*;
@@ -141,6 +141,70 @@ pub fn track_list_in(
     from: Option<u64>,
 ) -> VirtualList {
     list_of_tracks(items, cols, Some(header), from)
+}
+
+/// 整页曲目列表（音乐库、歌单、标签页共用）：`header`（页头 + 列头）
+/// 固定粘滞在顶部，下面是不带页头的虚拟化 `list`（`list_of_tracks(..,
+/// None, ..)`，调用方可先挂 `.empty(..)`）；正在播放的曲目滚出视野时
+/// 右下角浮出「定位到当前播放」。
+pub fn pinned_track_list(
+    header: impl IntoElement,
+    items: Memo<Rc<Vec<TrackEntry>>>,
+    list: VirtualList,
+) -> View {
+    let s = store();
+    // 视口内行区间 -> 「定位到当前播放」只在当前曲滚出视野时显示。
+    let list_ref = element_ref();
+    let viewable = signal(None::<(usize, usize)>);
+    let list = list
+        .element_ref(&list_ref)
+        .on_viewable_items_change(move |v: &ViewableItems| viewable.set(v.viewable));
+    let current_index = computed(move || {
+        let path = s.track.with(|t| t.path.clone())?;
+        items.with(|v| v.iter().position(|t| t.path == path))
+    });
+    let show_locate = move || {
+        current_index.get().is_some_and(|i| match viewable.get() {
+            None => true,
+            Some((first, last)) => i < first || i > last,
+        })
+    };
+    view()
+        .flex_1()
+        .min_w(px(0.0))
+        .child(header)
+        .child(list)
+        .child(when(show_locate, move || {
+            let locate = view()
+                .absolute()
+                .right(px(32.0))
+                .bottom(px(BAR_SPACE))
+                .size(px(40.0))
+                .rounded_full()
+                .items_center()
+                .justify_center()
+                .border_1()
+                .border_color(border())
+                // 与浮动播放条同款底色：macOS 半透明 + 背景模糊，
+                // Windows 上不透明（`theme::bar`）。
+                .bg(move || bar())
+                .shadow_md()
+                .hover(|st| st.bg(hover()))
+                .active(|st| st.opacity(0.7))
+                .transition_colors()
+                .role(AccessibilityRole::Button)
+                .label("定位到当前播放")
+                .on_press(move |_: &()| {
+                    if let Some(i) = current_index.get() {
+                        // 50% 把当前行放到视口中央。
+                        list_ref.scroll_to_index(i as u32, percentage(0.5), px(0.0), true);
+                    }
+                })
+                .child(icon(Icon::Locate, 18.0, fg));
+            #[cfg(not(target_os = "windows"))]
+            let locate = locate.backdrop_blur(px(24.0));
+            locate
+        }))
 }
 
 pub fn list_of_tracks(

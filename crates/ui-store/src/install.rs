@@ -126,6 +126,7 @@ pub fn install() -> Store {
     let (tx, posted) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
     POSTER.with(|p| *p.borrow_mut() = Some(Post(tx)));
     apply_accent();
+    remove_update_leftovers();
     auto_check_updates();
 
     // 引擎状态：100 ms 轮询共享状态（信号只在值变化时通知）。

@@ -136,7 +136,18 @@ pub fn install(archive: &Path) -> Result<(), String> {
     let bytes = config_bytes().ok_or_else(|| "开发运行没有安装源".to_string())?;
     let installation =
         Installation::current(app_id(), &bytes).ok_or_else(|| "不是打包安装".to_string())?;
+    // 替换之前先记下程序路径：换完后本进程的 exe 是被挪走的旧文件，
+    // `current_exe` 可能指向 `.nsh-updater-old-*`，重启会拉起旧版。
+    nsh_core::restart::remember_program();
     installation.install(archive).map_err(|e| e.to_string())
+}
+
+/// 清掉上次更新留下的东西（Windows 上运行中无法删的旧 exe、崩溃时没
+/// 收尾的暂存目录）。启动时调用；文件 IO，调用方放后台线程。
+pub fn remove_leftovers() {
+    if let Some(installation) = config_bytes().and_then(|b| Installation::current(app_id(), &b)) {
+        installation.remove_leftovers();
+    }
 }
 
 /// ureq 3 的 GET（跟随重定向：GitHub 的 release asset 在另一台主机）。

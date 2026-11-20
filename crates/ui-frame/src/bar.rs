@@ -7,10 +7,10 @@ use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
 use zeo_engine::audio::LoopMode;
+use zeo_icons::{Icon, icon_dyn};
 use zeo_ui_components::artists::artist_links;
 use zeo_ui_components::button::{RADIUS_MD, Size, Variant, icon_button, shell, tipped};
 use zeo_ui_components::cover::cover;
-use zeo_ui_components::icons::{Icon, icon_dyn};
 use zeo_ui_components::slider::{SliderStyle, slider};
 use zeo_ui_store::theme::*;
 use zeo_ui_store::{
@@ -114,11 +114,7 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
         .transition_transform()
         .duration(120.0)
         .on_press(|_: &()| zeo_ui_store::toggle())
-        .child(zeo_ui_components::icons::play_pause(
-            28.0,
-            zeo_ui_store::shown_playing,
-            fg,
-        ));
+        .child(zeo_icons::play_pause(28.0, zeo_ui_store::shown_playing, fg));
 
     let mode_icon = move || match s.playback.with(|p| p.loop_mode) {
         LoopMode::List => Icon::Repeat,

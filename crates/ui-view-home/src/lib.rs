@@ -22,7 +22,7 @@ pub(crate) use zeo_ui_components::button::icon_button;
 
 pub(crate) use zeo_ui_components::cover::{cover, cover_initial, initial_letter};
 
-pub(crate) use zeo_ui_components::icons::{Icon, icon};
+pub(crate) use zeo_icons::{Icon, icon};
 
 pub(crate) use zeo_ui_components::page::empty_state;
 

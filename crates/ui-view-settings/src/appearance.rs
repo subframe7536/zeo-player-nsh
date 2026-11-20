@@ -3,10 +3,10 @@
 use nsh_core::prelude::*;
 
 use super::setting_section;
+use zeo_icons::{Icon, icon};
 use zeo_types::config::ThemeColor;
 use zeo_ui_components::button::RADIUS_MD;
 use zeo_ui_components::form::trigger_chevron;
-use zeo_ui_components::icons::{Icon, icon};
 use zeo_ui_store::theme::*;
 use zeo_ui_store::{Same, set_theme_color, store};
 

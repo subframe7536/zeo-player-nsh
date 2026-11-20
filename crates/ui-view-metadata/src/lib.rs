@@ -23,12 +23,12 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use zeo_icons::{Icon, icon};
 use zeo_metadata::write::TagField;
 use zeo_types::config::TrackEntry;
 use zeo_ui_components::button::{RADIUS_MD, Size, Variant, text_button};
 use zeo_ui_components::checkbox::checkbox;
 use zeo_ui_components::form::input_field;
-use zeo_ui_components::icons::{Icon, icon};
 use zeo_ui_components::page::page_header;
 use zeo_ui_store::store;
 use zeo_ui_store::theme::*;
