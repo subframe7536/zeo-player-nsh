@@ -1,8 +1,8 @@
 {
   "name": "ZeoPlayer",
   "id": "dev.subf.zeo-player",
-  "version": "0.0.4",
-  "build": 4,
+  "version": "0.0.5",
+  "build": 5,
   "rust": ".",
   "root": "App",
   "theme": "theme.json",
