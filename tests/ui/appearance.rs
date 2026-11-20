@@ -54,7 +54,10 @@ fn accent_swatches_switch_and_persist_the_theme_color() {
     };
     // 自定义卡：首次的自定义色是蓝（0x2563eb，落盘 "blue"）。
     app.press(&radio("自定义")).unwrap();
-    assert!(app.screen().selected(&radio("自定义")).unwrap());
+    app.wait_until("「自定义」选中", Duration::from_secs(2), |s| {
+        s.selected(&radio("自定义")).unwrap_or(false)
+    })
+    .unwrap();
     assert!(saved("blue"), "theme_color 应为 blue");
     // 选中「自定义」后节头出现色块触发器：点开是取色弹层（HSB 区域 +
     // 色相条 + 颜色代码）。

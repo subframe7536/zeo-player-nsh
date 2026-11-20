@@ -13,6 +13,24 @@ impl Drop for RestoreWelcome {
     }
 }
 
+/// 主题色是进程全局配置，别的用例会改它：欢迎页断言出厂选中项前钉成
+/// 「封面」，结束时还原。
+struct RestoreThemeColor(zeo_types::config::ThemeColor);
+
+impl RestoreThemeColor {
+    fn cover() -> Self {
+        let prev = library_store().config().theme_color;
+        library_store().set_theme_color(zeo_types::config::ThemeColor::Cover);
+        Self(prev)
+    }
+}
+
+impl Drop for RestoreThemeColor {
+    fn drop(&mut self) {
+        library_store().set_theme_color(self.0);
+    }
+}
+
 /// 数据目录里 library.json 的 welcome_done（保存在后台线程，调用方轮询）。
 fn saved_welcome_done() -> Option<bool> {
     let file =
@@ -57,6 +75,7 @@ fn welcome_walks_through_every_step_and_is_remembered() {
     let corpus = isolate();
     let mut app = start_inner(1200.0, 800.0);
     let _restore = RestoreWelcome;
+    let _restore_color = RestoreThemeColor::cover();
     library_store().set_welcome_done(false);
     // 启动时配置里 `welcome_done` 为真：不自动弹。
     assert!(!has(&app, "欢迎使用 Zeo Player"), "{:?}", texts(&app));
