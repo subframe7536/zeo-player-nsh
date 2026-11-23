@@ -161,18 +161,12 @@ pub fn page() -> View {
             // 两块面板平分的宽度：内容宽减两侧页边距与分栏 gap。
             let panels_room =
                 move || zeo_ui_components::tracks::content_break() - PAGE_X * 2.0 - gap_w();
-            // 把手调的是把手前的表格，面板拿到剩下的；上游
-            // `resize_panel_at_handle` 在收缩方向不夹后一块面板的 max（把手
-            // 会拖过真实边界、松手后留在那，见 upstream.md），只能把面板的
-            // 上限折进表格的下限让它真到不了。
-            let table_min = move || {
-                let room = panels_room();
-                (room * TABLE_MIN_SHARE).max(room - PANEL_MAX_W)
-            };
-            // 面板实际拖得到的上限：min 之和超过可分宽度时上游 `min_of`
-            // 按比例缩各 min，这里同口径反推，把手落点才始终贴着真实边界。
-            // `max_size` 挂它：窗口变窄面板随之收、变宽再回 `panel_w` 记住的宽。
-            // （下限取缩放后的面板 min，防止浮点误差让 max 跌破 range。）
+            // 把手调的是把手前的表格，面板拿到剩下的。
+            let table_min = move || panels_room() * TABLE_MIN_SHARE;
+            // 面板的实际上限：min 之和超过可分宽度时上游 `min_of` 按比例缩各
+            // min，这里同口径反推。`max_size` 挂它：窗口变窄面板随之收、变宽
+            // 再回 `panel_w` 记住的宽。（下限取缩放后的面板 min，防止浮点误差
+            // 让 max 跌破 range。）
             let panel_max = move || {
                 let room = panels_room();
                 let total_min = table_min() + PANEL_MIN_W;
@@ -181,7 +175,9 @@ pub fn page() -> View {
                 } else {
                     1.0
                 };
-                (room - table_min() * scale).max(PANEL_MIN_W * scale)
+                (room - table_min() * scale)
+                    .max(PANEL_MIN_W * scale)
+                    .min(PANEL_MAX_W)
             };
             view()
                 .flex_1()
@@ -238,9 +234,8 @@ pub fn page() -> View {
                         .child(panel::history_button(history_open, can_history))
                         .child(view().flex_1().min_w(px(0.0)).window_drag(true))
                         .child({
-                            // 「全选」不放表头格：上游自定义表头对滚动区列
-                            // 不落渲染内容（见 upstream.md），工具栏的 nsh_base
-                            // 复选框在真机 / headless 都稳。
+                            // 「全选」不放表头格：工具栏的 nsh_base 复选框
+                            // 在真机 / headless 都稳。
                             let mark = checkbox(
                                 move || {
                                     selected.with(|s| {

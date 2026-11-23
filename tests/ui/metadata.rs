@@ -340,6 +340,7 @@ fn metadata_column_resize_drag() {
     app.drag(
         "id:resize:title",
         nsh_core::geometry::point(px(50.0), px(0.0)),
+        DragOptions::default(),
     )
     .unwrap();
 }
@@ -363,6 +364,7 @@ fn metadata_panel_resize_drag() {
     app.drag(
         "label:调整面板宽度",
         nsh_core::geometry::point(px(-80.0), px(0.0)),
+        DragOptions::default(),
     )
     .unwrap();
     app.wait_for("label:标题").unwrap();
@@ -440,8 +442,8 @@ fn window_close_prompt_is_an_alert_and_saves_only_when_checked() {
 
 /// 点行选中后开乱码修复弹窗，一次 Esc 就关掉：点行让 data_table 拿到
 /// 键盘（它的 Esc 层先清内置选中、再放键盘，会连吃两下），弹层要靠
-/// 自己更新的 pass_through 绑定（`modal` 的 `on_key_with("escape")`）把
-/// 键放回 `on_cancel` 一次关掉——回归：曾要按三次 Esc。
+/// `over_focused` 的 pass_through 绑定（`modal` 的 `on_key_with("escape")`）
+/// 把键放回 `on_cancel` 一次关掉——回归：曾要按三次 Esc。
 #[test]
 fn encoding_dialog_one_escape_after_row_click() {
     let mut app = start(1400.0, 800.0);

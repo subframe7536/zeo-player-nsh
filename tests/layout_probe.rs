@@ -12,7 +12,7 @@ use std::time::Duration;
 use nsh_core::geometry::{Bounds, Points, Size, px, size};
 use nsh_core::platform::Os;
 use nsh_core::{Command, MountItem, NodeId};
-use nsh_engine::{EngineConfig, Root};
+use nsh_engine::EngineConfig;
 use nsh_testing::Headless;
 use zeo_player::App;
 
@@ -67,7 +67,7 @@ fn start(width: f32, height: f32) -> Headless {
     zeo_player::config::library_store()
         .set_sidebar_section(zeo_player::config::SidebarSection::Playlists);
     let theme = nsh_base::Theme::from_json(include_str!("../theme.json")).expect("theme.json");
-    let mut config = EngineConfig::new(Root::of::<App>().tokens(theme.into_tokens()));
+    let mut config = EngineConfig::new(nsh_engine::Root::of::<App>().tokens(theme.into_tokens()));
     config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
     config.viewport = size(px(width), px(height));
     config.environment.os = Os::MacOs;

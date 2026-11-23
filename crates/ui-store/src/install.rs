@@ -40,8 +40,10 @@ pub fn shown_playing() -> bool {
     })
 }
 
-/// 建立状态并启动轮询；在根组件里调用一次。
-pub fn install() -> Store {
+/// 建立状态并启动轮询；在窗口内容里调用（`win` 是那个用户窗口的
+/// `current_window()`——窗口模型 v2 里 `main_window()` 只是不可见的
+/// 应用宿主，拿它发窗口请求都是空转）。
+pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
     let snap = player().state();
     let lib = library_store();
     let playback = signal(Playback {
@@ -241,10 +243,17 @@ pub fn install() -> Store {
     // 时恢复上次存的（`set_placement` 会按现在的显示器校正）；之后平台
     // 每次上报的位置变化写回配置。`state` 在焦点变化等不动位置的时候也
     // 重报，与已存值比对去重（`window_placement` 是非信号的直读，本效果
-    // 只订阅窗口状态 memo）。主窗口此时还隐藏着（见 `reveal_when_ready`），
+    // 只订阅窗口状态 memo）。窗口刚开还藏着（见 `reveal_when_ready`），
     // 还原不会被看到。`placed`：`None` 还没还原，`Some(saved)` 已还原。
-    let win = nsh_core::element::desktop::main_window();
+    zeo_shell::set_main_window(win.clone());
     let placed = stored(None::<Option<nsh_core::desktop::WindowPlacement>>);
+    // 启动藏过窗（要还原位置时首个状态先 `hide()`）：`reveal_when_ready`
+    // 据此知道必须补 `show()`，不能按「已经显示」收尾。
+    let hid = stored(false);
+    // 启动显示已收尾（`reveal_when_ready`）：首个窗口状态晚到（并行宿主
+    // 下可能晚于 `REVEAL_MAX_MS`）时它按「已经显示」收尾——那时再藏窗
+    // 就是永久消失，所以置位后首个状态不再 `hide()`。
+    let revealed = stored(false);
     // 上次上报的可见性：藏在托盘时窗口由系统重新显示（macOS 点 Dock、
     // Windows 任务栏 / Alt+Tab，NSH 自己把窗口提到前面）只表现为 visible
     // 由假变真——按这个跳变通知 zeo-shell，界面重新装上。只认跳变：
@@ -261,9 +270,20 @@ pub fn install() -> Store {
                 zeo_shell::shown_by_system();
             }
             if placed.with(|p| p.is_none()) {
+                // 窗口模型 v2 的声明窗口总是开着上来（`nsh.json`
+                // `defaultVisible` 不再生效）：要还原位置时先藏起来——
+                // 不是藏到托盘（`s.hidden` 不动、界面照建），`set_placement`
+                // 落在隐藏窗口上、就绪后由 `reveal_when_ready` 显示，用户
+                // 看不到「先在默认位置出现再跳走」。没东西可还原就不藏：
+                // 开了又藏再开反而闪一下。启动已收尾也跳过：那时窗口可能
+                // 已在屏幕上，再藏就永远消失。
                 let saved = zeo_shell::remembered()
                     .then(|| library_store().window_placement())
                     .flatten();
+                if saved.is_some() && !revealed.with(|s| *s) {
+                    hid.replace(true);
+                    win.hide();
+                }
                 if let Some(saved) = saved {
                     win.set_placement(saved);
                 }
@@ -523,7 +543,7 @@ pub fn install() -> Store {
     if let Some(path) = &restoring {
         request_accent(&s, Some(path));
     }
-    reveal_when_ready(s, win, placed, restoring.is_some());
+    reveal_when_ready(s, win, placed, hid, revealed, restoring.is_some());
     zeo_shell::start();
     if !library_store().roots().is_empty() {
         scan();
@@ -535,15 +555,17 @@ pub fn install() -> Store {
 /// 曲目装载失败）也按时显示，窗口不会一直藏着。
 const REVEAL_MAX_MS: u64 = 1500;
 
-/// 启动时主窗口按 nsh.json `window.defaultVisible: false` 隐藏着创建，
-/// 等首屏状态落定再显示：上次的窗口位置已还原、上次的曲目已装上（播放条
-/// 与封面强调色就位）。否则用户会看到窗口先在默认位置出现再跳走、播放条
-/// 与配色在首帧之后才变过来。显示前再等一帧，让上面的改动（位置、标题栏
-/// 样式）先落到平台与布局上。
+/// 启动时要还原位置的窗口先藏着（首个窗口状态到达时上面的效果
+/// `hide()`），等首屏状态落定再显示：上次的窗口位置已还原、上次的曲目
+/// 已装上（播放条与封面强调色就位）。显示前再等一帧，让上面的改动
+/// （位置、标题栏样式）先落到平台与布局上。从没藏过的窗口（没有位置
+/// 可还原）不显示——它开着上来了，这里只判断要不要补 `show()`。
 fn reveal_when_ready(
     s: Store,
     win: nsh_core::element::desktop::WindowRef,
     placed: Stored<Option<Option<nsh_core::desktop::WindowPlacement>>>,
+    hid: Stored<bool>,
+    revealed: Stored<bool>,
     restoring: bool,
 ) {
     const FRAME: Duration = Duration::from_millis(16);
@@ -558,17 +580,12 @@ fn reveal_when_ready(
             timer(FRAME).await;
         }
         timer(FRAME).await;
-        // 已经显示过（如第二份实例转来的唤起）就不再抢焦点。
-        if win.state().is_some_and(|st| st.visible) {
+        revealed.replace(true);
+        // 已经显示着（从未藏过，或第二份实例已唤起）：不再抢焦点。藏过的
+        // 照常显示——队列里的 Hide 先到、这里的 Show 后到，顺序有保证。
+        if !hid.with(|s| *s) && win.state().is_some_and(|st| st.visible) {
             return;
         }
         zeo_shell::show();
-        // Windows 隐藏窗口上的 `SetWindowPlacement` 只记普通位置、不保留
-        // 最大化 / 全屏（见 upstream.md），显示后再套一次模式。
-        if let Some(Some(saved)) = placed.get()
-            && saved.mode != nsh_core::desktop::WindowMode::Normal
-        {
-            win.set_placement(saved);
-        }
     });
 }

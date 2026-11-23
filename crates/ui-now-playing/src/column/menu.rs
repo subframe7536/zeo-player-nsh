@@ -73,7 +73,8 @@ pub(crate) fn more_menu() -> AnyElement {
             Icon::Copy,
             Box::new(move || {
                 if let Some(path) = path() {
-                    set_clipboard(path);
+                    // 写入结果不需要回执。
+                    let _ = set_clipboard(path);
                 }
             }),
         ))

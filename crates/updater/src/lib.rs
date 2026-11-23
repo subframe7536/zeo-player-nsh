@@ -139,7 +139,12 @@ pub fn install(archive: &Path) -> Result<(), String> {
     // 替换之前先记下程序路径：换完后本进程的 exe 是被挪走的旧文件，
     // `current_exe` 可能指向 `.nsh-updater-old-*`，重启会拉起旧版。
     nsh_core::restart::remember_program();
-    installation.install(archive).map_err(|e| e.to_string())
+    // 返回的新可执行文件路径用不上：改名 / 换 .app 时上游拿它 set_program
+    // （pub(crate)），本应用更新不改名。
+    installation
+        .install(archive)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// 清掉上次更新留下的东西（Windows 上运行中无法删的旧 exe、崩溃时没

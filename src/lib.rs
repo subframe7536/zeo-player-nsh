@@ -9,7 +9,7 @@ mod e2e;
 use std::rc::Rc;
 
 use nsh_core::desktop::{TitleBarOptions, TitleBarStyle, WindowAttributes};
-use nsh_core::element::desktop::{current_window, main_window};
+use nsh_core::element::desktop::{current_window, window as app_window};
 use nsh_core::prelude::*;
 
 use zeo_ui_store::theme::*;
@@ -28,13 +28,17 @@ pub use zeo_shell::{single_instance, window};
 pub use zeo_ui_store::BENCH_GRID;
 pub use zeo_ui_store::Nav;
 
-/// 应用根组件（`nsh.json` `"root"`）。
+/// 应用根组件（`nsh.json` `"root"`）：窗口模型 v2 下桌面根要自己声明
+/// 窗口——`main_window()` 是不可见的应用宿主，show / hide / close 请求
+/// 到不了它；用户窗口的元素与属性、关闭处理都挂在 `window()` 上。
+/// `nsh.json` 的 `window.defaultVisible` 随之失效：要还原上次位置时
+/// `install` 在首个窗口状态里先 `hide()`，就绪后由 `reveal_when_ready`
+/// 显示（`ui-store` 的 install.rs）。
 #[component]
 pub fn App() -> impl IntoElement {
     // 单实例兜底：真正的检查在 `native()`（窗口创建之前），这里 `Once`
     // 幂等，防不走 `native()` 的挂载路径。
     zeo_shell::single_instance::enforce();
-    let s = zeo_ui_store::install();
     let mut title_bar = TitleBarOptions::default();
     title_bar.style = TitleBarStyle::Hidden;
     title_bar.height = Some(px(TITLE_BAR));
@@ -54,12 +58,6 @@ pub fn App() -> impl IntoElement {
     // 留着），真要退出经 `zeo_shell::quit`（`desktop::quit` 不再回到这里，
     // 也不再触发下面的退出请求）。
     attributes.close_on_press = Some(false);
-    current_window().set(attributes);
-    main_window().on_close_press(|_| {
-        if zeo_shell::close_requested() {
-            zeo_shell::quit();
-        }
-    });
     // ⌘Q / Ctrl+Q / 退出菜单：挂着监听时平台不直接退，交给「关闭窗口」设置
     // （窗口已藏到托盘时直接退，见 `quit_requested`）。
     nsh_core::element::desktop::on_quit_request(|| {
@@ -67,7 +65,25 @@ pub fn App() -> impl IntoElement {
             zeo_shell::quit();
         }
     });
+    // Dock / Finder 重开（macOS）、再次启动（Windows / Linux）：v2 起上游
+    // 不再替应用显示窗口，只发 reopen——藏在托盘的窗口由应用自己放出来。
+    nsh_core::element::desktop::on_reopen(|| zeo_shell::show());
+    app_window()
+        .id("main")
+        .attributes(attributes)
+        .on_close_press(|_| {
+            if zeo_shell::close_requested() {
+                zeo_shell::quit();
+            }
+        })
+        .content(app_content)
+}
 
+/// 主窗口的内容（每次打开重造；本应用的窗口只开一次，即只跑一次）。
+/// `current_window()` 在这里才是这个用户窗口——`install` 靠它接管窗口
+/// 状态、隐藏与 reveal。
+fn app_content() -> AnyElement {
+    let s = zeo_ui_store::install(current_window());
     let full_open = signal(false);
     // 正在收起（淡出动画中）；收起途中再打开会取消它。
     let full_closing = signal(false);
@@ -209,7 +225,7 @@ pub fn App() -> impl IntoElement {
             close_prompt,
         ))
         .child(keys());
-    root
+    root.into_element()
 }
 
 /// 全局快捷键：动作与键位在 `zeo_ui_store::keybinds`（默认见

@@ -212,16 +212,17 @@ pub fn dialog_footer() -> View {
 /// （shadcn `bg-black/50`），点遮罩关闭，内容居中。
 pub fn modal(content: View, on_close: impl Fn() + Copy + 'static) -> AnyElement {
     // data_table 等拿键盘的组件已先绑了自己的 Esc（清内置选中 → 放键盘
-    // 两层），弹层的 `on_cancel` 要等它们让完才轮得到。给弹层挂一条更新
-    // 的 pass_through 绑定：按键查找「最新优先」先命中它，于是旧的组件
-    // 键位不再消费 Esc，按键继续走默认路径到 `on_cancel`——Esc 一次即
-    // 关（见 upstream.md「组件键位层盖过弹层取消」）。handler 空转：关
-    // 闭仍由 `on_cancel` 负责，pass_through 也让录键等下层消费者照常拿
-    // 到这键。
+    // 两层），弹层的 `on_cancel` 要等它们让完才轮得到。给弹层挂一条
+    // `over_focused` 的 pass_through 绑定（#2755）：它排在组件键位之
+    // 后查找、先命中，组件便不再消费 Esc；pass_through 把键放回默认路
+    // 径到 `on_cancel`——Esc 一次即关（见 upstream.md「组件键位层盖过
+    // 弹层取消」）。handler 空转：关闭仍由 `on_cancel` 负责，录键等下
+    // 层消费者也照常拿到这键。
     on_key_with(
         "escape",
         KeyOptions {
             pass_through: true,
+            over_focused: true,
             ..KeyOptions::default()
         },
         |_| {},

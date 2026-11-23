@@ -42,7 +42,7 @@ mod tests {
 
     #[component]
     pub(crate) fn MultiRowOverflowTest() -> impl IntoElement {
-        zeo_ui_store::install();
+        zeo_ui_store::install(nsh_core::element::desktop::main_window());
         let p = "mock.flac".to_owned();
         let rows = signal(HashMap::new());
         let full = signal(Some((
@@ -187,7 +187,7 @@ mod tests {
     /// 面板最窄宽度（`PANEL_MIN_W`）下的批量面板。
     #[component]
     pub(crate) fn NarrowBatchPanelTest() -> impl IntoElement {
-        zeo_ui_store::install();
+        zeo_ui_store::install(nsh_core::element::desktop::main_window());
         let paths = Rc::new(vec!["a.flac".to_owned(), "b.flac".to_owned()]);
         let displayed = computed(|| Rc::new(Vec::<TrackEntry>::new()));
         let rows = signal(HashMap::new());
@@ -249,7 +249,7 @@ mod tests {
     /// `when` 挂载），选中集固定两首。
     #[component]
     pub(crate) fn ToolDialogsTest() -> impl IntoElement {
-        zeo_ui_store::install();
+        zeo_ui_store::install(nsh_core::element::desktop::main_window());
         let shown = vec![entry("a.flac", "t0", "a", 1), entry("b.flac", "t1", "a", 2)];
         let displayed = computed(move || Rc::new(shown.clone()));
         let rows = signal(HashMap::new());
@@ -365,7 +365,7 @@ mod tests {
 
     #[component]
     pub(crate) fn ApplyButtonTest() -> impl IntoElement {
-        zeo_ui_store::install();
+        zeo_ui_store::install(nsh_core::element::desktop::main_window());
         let paths = Rc::new(APPLY_PATHS.lock().unwrap().clone());
         let shown: Vec<TrackEntry> = paths
             .iter()
@@ -434,7 +434,7 @@ mod tests {
 
     #[component]
     pub(crate) fn LyricsRemountTest() -> impl IntoElement {
-        zeo_ui_store::install();
+        zeo_ui_store::install(nsh_core::element::desktop::main_window());
         let full = signal(Some((
             HashMap::from([(TagField::Lyrics, "old".to_owned())]),
             Some("FLAC"),
@@ -501,7 +501,7 @@ mod tests {
 
     #[component]
     pub(crate) fn SinglePanelInstantSeedTest() -> impl IntoElement {
-        zeo_ui_store::install();
+        zeo_ui_store::install(nsh_core::element::desktop::main_window());
         let p = "mock.flac".to_owned();
         let meta = Arc::new(zeo_metadata::MetaInfo {
             title: "Mock Title".to_owned(),
@@ -531,7 +531,7 @@ mod tests {
     /// 页面级标签历史弹窗（入口在工具栏图标钮）。
     #[component]
     pub(crate) fn HistoryDialogTest() -> impl IntoElement {
-        zeo_ui_store::install();
+        zeo_ui_store::install(nsh_core::element::desktop::main_window());
         let open = signal(true);
         // 和页面（lib.rs）一样用 `when(open)` 挂载：「完成」关掉信号才会卸载弹窗。
         view().child(when(

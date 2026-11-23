@@ -4,10 +4,11 @@
 #   sh scripts/update-nsh.sh
 #
 # 频道选择：先 `nsh update nightly`；若 nightly 的基线版本落后于最新 stable
-# tag（nightly 冻结在发布点之前、没跟上），改 `nsh update stable`。
+# tag，再比较 nightly 与 stable tag 的提交日期——nightly 的提交确实旧于 stable
+# 的提交（冻结在发布点之前、没跟上）才算落后，改 `nsh update stable`。
+# 版本号低但提交更新（发布分支从旧基线分叉，nightly 实际领先）保持 nightly；
+# 取不到提交日期时退回按版本号判断。NSH_CHANNEL=nightly 强制跳过回退判断。
 # 未安装 nsh 时用官方脚本装 nightly，装完仍走同一套频道判断。
-# nightly 的基线版本号可能低于 stable（发布分支分叉，nightly 实际领先），
-# 此时设 NSH_CHANNEL=nightly 跳过回退判断。
 #
 # nightly 不发 crates.io，依赖走 git rev；stable 走 crates.io 版本号。
 # 最后同步 Cargo.toml 依赖说明符、AGENTS.md 的 nsh-pin 段、Cargo.lock，
@@ -40,6 +41,25 @@ version_lt() {
   [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]
 }
 
+tag_ts_pair() {
+  # tag_ts_pair <stable-tag>：浅抓 nightly 与该 stable tag，输出两个 tag 所指
+  # 提交的 committer 时间戳（"nightly_ts stable_ts"），失败返回非零。
+  local tmp n_ts s_ts
+  tmp="$(mktemp -d)"
+  git -C "$tmp" init -q
+  if ! git -C "$tmp" fetch -q --depth 1 "$GIT_URL" \
+    "refs/tags/nightly:refs/tags/nightly" \
+    "refs/tags/$1:refs/tags/cmp-stable" 2>/dev/null; then
+    rm -rf "$tmp"
+    return 1
+  fi
+  n_ts="$(git -C "$tmp" log -1 --format=%ct nightly)"
+  s_ts="$(git -C "$tmp" log -1 --format=%ct cmp-stable)"
+  rm -rf "$tmp"
+  [ -n "$n_ts" ] && [ -n "$s_ts" ] || return 1
+  echo "$n_ts $s_ts"
+}
+
 if ! command -v nsh >/dev/null 2>&1; then
   echo "==> nsh 未安装，用官方脚本安装"
   curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
@@ -53,8 +73,20 @@ latest_stable="$(git ls-remote --tags "$GIT_URL" | sed -nE 's|.*refs/tags/v([0-9
 echo "==> nsh update nightly"
 nsh update nightly
 if [ "${NSH_CHANNEL:-}" != "nightly" ] && [ -n "$latest_stable" ] && version_lt "$(cli_version)" "$latest_stable"; then
-  echo "==> nightly 停在 $(cli_version)，落后 stable v$latest_stable，改跟 stable"
-  nsh update stable
+  # 版本号低不一定是真落后：发布分支从旧基线分叉时 nightly 基线版本低但
+  # 提交更新。比较两边 tag 的提交日期，nightly 确实更旧才回退 stable。
+  n_ts=""; s_ts=""
+  if ts_pair="$(tag_ts_pair "v$latest_stable")"; then
+    n_ts="${ts_pair%% *}"; s_ts="${ts_pair##* }"
+  else
+    echo "nsh: 取 tag 提交日期失败，按版本号判断落后" >&2
+  fi
+  if [ -n "$n_ts" ] && [ "$n_ts" -ge "$s_ts" ]; then
+    echo "==> nightly 基线 $(cli_version) 低于 stable v$latest_stable，但提交 $(date -r "$n_ts" '+%Y-%m-%d') 不旧于 stable $(date -r "$s_ts" '+%Y-%m-%d')，保持 nightly"
+  else
+    echo "==> nightly 停在 $(cli_version)，落后 stable v$latest_stable，改跟 stable"
+    nsh update stable
+  fi
 fi
 echo "==> CLI: $(nsh --version)"
 

@@ -41,6 +41,21 @@ pub const MIN_HEIGHT: f32 = 720.0;
 // 这些没绑的线程记 0（广播：任一实例可处理——真实进程只有一个实例）。
 thread_local! {
     static INSTANCE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// 主窗口的 `WindowRef`（窗口模型 v2：`main_window()` 是不可见的应用
+    /// 宿主，窗口请求得发给用户窗口自己）。`zeo_ui_store::install` 在窗口
+    /// 内容里拿 `current_window()` 存进来；hide / show 只在界面线程调。
+    static MAIN_WINDOW: std::cell::RefCell<Option<nsh_core::element::desktop::WindowRef>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// 由 `zeo_ui_store::install` 在窗口内容里调用（那里 `current_window()`
+/// 才是真正的用户窗口；装在窗口外的调用拿到的是宿主）。
+pub fn set_main_window(win: nsh_core::element::desktop::WindowRef) {
+    MAIN_WINDOW.with(|w| *w.borrow_mut() = Some(win));
+}
+
+fn main_window() -> Option<nsh_core::element::desktop::WindowRef> {
+    MAIN_WINDOW.with(|w| w.borrow().clone())
 }
 static INSTANCE_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -214,7 +229,9 @@ pub fn start() {
 pub fn hide() {
     HIDDEN.lock().unwrap().insert(instance());
     notify();
-    nsh_core::element::desktop::main_window().hide();
+    if let Some(window) = main_window() {
+        window.hide();
+    }
 }
 
 /// 显示并激活窗口。
@@ -224,9 +241,10 @@ pub fn show() {
     hidden.remove(&0);
     drop(hidden);
     notify();
-    let window = nsh_core::element::desktop::main_window();
-    window.show();
-    window.focus();
+    if let Some(window) = main_window() {
+        window.show();
+        window.focus();
+    }
 }
 
 /// 退出应用（结束播放）：与 Cmd+Q / 退出菜单同一条收尾路径

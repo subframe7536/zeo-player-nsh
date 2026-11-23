@@ -265,8 +265,12 @@ fn eq_fader_drags_in_settings_scroll() {
     app.wait_for("role:switch[均衡器]").unwrap();
     app.press("role:switch[均衡器]").unwrap();
     app.wait_for("+0.0 dB").unwrap();
-    app.drag("label:均衡器 1k", point(px(0.0), px(-37.0)))
-        .unwrap();
+    app.drag(
+        "label:均衡器 1k",
+        point(px(0.0), px(-37.0)),
+        DragOptions::default(),
+    )
+    .unwrap();
     app.wait_for("+6.0 dB").unwrap();
     // 共享全局配置，用例结束前恢复：回平直、关开关。
     app.press("label:重置").unwrap();

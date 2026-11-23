@@ -109,7 +109,10 @@ pub(crate) fn tech_line_dyn(label: &'static str, value: impl Fn() -> String + 's
         .child(
             shell(Variant::Ghost, Size::IconXs)
                 .accessibility_label(SharedString::from(format!("复制{label}")))
-                .on_press(move |_: &()| set_clipboard(value()))
+                .on_press(move || {
+                    // `set_clipboard` 的 Answer 只报告写入结果，丢掉不取消。
+                    let _ = set_clipboard(value());
+                })
                 .child(icon(Icon::Copy, 11.0, muted_fg)),
         )
 }

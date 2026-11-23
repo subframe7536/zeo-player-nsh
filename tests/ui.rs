@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use nsh_core::geometry::{px, size};
 use nsh_core::platform::Os;
-use nsh_engine::{EngineConfig, Root};
-use nsh_testing::Headless;
+use nsh_engine::EngineConfig;
+use nsh_testing::{DragOptions, Headless};
 use zeo_player::App;
 
 const CORPUS: &str = concat!(
@@ -81,7 +81,10 @@ fn start_on(os: Os, width: f32, height: f32) -> Headless {
     zeo_player::config::library_store()
         .set_sidebar_section(zeo_player::config::SidebarSection::Playlists);
     let theme = nsh_base::Theme::from_json(include_str!("../theme.json")).expect("theme.json");
-    let mut config = EngineConfig::new(Root::of::<App>().tokens(theme.into_tokens()));
+    // 窗口模型 v2：App 自己声明 `window().id("main")`，与打包形态一致
+    // （`current_window` 指它；`main_window` 是不可见宿主）。不能再套
+    // `windowed_root`——它自己声明一个 `"main"` 窗口，会嵌出第二扇。
+    let mut config = EngineConfig::new(nsh_engine::Root::of::<App>().tokens(theme.into_tokens()));
     config.ui_sets = vec![nsh_base::registry(), zeo_player::registry()];
     config.viewport = size(px(width), px(height));
     config.environment.os = os;
