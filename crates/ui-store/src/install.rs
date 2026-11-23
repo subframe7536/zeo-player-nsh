@@ -239,25 +239,35 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
         }
     });
 
-    // 「记住窗口大小和位置」：placement 走 NSH——启动后第一次拿到窗口状态
-    // 时恢复上次存的（`set_placement` 会按现在的显示器校正）；之后平台
-    // 每次上报的位置变化写回配置。`state` 在焦点变化等不动位置的时候也
-    // 重报，与已存值比对去重（`window_placement` 是非信号的直读，本效果
-    // 只订阅窗口状态 memo）。窗口刚开还藏着（见 `reveal_when_ready`），
-    // 还原不会被看到。`placed`：`None` 还没还原，`Some(saved)` 已还原。
+    // 「记住窗口大小和位置」：placement 走 NSH——窗口模型 v2 的声明窗口
+    // 总是开着上来（`nsh.json` `defaultVisible` 不再生效），首个窗口状态
+    // 也要等首次显示之后才上报，按它再 `hide()` 一定来不及——用户看得见
+    // 「先在默认位置出现、消失、再跳到存档位置」。好在窗口内容首次渲染时
+    // 发给 `WindowRef` 的命令随开窗按序应用（上游 `early` 并进
+    // `window_commands`，跟在 `OpenWindow` 后）：要还原位置就在构建期
+    // 同步 `hide()` + `set_placement`——窗口创建即隐藏、在隐藏状态下摆好
+    // （`set_placement` 会按现在的显示器校正），就绪后由
+    // `reveal_when_ready` 显示，用户看不到跳变。没东西可还原就不藏：
+    // 开了又藏再开反而闪一下。
     zeo_shell::set_main_window(win.clone());
-    let placed = stored(None::<Option<nsh_core::desktop::WindowPlacement>>);
-    // 启动藏过窗（要还原位置时首个状态先 `hide()`）：`reveal_when_ready`
-    // 据此知道必须补 `show()`，不能按「已经显示」收尾。
-    let hid = stored(false);
-    // 启动显示已收尾（`reveal_when_ready`）：首个窗口状态晚到（并行宿主
-    // 下可能晚于 `REVEAL_MAX_MS`）时它按「已经显示」收尾——那时再藏窗
-    // 就是永久消失，所以置位后首个状态不再 `hide()`。
-    let revealed = stored(false);
-    // 上次上报的可见性：藏在托盘时窗口由系统重新显示（macOS 点 Dock、
-    // Windows 任务栏 / Alt+Tab，NSH 自己把窗口提到前面）只表现为 visible
-    // 由假变真——按这个跳变通知 zeo-shell，界面重新装上。只认跳变：
-    // `hide()` 先记隐藏再藏窗，期间仍报 visible 的那几次不能算重新显示。
+    let saved = library_store()
+        .remember_frame()
+        .then(|| library_store().window_placement())
+        .flatten();
+    // 启动藏过窗：`reveal_when_ready` 据此知道必须补 `show()`，不能按
+    // 「已经显示」收尾。
+    let hid = saved.is_some();
+    if let Some(saved) = saved {
+        win.hide();
+        win.set_placement(saved);
+    }
+    // 之后平台每次上报的位置变化写回配置。`state` 在焦点变化等不动位置
+    // 的时候也重报，与已存值比对去重（`window_placement` 是非信号的直读，
+    // 本效果只订阅窗口状态 memo）。上次上报的可见性：藏在托盘时窗口由
+    // 系统重新显示（macOS 点 Dock、Windows 任务栏 / Alt+Tab，NSH 自己把
+    // 窗口提到前面）只表现为 visible 由假变真——按这个跳变通知
+    // zeo-shell，界面重新装上。只认跳变：`hide()` 先记隐藏再藏窗，期间
+    // 仍报 visible 的那几次不能算重新显示。
     let was_visible = stored(false);
     effect({
         let win = win.clone();
@@ -268,27 +278,6 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
             let was = was_visible.replace(state.visible);
             if state.visible && !was {
                 zeo_shell::shown_by_system();
-            }
-            if placed.with(|p| p.is_none()) {
-                // 窗口模型 v2 的声明窗口总是开着上来（`nsh.json`
-                // `defaultVisible` 不再生效）：要还原位置时先藏起来——
-                // 不是藏到托盘（`s.hidden` 不动、界面照建），`set_placement`
-                // 落在隐藏窗口上、就绪后由 `reveal_when_ready` 显示，用户
-                // 看不到「先在默认位置出现再跳走」。没东西可还原就不藏：
-                // 开了又藏再开反而闪一下。启动已收尾也跳过：那时窗口可能
-                // 已在屏幕上，再藏就永远消失。
-                let saved = zeo_shell::remembered()
-                    .then(|| library_store().window_placement())
-                    .flatten();
-                if saved.is_some() && !revealed.with(|s| *s) {
-                    hid.replace(true);
-                    win.hide();
-                }
-                if let Some(saved) = saved {
-                    win.set_placement(saved);
-                }
-                placed.replace(Some(saved));
-                return;
             }
             if zeo_shell::remembered()
                 && library_store().window_placement() != Some(state.placement)
@@ -543,7 +532,7 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
     if let Some(path) = &restoring {
         request_accent(&s, Some(path));
     }
-    reveal_when_ready(s, win, placed, hid, revealed, restoring.is_some());
+    reveal_when_ready(s, win, hid, restoring.is_some());
     zeo_shell::start();
     if !library_store().roots().is_empty() {
         scan();
@@ -555,35 +544,29 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
 /// 曲目装载失败）也按时显示，窗口不会一直藏着。
 const REVEAL_MAX_MS: u64 = 1500;
 
-/// 启动时要还原位置的窗口先藏着（首个窗口状态到达时上面的效果
-/// `hide()`），等首屏状态落定再显示：上次的窗口位置已还原、上次的曲目
-/// 已装上（播放条与封面强调色就位）。显示前再等一帧，让上面的改动
-/// （位置、标题栏样式）先落到平台与布局上。从没藏过的窗口（没有位置
+/// 启动时要还原位置的窗口先藏着（`install` 构建期随开窗下发的 Hide），
+/// 等首屏状态落定再显示：上次的曲目已装上（播放条与封面强调色就位）。
+/// 显示前再等一帧，让改动先落到平台与布局上。从没藏过的窗口（没有位置
 /// 可还原）不显示——它开着上来了，这里只判断要不要补 `show()`。
 fn reveal_when_ready(
     s: Store,
     win: nsh_core::element::desktop::WindowRef,
-    placed: Stored<Option<Option<nsh_core::desktop::WindowPlacement>>>,
-    hid: Stored<bool>,
-    revealed: Stored<bool>,
+    hid: bool,
     restoring: bool,
 ) {
     const FRAME: Duration = Duration::from_millis(16);
     spawn(async move {
         let deadline = Instant::now() + Duration::from_millis(REVEAL_MAX_MS);
-        loop {
-            let ready = placed.with(|p| p.is_some())
-                && (!restoring || s.track.with_untracked(|t| t.path.is_some()));
-            if ready || Instant::now() >= deadline {
-                break;
-            }
+        while restoring
+            && !s.track.with_untracked(|t| t.path.is_some())
+            && Instant::now() < deadline
+        {
             timer(FRAME).await;
         }
         timer(FRAME).await;
-        revealed.replace(true);
         // 已经显示着（从未藏过，或第二份实例已唤起）：不再抢焦点。藏过的
         // 照常显示——队列里的 Hide 先到、这里的 Show 后到，顺序有保证。
-        if !hid.with(|s| *s) && win.state().is_some_and(|st| st.visible) {
+        if !hid && win.state().is_some_and(|st| st.visible) {
             return;
         }
         zeo_shell::show();

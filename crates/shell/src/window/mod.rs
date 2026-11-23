@@ -8,8 +8,9 @@
 //! 决定做什么；`Ask` 时不关闭，只把 [`take_close_request`] 置位，由界面
 //! 弹出选择；确定退出经 NSH 的 `desktop::quit()`（与 Cmd+Q / 退出菜单同
 //! 一条收尾路径）。「记住窗口大小和位置」也走 NSH：界面侧订阅
-//! `WindowRef::state`，`placement` 变化写进配置，启动时用 `set_placement`
-//! 恢复（上游按现有显示器校正）。
+//! `WindowRef::state`，`placement` 变化写进配置；启动时在窗口内容首渲染
+//! 里随开窗下发 `hide()` + `set_placement` 恢复（首个窗口状态要等首次
+//! 显示后才到、按它再藏就闪了；上游按现有显示器校正）。
 //!
 //! 余下的平台代码：
 //!

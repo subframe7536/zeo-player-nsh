@@ -32,8 +32,9 @@ pub use zeo_ui_store::Nav;
 /// 窗口——`main_window()` 是不可见的应用宿主，show / hide / close 请求
 /// 到不了它；用户窗口的元素与属性、关闭处理都挂在 `window()` 上。
 /// `nsh.json` 的 `window.defaultVisible` 随之失效：要还原上次位置时
-/// `install` 在首个窗口状态里先 `hide()`，就绪后由 `reveal_when_ready`
-/// 显示（`ui-store` 的 install.rs）。
+/// `install` 在窗口内容首渲染里同步 `hide()` + `set_placement`（随开窗
+/// 按序应用，首个窗口状态要等首次显示后才到、按它再藏就闪了），就绪后
+/// 由 `reveal_when_ready` 显示（`ui-store` 的 install.rs）。
 #[component]
 pub fn App() -> impl IntoElement {
     // 单实例兜底：真正的检查在 `native()`（窗口创建之前），这里 `Once`
