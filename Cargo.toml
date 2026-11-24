@@ -12,11 +12,11 @@ members = ["crates/*"]
 # 走 git rev（与 `nsh --version` 括号里的提交一致）；stable 走 crates.io 版本号。
 # dev-dependencies 里的 nsh-engine / nsh-testing 一起改。
 [workspace.dependencies]
-nsh-core = { git = "https://github.com/longbridge/nsh", rev = "f577c51901a2857956f8ba0580da4db9ce3a3311", features = ["svg"] }
-nsh-base = { git = "https://github.com/longbridge/nsh", rev = "f577c51901a2857956f8ba0580da4db9ce3a3311" }
-nsh-engine = { git = "https://github.com/longbridge/nsh", rev = "f577c51901a2857956f8ba0580da4db9ce3a3311" }
-nsh-testing = { git = "https://github.com/longbridge/nsh", rev = "f577c51901a2857956f8ba0580da4db9ce3a3311", default-features = false }
-nsh-updater = { git = "https://github.com/longbridge/nsh", rev = "f577c51901a2857956f8ba0580da4db9ce3a3311" }
+nsh-core = { git = "https://github.com/longbridge/nsh", rev = "589a60f7569c14023c262c126f50279f27ddf470", features = ["svg"] }
+nsh-base = { git = "https://github.com/longbridge/nsh", rev = "589a60f7569c14023c262c126f50279f27ddf470" }
+nsh-engine = { git = "https://github.com/longbridge/nsh", rev = "589a60f7569c14023c262c126f50279f27ddf470" }
+nsh-testing = { git = "https://github.com/longbridge/nsh", rev = "589a60f7569c14023c262c126f50279f27ddf470", default-features = false }
+nsh-updater = { git = "https://github.com/longbridge/nsh", rev = "589a60f7569c14023c262c126f50279f27ddf470" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
