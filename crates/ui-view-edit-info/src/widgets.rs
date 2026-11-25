@@ -82,7 +82,7 @@ pub(crate) fn fields(draft: Signal<TagDraft>) -> View {
         )))
 }
 
-/// 单个标签字段的输入框（`input_field` 36 高纯文本样式；宽 / 聚焦由
+/// 单个标签字段的输入框（`text_input` 36 高纯文本样式；宽 / 聚焦由
 /// 调用处加）。`label` 同时是无障碍名。
 fn field_input(label: &'static str, field: TagField, draft: Signal<TagDraft>) -> Input {
     let initial = untracked(|| {
@@ -90,7 +90,7 @@ fn field_input(label: &'static str, field: TagField, draft: Signal<TagDraft>) ->
             .with(|d| d.values.get(&field).cloned())
             .unwrap_or_default()
     });
-    input_field(false)
+    text_input(false)
         .label(label)
         .default_value(initial)
         .readonly(move || draft.with(|d| d.saving))

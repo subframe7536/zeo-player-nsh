@@ -41,8 +41,9 @@ pub(crate) use zeo_ui_components::button::{
     Size, Variant, icon_button, outline_button, pill_button, text_button,
 };
 pub(crate) use zeo_ui_components::form::{
-    dialog_content, dialog_footer, dialog_header, input_field, modal, tab_list, tab_trigger,
+    dialog_content, dialog_footer, dialog_header, modal, tab_list, tab_trigger,
 };
+pub(crate) use zeo_ui_components::input::text_input;
 pub(crate) use zeo_ui_components::page::{empty_state, page_header};
 pub(crate) use zeo_ui_components::tracks::{
     Columns, ROW, format_bytes, track_columns, track_row_selectable,

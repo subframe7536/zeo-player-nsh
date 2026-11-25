@@ -20,9 +20,11 @@ pub(crate) use zeo_ui_components::button::{
 };
 
 pub(crate) use zeo_ui_components::form::{
-    SelectOption, dialog_content, dialog_footer, dialog_header, input_field, modal, select,
-    select_trigger, tab_list, tab_trigger,
+    SelectOption, dialog_content, dialog_footer, dialog_header, modal, select, select_trigger,
+    tab_list, tab_trigger,
 };
+
+pub(crate) use zeo_ui_components::input::text_input;
 
 pub(crate) use zeo_icons::{Icon, icon};
 

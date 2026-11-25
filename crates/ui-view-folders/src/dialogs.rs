@@ -31,7 +31,7 @@ pub(crate) fn name_dialog(
     let content = dialog_content(425.0)
         .child(dialog_header(heading, None))
         .child(
-            input_field(false)
+            text_input(false)
                 .w_full()
                 .label("名称")
                 .auto_focus(true)

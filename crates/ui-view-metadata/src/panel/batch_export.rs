@@ -387,7 +387,7 @@ pub(crate) fn export_dialog(
                 .child(wrap_row(
                     "文件名",
                     vec![
-                        input_field(true)
+                        text_input(true)
                             .flex_1()
                             .min_w(px(160.0))
                             .label("导出文件名模板")

@@ -227,7 +227,7 @@ pub(crate) fn single_header(
                 // 或 ✓ 提交；输入即时 `plan_name` 预检（分隔符硬规则 /
                 // 撞名先报，✓ 随之禁用）。
                 let mut parts: Vec<AnyElement> = vec![
-                    input_field(true)
+                    text_input(true)
                         .flex_1()
                         .min_w(px(0.0))
                         .h(px(24.0))

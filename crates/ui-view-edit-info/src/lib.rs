@@ -17,9 +17,10 @@ pub(crate) use zeo_ui_components::button::{
 pub(crate) use zeo_ui_components::cover::cover;
 
 pub(crate) use zeo_ui_components::form::{
-    SelectOption, dialog_content, dialog_footer, dialog_header, input_field, modal, select,
-    trigger_chevron,
+    SelectOption, dialog_content, dialog_footer, dialog_header, modal, select, trigger_chevron,
 };
+
+pub(crate) use zeo_ui_components::input::{TextAreaHeight, text_area, text_input};
 
 pub(crate) use zeo_icons::{Icon, icon};
 

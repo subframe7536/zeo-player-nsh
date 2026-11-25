@@ -4,7 +4,8 @@ use nsh_core::prelude::*;
 
 use super::{pref_row, setting_section};
 use zeo_ui_components::button::{Size, Variant, text_button};
-use zeo_ui_components::form::{SelectOption, input_field, select, switch};
+use zeo_ui_components::form::{SelectOption, select, switch};
+use zeo_ui_components::input::text_input;
 use zeo_ui_components::slider::{SliderStyle, slider};
 use zeo_ui_store::store;
 use zeo_ui_store::theme::*;
@@ -49,7 +50,7 @@ fn int_field(
         }
         Err(_) => draft.set(format!("{}", get())),
     };
-    let field = input_field(true)
+    let field = text_input(true)
         .w(px(88.0))
         .label(label)
         .keyboard_type(KeyboardType::Number)
@@ -174,7 +175,7 @@ fn db_row(
         }
         Err(_) => draft.set(format!("{}", get())),
     };
-    let field = input_field(true)
+    let field = text_input(true)
         .w(px(88.0))
         .label(label)
         .keyboard_type(KeyboardType::Number)

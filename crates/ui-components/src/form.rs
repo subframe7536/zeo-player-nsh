@@ -1,10 +1,9 @@
-//! 表单与弹窗的 shadcn/ui 外观：Input、Select 触发器、Dialog 内容、Tabs
-//! 分段。行为来自 nsh-base 的 `Input` 与 `tabs` / `tab` /
+//! 表单与弹窗的 shadcn/ui 外观：Select 触发器、Dialog 内容、Tabs
+//! 分段。行为来自 nsh-base 的 `select` / `tabs` / `tab` /
 //! `dialog`；尺寸、间距、圆角同 shadcn，颜色取自主题（浅色 / 深色）。
+//! 文本输入在 `crate::input`（[`text_input`] / [`text_area`]）。
 
-use nsh_base::{
-    Input, SwitchElement, TabElement, TabsElement, input, switch as base_switch, tab, tabs,
-};
+use nsh_base::{SwitchElement, TabElement, TabsElement, switch as base_switch, tab, tabs};
 use nsh_core::prelude::*;
 
 use super::button::RADIUS_MD;
@@ -13,37 +12,6 @@ use zeo_ui_store::theme::*;
 
 /// shadcn 的 `rounded-lg`。
 pub const RADIUS_LG: f32 = 10.0;
-
-/// shadcn Input：`h-9 rounded-md border border-input px-3 text-sm
-/// shadow-xs`，聚焦时 `border-ring ring-3 ring-ring/50`。底色用 `card`
-/// 而不是 shadcn 的 `bg-transparent` / `dark:bg-input/30`：面板底色会随
-/// 封面染色，透明或半透明的底会把染色带进输入框。`small` 为 `h-8`
-/// （放在一行条件里）。
-pub fn input_field(small: bool) -> Input {
-    let t = nsh_base::theme();
-    let (input_c, ring) = (t.input, t.ring);
-    let field = input()
-        .h(px(if small { 32.0 } else { 36.0 }))
-        .px(px(8.0))
-        .rounded(px(RADIUS_MD))
-        .border_1()
-        .border_color(input_c)
-        .shadow_xs()
-        .text_size(px(14.0))
-        .text_color(fg())
-        .bg(t.card);
-    // macOS 的单行输入把行盒垂直居在内容盒里，而字形墨水在行盒内偏下：
-    // 加 2pt 底边距把内容盒中心抬高约 1pt 抵消（见 upstream.md「单行
-    // 输入文字偏下」）。Windows 的 RichEdit 落位已正，同样抬高反而
-    // 显得文字偏上，不加。
-    #[cfg(target_os = "macos")]
-    let field = field.pb(px(2.0));
-    field.focus(move |st| {
-        st.border_color(ring)
-            .ring(px(3.0))
-            .ring_color(ring.opacity(0.5))
-    })
-}
 
 /// shadcn Switch：`w-[42px] h-[24px]` 轨道（`rounded-full bg-muted border border-border`，
 /// 开启时 `bg-primary border-primary`），`size-[18px]` 白色滑块（`rounded-full shadow-sm`，

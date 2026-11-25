@@ -159,7 +159,7 @@ pub(crate) fn rename_dialog(
             view()
                 .gap(px(6.0))
                 .child(
-                    input_field(false)
+                    text_input(false)
                         .label("模板")
                         .placeholder("{track:02d} - {title}")
                         .value(move || tpl.get())

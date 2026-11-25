@@ -118,12 +118,9 @@ pub(crate) fn lyrics_area(draft: Signal<TagDraft>, file: bool, generation: u32) 
             }
         })
     });
-    input_field(false)
+    text_area(TextAreaHeight::Fixed(200.0))
         .key(format!("{file}-{generation}"))
         .label("歌词")
-        .multiline(true)
-        .h(px(200.0))
-        .py(px(10.0))
         .default_value(initial)
         .placeholder("粘贴歌词文本（支持 LRC 时间轴）")
         .readonly(move || draft.with(|d| d.saving))

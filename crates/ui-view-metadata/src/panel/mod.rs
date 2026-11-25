@@ -39,7 +39,9 @@ pub(crate) use zeo_ui_components::checkbox::checkbox;
 
 pub(crate) use zeo_ui_components::cover::cover;
 
-pub(crate) use zeo_ui_components::form::{SelectOption, input_field, select, trigger_chevron};
+pub(crate) use zeo_ui_components::form::{SelectOption, select, trigger_chevron};
+
+pub(crate) use zeo_ui_components::input::{TextAreaHeight, text_area, text_input};
 
 pub(crate) use zeo_icons::{Icon, icon, icon_dyn};
 

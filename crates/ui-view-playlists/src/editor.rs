@@ -20,7 +20,7 @@ pub fn editor_dialog() -> AnyElement {
         (true, false) => "重命名歌单",
         (true, true) => "编辑智能歌单",
     });
-    let name_input = input_field(false)
+    let name_input = text_input(false)
         .w_full()
         .label("歌单名称")
         .auto_focus(true)
@@ -151,7 +151,7 @@ pub(crate) fn rule_editor(draft: Signal<Draft>) -> View {
             .collect(),
         170.0,
     );
-    let limit = input_field(true)
+    let limit = text_input(true)
         .w(px(80.0))
         .label("数量上限")
         .keyboard_type(KeyboardType::Number)
@@ -268,7 +268,7 @@ pub fn condition_editor(
             FieldType::Number => "数值",
             FieldType::Date => "天数",
         };
-        input_field(true)
+        text_input(true)
             .flex_1()
             .min_w(px(80.0))
             .label("值")

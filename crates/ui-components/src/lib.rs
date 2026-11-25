@@ -7,6 +7,7 @@ pub mod button;
 pub mod checkbox;
 pub mod cover;
 pub mod form;
+pub mod input;
 pub mod nav;
 pub mod page;
 pub mod radio;

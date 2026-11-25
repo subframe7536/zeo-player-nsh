@@ -57,7 +57,7 @@ pub(crate) fn wrap_row(label: &'static str, controls: Vec<AnyElement>) -> View {
         )
 }
 
-/// 加载中的输入框占位：与 `input_field` 同款外观，无法获得焦点，文字显示「加载中...」。
+/// 加载中的输入框占位：与 `text_input` 同款外观，无法获得焦点，文字显示「加载中...」。
 pub(crate) fn loading_input(small: bool, width: Option<f32>) -> View {
     let t = nsh_base::theme();
     let pad = match width {
@@ -114,7 +114,7 @@ pub(crate) fn field_row(
                     })
                     .unwrap_or_default()
             });
-            input_field(true)
+            text_input(true)
                 .flex_1()
                 .min_w(px(0.0))
                 .label(label)

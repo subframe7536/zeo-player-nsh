@@ -323,7 +323,7 @@ pub(crate) fn tri_row(
                 112.0,
             )
             .into_element(),
-            input_field(true)
+            text_input(true)
                 .flex_1()
                 .min_w(px(TRI_INPUT_MIN_W))
                 .label(label)

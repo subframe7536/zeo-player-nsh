@@ -3,7 +3,7 @@
 use nsh_core::prelude::*;
 
 use super::setting_section;
-use zeo_ui_components::form::input_field;
+use zeo_ui_components::input::text_input;
 use zeo_ui_store::store;
 use zeo_ui_store::theme::*;
 
@@ -93,7 +93,7 @@ pub(crate) fn lyrics_offset_section() -> View {
             ),
         }
     };
-    let field = input_field(true)
+    let field = text_input(true)
         .w(px(88.0))
         .label("全局歌词偏移")
         .keyboard_type(KeyboardType::Number)

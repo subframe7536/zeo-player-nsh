@@ -87,7 +87,7 @@ pub(crate) fn number_input(
             .or_else(|| full.with(|f| f.as_ref().and_then(|(m, _, _)| m.get(&field).cloned())))
             .unwrap_or_default()
     });
-    input_field(true)
+    text_input(true)
         .w(px(width))
         .label(label)
         .default_value(initial)
@@ -237,11 +237,8 @@ pub(crate) fn multi_row(
         }))
 }
 
-/// 多行输入本体：输入框自身限高、内部原生滚动。文本超过上限时
-/// 锁成固定高：h(auto) 的输入框 intrinsic 高度随内容长，max_h 只裁元素框，
-/// 宿主编辑器仍按内容高开视口——内部永远没有可滚范围（overflow_hidden 再
-/// 裁一下只是看不见溢出）。固定到 max_height 后编辑器视口被框住，原生滚动
-/// 恢复；未超限时仍 auto 随文生长。22 = py(10)×2 + border_1×2。
+/// 多行输入本体：`text_area` 的 `Grow` 随文生长、超过 `max_height`
+/// 锁成固定高恢复内部原生滚动（机制见 `components::input`）。
 fn multi_input(
     label: &'static str,
     field: TagField,
@@ -251,35 +248,23 @@ fn multi_input(
     max_height: f32,
     generation: u32,
 ) -> AnyElement {
-    let content_h = signal(0.0f32);
-    input_field(false)
-        .key(format!("{field:?}-{generation}"))
-        .flex_1()
-        .min_w(px(0.0))
-        .py(px(10.0))
-        .multiline(true)
-        .label(label)
-        .default_value(initial)
-        .readonly(move || draft.with(|d| d.saving))
-        .on_content_size_change(move |s: &nsh_core::Size<nsh_core::Points>| {
-            content_h.set(s.height.0)
+    text_area(TextAreaHeight::Grow {
+        min: min_height,
+        max: max_height,
+    })
+    .key(format!("{field:?}-{generation}"))
+    .flex_1()
+    .min_w(px(0.0))
+    .label(label)
+    .default_value(initial)
+    .readonly(move || draft.with(|d| d.saving))
+    .on_change(move |t: &str| {
+        draft.update(|d| {
+            d.values.insert(field, t.to_owned());
+            d.saved = false;
         })
-        .on_change(move |t: &str| {
-            draft.update(|d| {
-                d.values.insert(field, t.to_owned());
-                d.saved = false;
-            })
-        })
-        .h(move || {
-            if content_h.get() + 22.0 > max_height {
-                Length::from(px(max_height))
-            } else {
-                auto()
-            }
-        })
-        .min_h(px(min_height))
-        .max_h(px(max_height))
-        .into_element()
+    })
+    .into_element()
 }
 
 /// 封面行：缩略图 + 更换 / 移除（写内嵌图片）。

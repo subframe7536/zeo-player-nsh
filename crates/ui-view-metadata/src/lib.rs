@@ -28,7 +28,7 @@ use zeo_metadata::write::TagField;
 use zeo_types::config::TrackEntry;
 use zeo_ui_components::button::{RADIUS_MD, Size, Variant, text_button};
 use zeo_ui_components::checkbox::checkbox;
-use zeo_ui_components::form::input_field;
+use zeo_ui_components::input::text_input;
 use zeo_ui_components::page::page_header;
 use zeo_ui_store::store;
 use zeo_ui_store::theme::*;
@@ -208,7 +208,7 @@ pub fn page() -> View {
                                 .w(move || px(filter_w()))
                                 .h(px(32.0))
                                 .child(
-                                    input_field(true)
+                                    text_input(true)
                                         .size_full()
                                         .label("筛选")
                                         .placeholder("筛选文件名、标题、艺术家、专辑、标签")
