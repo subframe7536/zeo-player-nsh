@@ -7,16 +7,15 @@ publish = false
 [workspace]
 members = ["crates/*"]
 
-# 各 crate 共用的依赖版本：nsh-* 跟随 NSH 的 nightly / stable 频道，
-# `sh scripts/update-nsh.sh` 挑更新的频道并一键对齐——nightly 不发 crates.io，
-# 走 git rev（与 `nsh --version` 括号里的提交一致）；stable 走 crates.io 版本号。
+# 各 crate 共用的依赖版本：nsh-* 只跟随 NSH 的 stable 频道，
+# `sh scripts/update-nsh.sh` 一键对齐——stable 走 crates.io 版本号。
 # dev-dependencies 里的 nsh-engine / nsh-testing 一起改。
 [workspace.dependencies]
-nsh-core = { git = "https://github.com/longbridge/nsh", rev = "589a60f7569c14023c262c126f50279f27ddf470", features = ["svg"] }
-nsh-base = { git = "https://github.com/longbridge/nsh", rev = "589a60f7569c14023c262c126f50279f27ddf470", default-features = false }
-nsh-engine = { git = "https://github.com/longbridge/nsh", rev = "589a60f7569c14023c262c126f50279f27ddf470" }
-nsh-testing = { git = "https://github.com/longbridge/nsh", rev = "589a60f7569c14023c262c126f50279f27ddf470", default-features = false }
-nsh-updater = { git = "https://github.com/longbridge/nsh", rev = "589a60f7569c14023c262c126f50279f27ddf470" }
+nsh-core = { version = "0.7.0", features = ["svg"] }
+nsh-base = { version = "0.7.0", default-features = false }
+nsh-engine = { version = "0.7.0" }
+nsh-testing = { version = "0.7.0", default-features = false }
+nsh-updater = { version = "0.7.0" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

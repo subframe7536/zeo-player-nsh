@@ -5,7 +5,7 @@ ZeoPlayer is a local-first desktop music player written in pure Rust with NSH (m
 ## Rules
 
 - **Ask before every `git commit` and `git push`.** Never commit or push on your own.
-- **NSH pin**: Track whichever NSH channel is newer via `sh scripts/update-nsh.sh`. Keep `nsh-core`, `nsh-base`, `nsh-engine`, `nsh-testing`, and `nsh-updater` in `[workspace.dependencies]` synced (<!-- nsh-pin -->currently `0.6.0 (589a60f nightly)`, rev `589a60f7569c14023c262c126f50279f27ddf470`<!-- /nsh-pin -->). Update `.github/actions/setup` if the channel switches between nightly and stable.
+- **NSH pin**: Track the NSH stable channel only via `sh scripts/update-nsh.sh`. Keep `nsh-core`, `nsh-base`, `nsh-engine`, `nsh-testing`, and `nsh-updater` in `[workspace.dependencies]` synced (<!-- nsh-pin -->currently `0.7.0 (3f8ecd8 stable)`, version `0.7.0`<!-- /nsh-pin -->).
 - **Cross-platform**: Keep both macOS and Windows building. Gate OS-specific code with `cfg(target_os = ...)`; don't add a macOS-only path without a Windows counterpart or a documented gap.
 - **Docs & workarounds**: Update `README.md` when behavior changes. Record upstream NSH limitations in `upstream.md` and work around them in-app—never patch NSH crates locally.
 - **Toolchains**: Resolve `$CARGO_HOME` / `$RUSTUP_HOME` first, falling back to `~/.cargo` / `~/.rustup` only when unset.
@@ -107,7 +107,7 @@ uv run --with pillow python -c "from PIL import Image; Image.open('resources/ico
 ## Commands & Testing
 
 ```sh
-sh scripts/update-nsh.sh  # sync NSH channel/rev across Cargo.toml, AGENTS.md, Cargo.lock + nsh check
+sh scripts/update-nsh.sh  # sync the stable version across Cargo.toml, AGENTS.md, Cargo.lock + nsh check
 nsh check .               # cargo check + type check
 nsh test .                # unit tests + tests/ui.rs (headless UI tests)
 nsh run .                 # run with rebuild on change (uses .nsh/dev-data; override via ZEO_PLAYER_DATA_DIR)
