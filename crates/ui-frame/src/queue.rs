@@ -79,6 +79,11 @@ fn queue_panel(open: Signal<bool>) -> View {
         )
     });
     let count = computed(move || s.queue.with(|q| q.len()));
+    // 序号列宽度随队列总曲目数位数自适应，避免超过 3 位数后换行且保持上下对齐。
+    let num_w = computed(move || {
+        let digits = count.get().max(1).ilog10() + 1;
+        (digits as f32 * 8.0).max(24.0)
+    });
     let current = computed(move || s.track.with(|t| t.index));
     let start = untracked(move || current.get()).max(0) as usize;
 
@@ -117,22 +122,27 @@ fn queue_panel(open: Signal<bool>) -> View {
             .active(|st| st.opacity(0.7))
             .on_press(move |_: &()| player().jump(untracked(|| at.index())))
             .child(
-                view().w(px(24.0)).items_center().child(
-                    when(is_current, move || {
-                        icon_dyn(
-                            move || if playing() { Icon::Wave } else { Icon::Play },
-                            13.0,
-                            primary,
-                        )
-                    })
-                    .otherwise(move || {
-                        text(move || (at.index() + 1).to_string())
-                            .text_size(px(12.0))
-                            .line_height(px(12.0))
-                            .tabular_nums()
-                            .text_color(faint())
-                    }),
-                ),
+                view()
+                    .w(move || px(num_w.get()))
+                    .flex_shrink_0()
+                    .items_center()
+                    .child(
+                        when(is_current, move || {
+                            icon_dyn(
+                                move || if playing() { Icon::Wave } else { Icon::Play },
+                                13.0,
+                                primary,
+                            )
+                        })
+                        .otherwise(move || {
+                            text(move || (at.index() + 1).to_string())
+                                .number_of_lines(1)
+                                .text_size(px(12.0))
+                                .line_height(px(12.0))
+                                .tabular_nums()
+                                .text_color(faint())
+                        }),
+                    ),
             )
             .child(when(covers_on, move || {
                 cover_initial(src, letter, Some(36.0), 6.0)
