@@ -105,6 +105,7 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
         full_screen: signal(false),
         delete_ask: signal(None),
         edit_info: signal(None),
+        pending_batch_match: signal(None),
         accent: signal(None),
         tint: signal(None),
         artist_sel: signal(None),

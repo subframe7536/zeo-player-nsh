@@ -1,5 +1,5 @@
 //! 「编辑元数据」弹窗：单曲目的标签编辑，一个滚动表单放文件卡片
-//! （封面 + 文件信息 + 封面保存目标）、标签字段与歌词；保存走
+//! （封面 + 文件信息 + 封面保存目标）、在线匹配卡片、标签字段与歌词；保存走
 //! `store::save_tags`（原子写回 + 索引刷新 + 当前曲重载）。
 
 pub(crate) use std::collections::HashMap;
@@ -32,12 +32,14 @@ mod cover;
 mod genre;
 mod logic;
 mod lyrics;
+mod match_panel;
 mod widgets;
 
 pub(crate) use cover::*;
 pub(crate) use genre::*;
 pub(crate) use logic::*;
 pub(crate) use lyrics::*;
+pub(crate) use match_panel::*;
 pub(crate) use widgets::*;
 
 /// 弹窗里的草稿：打开时从文件读出初值，保存时与原值比较生成 `TagEdits`
@@ -104,6 +106,8 @@ pub fn edit_info_dialog() -> AnyElement {
         saving: false,
         error: None,
     });
+    let form_gen = signal(0u32);
+    let lyrics_gen = signal(0u32);
     let close = move || s.edit_info.set(None);
     let content = dialog_content(580.0)
         .child(
@@ -115,7 +119,7 @@ pub fn edit_info_dialog() -> AnyElement {
                 .child(icon_button(|| Icon::Close, 16.0, "关闭", muted_fg, close)),
         )
         .child(
-            // 单个滚动表单（文件卡片 + 字段 + 歌词）：固定 560 高，窗口
+            // 单个滚动表单（文件卡片 + 在线匹配 + 字段 + 歌词）：固定 560 高，窗口
             // 太矮时收缩、滚动兜底。内容内缩 4pt：focus ring 画在控件
             // 外侧 3pt，贴视口边会被裁掉。
             scroll()
@@ -127,8 +131,12 @@ pub fn edit_info_dialog() -> AnyElement {
                         .p(px(4.0))
                         .gap(px(20.0))
                         .child(file_card(draft))
-                        .child(fields(draft))
-                        .child(lyrics_block(draft)),
+                        .child(match_card(draft, form_gen, lyrics_gen))
+                        .child(dynamic(move || {
+                            let _ = form_gen.get();
+                            fields(draft).into_element()
+                        }))
+                        .child(lyrics_block(draft, lyrics_gen)),
                 ),
         )
         .child(when(

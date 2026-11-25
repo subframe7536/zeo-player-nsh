@@ -97,8 +97,15 @@ pub fn track_menu_selectable(
         let multi_paths = multi_paths.clone();
         let rename = rename.clone();
         dynamic(move || {
-            if multi_paths().len() > 1 {
-                return Vec::new();
+            let paths = multi_paths();
+            if paths.len() > 1 {
+                let target = paths.clone();
+                return vec![
+                    separator(),
+                    item("自动匹配元数据…", Some(Icon::Smart), move || {
+                        store::open_batch_match(target.clone());
+                    }),
+                ];
             }
             let mut list = Vec::new();
             list.push(separator());

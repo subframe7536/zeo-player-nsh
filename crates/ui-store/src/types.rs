@@ -152,6 +152,8 @@ pub struct Store {
     pub delete_ask: Signal<Option<DeleteAsk>>,
     /// 「编辑元数据」弹窗打开的曲目路径（`Some` 时打开）。
     pub edit_info: Signal<Option<String>>,
+    /// 右键多选「自动匹配元数据…」待跳转打开的路径列表（元数据页消费后清零）。
+    pub pending_batch_match: Signal<Option<Vec<String>>>,
     /// 主题色覆盖的强调色（`None`：主题默认黑白）；`theme::primary` 读它。
     pub accent: Signal<Option<AdaptiveColor>>,
     /// 「跟随封面」时封面的原始主色调（色相圈、饱和度）——界面底色向它

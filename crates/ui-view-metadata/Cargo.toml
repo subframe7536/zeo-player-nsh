@@ -13,6 +13,7 @@ zeo-icons.workspace = true
 zeo-ui-components.workspace = true
 zeo-types.workspace = true
 zeo-metadata.workspace = true
+zeo-matcher.workspace = true
 zeo-library.workspace = true
 zeo-playlists.workspace = true
 zeo-ui-view-folders.workspace = true
