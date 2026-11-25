@@ -4,11 +4,13 @@
 //! 全局库 [`zeo_library::LibraryStore`]（各源的曲目合成一份索引）与提供方
 //! 实现在 `zeo-library` crate；这里只放数据。
 
+mod matcher;
 mod model;
 mod paths;
 mod settings;
 mod time;
 
+pub use matcher::*;
 pub use model::*;
 pub use paths::*;
 pub use settings::*;

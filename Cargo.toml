@@ -27,6 +27,7 @@ zeo-types = { path = "crates/types" }
 zeo-keybinds = { path = "crates/keybinds" }
 zeo-db = { path = "crates/db" }
 zeo-metadata = { path = "crates/metadata" }
+zeo-matcher = { path = "crates/matcher" }
 zeo-library = { path = "crates/library" }
 zeo-playlists = { path = "crates/playlists" }
 zeo-engine = { path = "crates/engine" }

@@ -110,6 +110,9 @@ pub struct LibraryConfig {
     /// 「元数据」表格「显示列」选中的列 key；`None` = 默认列（旧版文件没有此字段）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata_columns: Option<std::collections::BTreeSet<String>>,
+    /// 元数据在线自动匹配的偏好（默认源、写入策略、字段勾选；旧版文件没有此字段）。
+    #[serde(default)]
+    pub match_prefs: super::matcher::MatchPrefs,
 }
 
 fn default_fade_ms() -> u32 {
@@ -172,6 +175,7 @@ impl Default for LibraryConfig {
             global_keybinds: std::collections::BTreeMap::new(),
             welcome_done: false,
             metadata_columns: None,
+            match_prefs: super::matcher::MatchPrefs::default(),
         }
     }
 }
