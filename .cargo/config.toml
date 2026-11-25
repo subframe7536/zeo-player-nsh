@@ -8,6 +8,7 @@ opt-level = "s"
 lto = "thin"
 codegen-units = 1
 strip = true
+panic = "abort"
 
 [profile.release.package.rubato]
 opt-level = 3
