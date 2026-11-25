@@ -153,9 +153,16 @@ pub fn page() -> View {
             };
             let filter_w = move || {
                 if zeo_ui_components::tracks::content_break() < 860.0 {
-                    120.0
+                    92.0
                 } else {
                     260.0
+                }
+            };
+            let toolbar_gap = move || {
+                if zeo_ui_components::tracks::content_break() < 860.0 {
+                    5.0
+                } else {
+                    8.0
                 }
             };
             let panel_default_w = move || {
@@ -208,7 +215,7 @@ pub fn page() -> View {
                     view()
                         .flex_row()
                         .items_center()
-                        .gap(px(8.0))
+                        .gap(move || px(toolbar_gap()))
                         .px(px(PAGE_X))
                         .pb(px(16.0))
                         .child(
@@ -301,7 +308,7 @@ pub fn page() -> View {
                                 .items_center()
                                 .gap(px(6.0))
                                 .child(mark)
-                                // 窄窗口省掉「全选」文字只留复选框：工具栏加了两颗
+                                // 窄窗口省掉「全选」文字只留复选框：工具栏加了多颗
                                 // 批量工具钮，文字再占 34pt 会把行尾挤出可视区。
                                 .child(when(
                                     move || zeo_ui_components::tracks::content_break() >= 860.0,
