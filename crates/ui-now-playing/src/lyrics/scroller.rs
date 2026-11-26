@@ -39,23 +39,20 @@ pub(crate) fn lyrics_column(swap: &Swap) -> View {
 }
 
 /// 行级歌词：跟随时间滚动（当前行停在 [`ANCHOR`] 处），用户滚动后 3 s
-/// 恢复跟随；点击行 seek；距离当前行越远越暗越模糊。
+/// 恢复跟随；点击行 seek；未高亮的行更暗；模糊与边缘淡出见 [`blur_effect`]。
 pub(crate) fn lyrics_scroller() -> View {
     let s = store();
     let scroller = element_ref();
     let viewport = signal(0.0_f32);
     let laid = signal(0_usize);
     let follow = signal(true);
-    // 指针在歌词区域内：所有行去掉模糊（看清再点）。`clear` 是去模糊的
-    // 程度（0 按距离模糊，1 全部清晰），移入移出时逐帧过渡：NSH 的样式
-    // 过渡不包括滤镜，只能自己推进。
+    // 指针在歌词区域内：去掉模糊（看清再点）。`clear` 是去模糊的程度
+    // （0 按位置模糊，1 全部清晰），移入移出时逐帧过渡（shader 的 uniform
+    // 没有样式过渡）。
     let clear = signal(0.0_f32);
     let clear_task: Rc<RefCell<Option<Spawned<()>>>> = Rc::default();
     let fade_blur = Rc::new(move |to: f32| drive(clear, &clear_task, to, BLUR_FADE_MS));
     let line_ys: Rc<RefCell<Vec<f32>>> = Rc::default();
-    // 滚动位置与各行的位置、高度，用来让靠近上下边缘的行淡出（见 `edge_fade`）。
-    let scroll_y = signal(0.0_f32);
-    let rows_box = signal(Vec::<(f32, f32)>::new());
     let target: Rc<RefCell<Option<(f32, std::time::Instant)>>> = Rc::default();
     let resume: Rc<RefCell<Option<Spawned<()>>>> = Rc::default();
     let last_followed = Rc::new(RefCell::new(-1_i64));
@@ -117,7 +114,6 @@ pub(crate) fn lyrics_scroller() -> View {
                         *last_followed.borrow_mut() = index;
                         *target.borrow_mut() = Some((y, std::time::Instant::now()));
                         scroller.scroll_to(point(px(0.0), px(y)), false);
-                        scroll_y.set(y);
                         settled += 1;
                         if settled >= 3 {
                             break;
@@ -193,7 +189,6 @@ pub(crate) fn lyrics_scroller() -> View {
                 if let Some(y) = offset_of(index) {
                     *target.borrow_mut() = Some((y, std::time::Instant::now()));
                     scroller.scroll_to(point(px(0.0), px(y)), false);
-                    scroll_y.set(y);
                 }
             });
         });
@@ -327,21 +322,11 @@ pub(crate) fn lyrics_scroller() -> View {
                 })
             })
         };
-        let fade = move || {
-            let viewport = viewport.get();
-            let y = scroll_y.get();
-            rows_box.with(|b| {
-                b.get(index).map_or(1.0, |&(top, h)| {
-                    edge_fade(viewport * ANCHOR + top + h / 2.0 - y, viewport)
-                })
-            })
-        };
         // `on_layout` 只能挂在裸 view 上（`Interactive` 不在组件元素上）：
         // 外层量位置、包按钮。按钮管按压与无障碍，时间戳槽在按钮内容行里。
         view()
             .w_full()
             .group()
-            .opacity(fade)
             .child(
                 nsh_base::button()
                     .w_full()
@@ -350,30 +335,14 @@ pub(crate) fn lyrics_scroller() -> View {
                     } else {
                         String::new()
                     })
-                    // 当前行与前后一句清晰，再远越模糊（见 `lyric_blur`）。颜色
-                    // 在文字上：原文随高亮变化，译文始终不变。时间戳槽在这层之外，
-                    // 不跟着模糊。
+                    // 颜色在文字上：原文随高亮变化，译文始终不变。
                     .child(
                         view()
                             .w_full()
                             .flex_row()
                             .items_center()
                             .child(stamp(true))
-                            .child(
-                                view()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .style_with(move |st| {
-                                        // 鼠标在歌词区时不模糊（移入移出有过渡）；否则按与
-                                        // 高亮行的距离模糊。
-                                        let blur =
-                                            lyric_blur(timed, distance()) * (1.0 - clear.get());
-                                        st.blur(px(blur))
-                                    })
-                                    .transition_all()
-                                    .duration(300.0)
-                                    .child(content_view),
-                            )
+                            .child(view().flex_1().min_w(px(0.0)).child(content_view))
                             .child(stamp(false)),
                     )
                     .on_press(move |_: &()| {
@@ -402,15 +371,6 @@ pub(crate) fn lyrics_scroller() -> View {
                 }
                 ys[index] = frame.origin.y.0;
                 drop(ys);
-                let row = (frame.origin.y.0, frame.size.height.0);
-                if rows_box.with_untracked(|b| b.get(index) != Some(&row)) {
-                    rows_box.update(|b| {
-                        if b.len() <= index {
-                            b.resize(index + 1, (0.0, 0.0));
-                        }
-                        b[index] = row;
-                    });
-                }
                 if index + 1 > laid.get_untracked() {
                     laid.set(index + 1);
                 }
@@ -434,7 +394,7 @@ pub(crate) fn lyrics_scroller() -> View {
                 .text_color(white_a(0.4))
                 .pb(px(8.0))
         }))
-        .child(
+        .child(blur_effect(
             scroll()
                 .flex_1()
                 .opacity(move || if placed.get() { 1.0_f32 } else { 0.0 })
@@ -443,7 +403,6 @@ pub(crate) fn lyrics_scroller() -> View {
                 .on_layout(move |frame: &Bounds<Points>| viewport.set(frame.size.height.0))
                 .on_scroll(move |e: &ScrollEvent| {
                     let y = e.offset.y.0;
-                    scroll_y.set(y);
                     // 程序滚动：动画进行中（约 0.7 s 内）或已到目标附近。
                     let ours = target.borrow().is_some_and(|(t, at)| {
                         at.elapsed().as_millis() < 700 || (y - t).abs() < 64.0
@@ -460,5 +419,8 @@ pub(crate) fn lyrics_scroller() -> View {
                         .child(view().w_full().children(rows))
                         .child(view().h(move || px(viewport.get() * (1.0 - ANCHOR)))),
                 ),
-        )
+            timed,
+            viewport,
+            clear,
+        ))
 }

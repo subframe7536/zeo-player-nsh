@@ -5,17 +5,25 @@ mod tests {
     use super::*;
 
     #[test]
-    pub(crate) fn blur_spares_the_neighbours_and_grows_after() {
-        assert_eq!(lyric_blur(true, 0.0), 0.0);
-        assert_eq!(lyric_blur(true, 1.0), 0.0, "前后一句不模糊");
-        let steps: Vec<f32> = (2..=10).map(|d| lyric_blur(true, d as f32)).collect();
-        assert!(steps[0] > 0.0);
+    pub(crate) fn blur_shader_compiles() {
+        let source = include_str!("blur.wgsl");
+        if let Err(e) = nsh_core::shader::Shader::compile(source) {
+            panic!("歌词模糊 shader 编译失败: {e}");
+        }
+    }
+
+    #[test]
+    pub(crate) fn clear_band_holds_the_anchor_line_and_its_neighbours() {
+        let (top, bottom) = clear_band(1000.0);
+        let anchor = 1000.0 * ANCHOR;
+        // 跟随时高亮行的顶在锚点：前一句、高亮行、后一句都在带内。
         assert!(
-            steps.windows(2).all(|w| w[0] < w[1] || w[1] == 8.0),
-            "{steps:?}"
+            top <= anchor - 60.0 && bottom >= anchor + 120.0,
+            "{top}..{bottom}"
         );
-        assert_eq!(lyric_blur(true, 20.0), 8.0);
-        assert_eq!(lyric_blur(false, 5.0), 0.0);
+        // 与视口高度成比例移动，宽度不变。
+        let (top2, bottom2) = clear_band(500.0);
+        assert!(((bottom - top) - (bottom2 - top2)).abs() < 1e-3);
     }
 
     #[test]
@@ -28,14 +36,5 @@ mod tests {
             original_opacity(true, true) > TRANSLATION_ALPHA,
             "高亮：原文比译文亮"
         );
-    }
-
-    #[test]
-    pub(crate) fn edges_fade_out() {
-        assert_eq!(edge_fade(0.0, 1000.0), 0.0);
-        assert_eq!(edge_fade(1000.0, 1000.0), 0.0);
-        assert_eq!(edge_fade(ANCHOR * 1000.0, 1000.0), 1.0, "高亮行不淡出");
-        assert!((edge_fade(90.0, 1000.0) - 0.5).abs() < 1e-4);
-        assert!((edge_fade(860.0, 1000.0) - 0.5).abs() < 1e-4);
     }
 }

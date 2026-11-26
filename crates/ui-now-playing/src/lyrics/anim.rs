@@ -1,31 +1,5 @@
 use super::*;
 
-/// 歌词行的模糊半径（点）：高亮行和前后一句清晰，再远每多一行加 1.5，
-/// 最多 8（与 ap-spec 的上限相同）。无时间轴的歌词不模糊。
-pub(crate) fn lyric_blur(timed: bool, distance: f32) -> f32 {
-    if timed {
-        ((distance - 1.0) * 1.5).clamp(0.0, 8.0)
-    } else {
-        0.0
-    }
-}
-
-/// 歌词行在视口里的不透明度：行中心进入顶部 [`EDGE_TOP`] 或底部
-/// [`EDGE_BOTTOM`]（占视口高度的比例）后线性淡出，到边缘为 0。NSH 的
-/// macOS / Windows 后端还不画 `maskImage`，只能按行算。
-pub(crate) fn edge_fade(center: f32, viewport: f32) -> f32 {
-    if viewport <= 0.0 {
-        return 1.0;
-    }
-    let top = center / (viewport * EDGE_TOP);
-    let bottom = (viewport - center) / (viewport * EDGE_BOTTOM);
-    top.min(bottom).clamp(0.0, 1.0)
-}
-
-/// 顶部淡出区（视口高度的比例），小于 [`ANCHOR`]，高亮行不受影响。
-pub(crate) const EDGE_TOP: f32 = 0.18;
-/// 底部淡出区。
-pub(crate) const EDGE_BOTTOM: f32 = 0.28;
 /// 点击某行后，最多等这么久让高亮换到这一行（之后照常跟随）。
 pub(crate) const PENDING_WAIT: Duration = Duration::from_millis(1500);
 
