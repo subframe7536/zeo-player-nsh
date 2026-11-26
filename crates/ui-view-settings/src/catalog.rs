@@ -111,6 +111,12 @@ pub(crate) const SECTIONS: &[Section] = &[
     },
     Section {
         pane: Pane::Lyrics,
+        title: "歌词模糊",
+        keys: "歌词 模糊 清晰 全屏 性能 blur",
+        build: lyrics::lyrics_blur_section,
+    },
+    Section {
+        pane: Pane::Lyrics,
         title: "全局歌词偏移",
         keys: "歌词 偏移 全局 提前 延后 同步 offset 蓝牙 延迟",
         build: lyrics::lyrics_offset_section,

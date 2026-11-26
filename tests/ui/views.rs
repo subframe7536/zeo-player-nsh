@@ -238,6 +238,64 @@ fn full_player_opens_and_closes() {
         .unwrap();
 }
 
+/// 歌词手动滚动后：鼠标还在歌词区内不恢复跟随；移出 3 秒后滚回高亮行。
+#[test]
+fn lyrics_resume_follow_after_mouse_leaves() {
+    let _guard = play_lock();
+    let mut app = start_inner(1200.0, 800.0);
+    if !isolate() {
+        return eprintln!("跳过：没有 {CORPUS}");
+    }
+    goto_folders(&mut app);
+    app.press("zeo-player-test-music").unwrap();
+    app.wait_for("text:测试歌曲").unwrap();
+    double_press(&mut app, "role:button[测试歌曲]");
+    app.press("label:全屏播放").unwrap();
+    app.wait_for("text:第一句歌词").unwrap();
+    // 停在「第一句歌词」（1s；0.5s 的提前显示也不会到 5s 的下一行），
+    // 让高亮行在测试期间保持不变。
+    zeo_player::engine::Player::global().pause();
+    zeo_player::engine::Player::global().seek(1.2);
+    app.wait(Duration::from_millis(800)).unwrap();
+
+    let line_y = |app: &Headless| {
+        app.screen()
+            .layout("text:第一句歌词")
+            .unwrap()
+            .map(|l| l.bounds.origin.y.0)
+            .expect("第一句歌词应在歌词区")
+    };
+    let anchored_y = line_y(&app);
+    app.hover("text:第一句歌词").unwrap();
+    app.scroll("text:第一句歌词", px(220.0)).unwrap();
+    let scrolled_y = line_y(&app);
+    assert!(
+        scrolled_y < anchored_y - 100.0,
+        "手动滚动应离开高亮行: {anchored_y} -> {scrolled_y}"
+    );
+
+    // 鼠标还在歌词区：超过 3 秒也不自动回去。
+    app.wait(Duration::from_millis(3200)).unwrap();
+    let hovered_y = line_y(&app);
+    assert!(
+        hovered_y < anchored_y - 100.0,
+        "鼠标未移出时不应恢复跟随: {anchored_y} -> {hovered_y}"
+    );
+
+    // 移出歌词区后 3 秒计时，滚动动画约 0.3 秒。
+    app.hover("label:收起").unwrap();
+    app.wait(Duration::from_millis(3100)).unwrap();
+    app.wait_until("歌词滚回高亮行", Duration::from_secs(2), |screen| {
+        screen
+            .layout("text:第一句歌词")
+            .ok()
+            .flatten()
+            .is_some_and(|l| (l.bounds.origin.y.0 - anchored_y).abs() < 30.0)
+    })
+    .unwrap();
+    zeo_player::engine::Player::global().pause();
+}
+
 /// 侧栏搜索按钮：点击直接打开 command palette，支持搜索曲目与页面导航。
 #[test]
 fn sidebar_search_opens_command_palette() {

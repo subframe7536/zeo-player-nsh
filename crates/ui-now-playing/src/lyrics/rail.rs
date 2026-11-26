@@ -4,6 +4,14 @@ use super::*;
 pub(crate) const LYRICS: f32 = 520.0;
 /// 当前歌词行停在视口从上往下的这个比例处（偏上，下方留出更多后续歌词）。
 pub(crate) const ANCHOR: f32 = 0.35;
+/// 歌词列（滚动区 + 偏移栏）的命名 group：偏移栏悬停歌词区才浮现。
+/// 用命名 group 跳过歌词行自己的 `.group()`。
+pub(crate) const LYRICS_GROUP: &str = "lyrics";
+/// 偏移栏占位宽度（窄条，含与窗口右缘的间距）。
+const RAIL_W: f32 = 48.0;
+/// 数值格宽度：10 pt 字放得下最长的「−30.0s」一行（不换行），数值变化时
+/// 栏宽不变；只比 ± 按钮（28）略宽，按钮两侧不显得空。
+const TRIGGER_W: f32 = 34.0;
 
 // --- 歌词 ---------------------------------------------------------------------
 
@@ -35,8 +43,9 @@ pub(crate) fn fmt_offset(ms: i64) -> String {
     format!("{sign}{:.1}s", ms.unsigned_abs() as f64 / 1000.0)
 }
 
-/// 右边缘的偏移栏（占位、常显）：竖排 [+] 数值 [−]，数值点开横向滑条
-/// 弹层（同音量弹层的路子）；± 按 0.5 秒步进，全局偏移与「重置」在弹层里。
+/// 右边缘的偏移栏（占位，悬停歌词区或弹层打开时浮现）：竖排 [+] 数值 [−]，
+/// 数值悬停变铅笔、点开竖向滑条弹层（同音量弹层的路子）；± 按 0.5 秒步进，
+/// 弹层里只有滑条与重置（数值就在旁边的栏上），全局偏移非零时多两行小字。
 pub(crate) fn offset_rail() -> AnyElement {
     let s = store();
     let open = signal(false);
@@ -53,34 +62,111 @@ pub(crate) fn offset_rail() -> AnyElement {
     let apply =
         move |f: f64| set_lyrics_offset(((f * 60000.0 - 30000.0) / 100.0).round() as i64 * 100);
     // 触发器用普通 view（nsh-base 的 button 会吃掉按压，popover 收不到，
-    // 同队列 / 音量按钮）。
+    // 同队列 / 音量按钮）。悬停时数值淡出、换成铅笔图标（两者叠在同一格
+    // 里，栏宽不变）；弹层打开后换回数值，拖滑条时能看到当前值。
+    let hovered = signal(false);
+    let pen = move || hovered.get() && !open.get();
     let trigger = view()
+        .w(px(TRIGGER_W))
         .h(px(28.0))
-        .px(px(4.0))
         .items_center()
         .justify_center()
-        .rounded(px(RADIUS_MD))
         .role(AccessibilityRole::Button)
         .label("调整歌词时间偏移")
-        .style_when(move || open.get(), |st| st.bg(white_a(0.10)))
-        .hover(|st| st.bg(white_a(0.08)))
         .active(|st| st.opacity(0.8))
-        .transition_colors()
-        .duration(150.0)
+        .on_mouse_enter(move |_: &MouseEvent| hovered.set(true))
+        .on_mouse_leave(move |_: &MouseEvent| hovered.set(false))
         .child(
             text(move || value())
-                .text_size(px(11.0))
-                .line_height(px(11.0))
+                .whitespace_nowrap()
+                .text_size(px(10.0))
+                .line_height(px(10.0))
                 .tabular_nums()
-                .text_color(white_a(0.8)),
+                .text_color(white_a(0.8))
+                .opacity(move || if pen() { 0.0_f32 } else { 1.0 })
+                .transition_opacity()
+                .duration(150.0),
+        )
+        .child(
+            view()
+                .absolute()
+                .inset_0()
+                .items_center()
+                .justify_center()
+                .pointer_events(PointerEvents::None)
+                .opacity(move || if pen() { 1.0_f32 } else { 0.0 })
+                .transition_opacity()
+                .duration(150.0)
+                .child(icon(Icon::Edit, 14.0, || white_a(0.85))),
         );
+    // 弹层：窄竖条，上提前、下延后（同栏上 + / − 的方向），底部重置；
+    // 重置常驻（偏移为 0 时禁用），弹层尺寸不随数值变。
+    let sheet = view()
+        .items_center()
+        .px(px(8.0))
+        .pt(px(12.0))
+        .pb(px(6.0))
+        .gap(px(6.0))
+        .child(
+            slider(
+                SliderStyle::VERTICAL,
+                "歌词偏移",
+                fraction,
+                input(),
+                fg(),
+                fg(),
+                apply,
+                apply,
+            )
+            .h(px(140.0)),
+        )
+        .child(tipped(
+            icon_button(
+                || Icon::Refresh,
+                12.0,
+                "重置歌词偏移",
+                muted_fg,
+                || nudge_lyrics_offset(None),
+            )
+            .disabled(move || s.lyrics_offset.get() == 0),
+            "重置",
+        ))
+        .child(dynamic(move || {
+            let g = s.library.with(|l| l.config.global_lyrics_offset_ms);
+            // 分两行，不把窄竖条撑宽。
+            (g != 0).then(|| {
+                let line = |t: String| {
+                    text(t)
+                        .whitespace_nowrap()
+                        .text_size(px(10.0))
+                        .line_height(px(10.0))
+                        .tabular_nums()
+                        .text_color(muted_fg())
+                };
+                view()
+                    .items_center()
+                    .gap(px(3.0))
+                    .pb(px(4.0))
+                    .child(line("全局".to_owned()))
+                    .child(line(fmt_offset(g)))
+                    .into_element()
+            })
+        }));
     let panel = view()
         .items_center()
         .gap(px(2.0))
         .py(px(4.0))
-        .px(px(4.0))
-        .rounded(px(10.0))
+        .px(px(1.0))
+        .rounded(px(12.0))
         .bg(white_a(0.06))
+        // 平时隐藏，悬停歌词区（或键盘焦点在栏内）浮现；弹层打开时指针在
+        // 弹层上、不在歌词区里，靠 `open` 保持可见。
+        .opacity(0.0)
+        .group_hover_named(LYRICS_GROUP, |st| st.opacity(1.0))
+        .group_focus_within_named(LYRICS_GROUP, |st| st.opacity(1.0))
+        .style_when(move || open.get(), |st| st.opacity(1.0))
+        .transition_opacity()
+        .duration(200.0)
         .child(
             on_dark(28.0)
                 .accessibility_label("歌词提前")
@@ -108,92 +194,7 @@ pub(crate) fn offset_rail() -> AnyElement {
                         .overflow_hidden()
                 })
                 .trigger(trigger)
-                .child(
-                    view()
-                        .w(px(232.0))
-                        .px(px(14.0))
-                        .py(px(12.0))
-                        .gap(px(8.0))
-                        .child(
-                            view()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(8.0))
-                                .child(
-                                    text(move || value())
-                                        .text_size(px(13.0))
-                                        .line_height(px(13.0))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .tabular_nums()
-                                        .text_color(fg()),
-                                )
-                                .child(dynamic(move || {
-                                    let g = s.library.with(|l| l.config.global_lyrics_offset_ms);
-                                    (g != 0).then(|| {
-                                        text(format!("全局 {}", fmt_offset(g)))
-                                            .text_size(px(11.0))
-                                            .line_height(px(11.0))
-                                            .text_color(muted_fg())
-                                            .into_element()
-                                    })
-                                }))
-                                .child(view().flex_1())
-                                .child(dynamic(move || {
-                                    (s.lyrics_offset.get() != 0).then(|| {
-                                        nsh_base::button()
-                                            .h(px(24.0))
-                                            .px(px(8.0))
-                                            .flex_shrink_0()
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded(px(6.0))
-                                            .transition_colors()
-                                            .duration(150.0)
-                                            .hover(|st| st.bg(hover()))
-                                            .active(|st| st.opacity(0.7))
-                                            .accessibility_label("重置歌词偏移")
-                                            .on_press(|_: &()| nudge_lyrics_offset(None))
-                                            .child(
-                                                text("重置")
-                                                    .text_size(px(11.0))
-                                                    .line_height(px(11.0))
-                                                    .text_color(muted_fg()),
-                                            )
-                                            .into_element()
-                                    })
-                                })),
-                        )
-                        .child(
-                            slider(
-                                SliderStyle::HORIZONTAL,
-                                "歌词偏移",
-                                fraction,
-                                input(),
-                                fg(),
-                                fg(),
-                                apply,
-                                apply,
-                            )
-                            .w_full(),
-                        )
-                        .child(
-                            view()
-                                .flex_row()
-                                .child(
-                                    text("延后 30s")
-                                        .text_size(px(10.0))
-                                        .line_height(px(10.0))
-                                        .text_color(muted_fg()),
-                                )
-                                .child(view().flex_1())
-                                .child(
-                                    text("提前 30s")
-                                        .text_size(px(10.0))
-                                        .line_height(px(10.0))
-                                        .text_color(muted_fg()),
-                                ),
-                        ),
-                ),
+                .child(sheet),
         )
         .child(
             on_dark(28.0)
@@ -203,7 +204,7 @@ pub(crate) fn offset_rail() -> AnyElement {
         );
     view()
         .h_full()
-        .w(px(48.0))
+        .w(px(RAIL_W))
         .flex_shrink_0()
         .justify_center()
         .items_center()

@@ -5,7 +5,7 @@ ZeoPlayer is a local-first desktop music player written in pure Rust with NSH (m
 ## Rules
 
 - **Ask before every `git commit` and `git push`.** Never commit or push on your own.
-- **NSH pin**: Track the NSH stable channel only via `sh scripts/update-nsh.sh`. Keep `nsh-core`, `nsh-base`, `nsh-engine`, `nsh-testing`, and `nsh-updater` in `[workspace.dependencies]` synced (<!-- nsh-pin -->currently `0.7.0 (3f8ecd8 stable)`, version `0.7.0`<!-- /nsh-pin -->).
+- **NSH pin**: Track the NSH stable channel only via `sh scripts/update-nsh.sh`. Keep `nsh-core`, `nsh-base`, `nsh-engine`, `nsh-testing`, and `nsh-updater` in `[workspace.dependencies]` synced (<!-- nsh-pin -->currently `0.7.1 (f78eace stable)`, version `0.7.1`<!-- /nsh-pin -->).
 - **Cross-platform**: Keep both macOS and Windows building. Gate OS-specific code with `cfg(target_os = ...)`; don't add a macOS-only path without a Windows counterpart or a documented gap.
 - **Docs & workarounds**: Update `README.md` when behavior changes. Record upstream NSH limitations in `upstream.md` and work around them in-app—never patch NSH crates locally.
 - **Toolchains**: Resolve `$CARGO_HOME` / `$RUSTUP_HOME` first, falling back to `~/.cargo` / `~/.rustup` only when unset.
@@ -51,6 +51,7 @@ Bottom-up dependency graph; lower crates must never depend on upper ones (use in
 - **List covers**: One cached file per track — 96 px for ≤48 pt slots, lazily upgraded to 400 px for larger slots (`covers::list_cover` + `prune_smaller`). `cover_frame` sets the previous source as `placeholder` to prevent flashing during upgrade. Don't wrap cover-holding pages in a `dynamic` reading `s.tracks` wholesale (gate on `computed`, e.g. `is_empty`).
 - **`show_covers` gate**: When off, `cover_for` returns `None` and cover slots are omitted (`when(store::covers_on, …)`). Player bar uses `cover_for_always` + `cover()`. When on without art, `cover_initial` draws a letter tile.
 - **Fullscreen & media session**: Fullscreen art and blurred background reuse an 8-entry LRU of 720 px JPEG `data:` URIs (`covers::artwork_uri`; blur is `blur_radius` on macOS, `st.blur()` on Windows). `MediaSession::publish` re-queries `covers::cached_list` (`file://` percent-encoded); Windows additionally pushes thumbnails via `smtc_thumbnail` (`GetForWindow` + `StorageFile`).
+- **Fullscreen lyrics blur**: Position-based (fixed clear band around `ANCHOR`, not tied to the active line) progressive blur + edge fade via `shader_effect` wrapping the lyrics scroll (`lyrics/blur.rs` + `blur.wgsl`, needs nsh-core `shader` feature); no per-row `filter: blur()` (macOS ignores it) or `maskImage` (Windows ignores it). Without a GPU, lyrics draw unblurred.
 - **Lyrics & waveforms**: Loaded on demand (`metadata::read_lyrics`); `engine::Meta::lyrics` caches near playhead + next 3 queue tracks (alongside covers and SQLite-persisted `waveforms`). Cover/lyrics cache keys fold in sidecar timestamps (`jpg/jpeg/png/webp`, `.lrc`) and `prefer_local_*` flags.
 - **Track tables**: 音乐库 / 艺术家详情 / 歌单 / 标签详情 show `#` (hover → play/pause); 音乐库 also shows 大小; 专辑详情 shows tag track `#`; others show neither. 音乐库 / 歌单 / 标签 share `views_base::pinned_track_list`. Track rows lead the artist line with `quality_badge` (`MetaInfo::quality_tag()` + `theme::quality_color`).
 

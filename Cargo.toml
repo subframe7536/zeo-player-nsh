@@ -11,11 +11,11 @@ members = ["crates/*"]
 # `sh scripts/update-nsh.sh` 一键对齐——stable 走 crates.io 版本号。
 # dev-dependencies 里的 nsh-engine / nsh-testing 一起改。
 [workspace.dependencies]
-nsh-core = { version = "0.7.0", features = ["svg"] }
-nsh-base = { version = "0.7.0", default-features = false }
-nsh-engine = { version = "0.7.0" }
-nsh-testing = { version = "0.7.0", default-features = false }
-nsh-updater = { version = "0.7.0" }
+nsh-core = { version = "0.7.1", features = ["svg", "shader"] }
+nsh-base = { version = "0.7.1", default-features = false }
+nsh-engine = { version = "0.7.1" }
+nsh-testing = { version = "0.7.1", default-features = false }
+nsh-updater = { version = "0.7.1" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
