@@ -1,7 +1,7 @@
 use super::*;
 
 /// 右半区：有歌词时滚动列表，载入中一行提示；有时间轴的歌词在右边缘
-/// 放偏移栏（占位、常显，不被歌词盖住）。
+/// 放偏移栏（占位，不被歌词盖住；悬停整个右半区才浮现）。
 pub(crate) fn lyrics_column(swap: &Swap) -> View {
     let s = store();
     let has_lines = move || {
@@ -16,6 +16,7 @@ pub(crate) fn lyrics_column(swap: &Swap) -> View {
         .w_full()
         .h_full()
         .flex_row()
+        .group_named(LYRICS_GROUP)
         .bind_opacity(&swap.content)
         .bind_translate_x(&swap.lyrics_shift)
         .child(view().flex_1().h_full().min_w(px(0.0)).child(

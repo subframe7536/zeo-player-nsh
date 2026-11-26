@@ -322,12 +322,13 @@ fn lyrics_offset_global_saves() {
     app.wait_for("label:歌词提前").unwrap();
     // 暂停：测试曲只有 10 秒，播完自动切到无歌词的曲目会把偏移栏收掉。
     zeo_player::engine::Player::global().pause();
-    // 「全局 +0.3s」小字在偏移数值点开的弹层里；触发器按压偶发落空，重试。
+    // 「全局」「+0.3s」两行小字在偏移数值点开的弹层里；触发器按压偶发
+    // 落空，重试。
     let mut opened = false;
     for _ in 0..10 {
         app.press("label:调整歌词时间偏移").unwrap();
         if app
-            .wait_for_within("全局 +0.3s", Duration::from_millis(500))
+            .wait_for_within("全局", Duration::from_millis(500))
             .is_ok()
         {
             opened = true;
@@ -335,6 +336,7 @@ fn lyrics_offset_global_saves() {
         }
     }
     assert!(opened, "偏移弹层应打开");
+    assert!(has(&app, "+0.3s"), "应显示全局偏移值");
     assert!(has(&app, "0s"), "每曲偏移不应受影响");
     // 共享全局配置，用例结束前恢复 0。等全屏淡出完再点侧栏（淡出中的
     // 覆盖层仍画在「设置」上，新版 nsh-testing 会判遮挡）。

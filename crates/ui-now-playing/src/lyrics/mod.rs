@@ -15,7 +15,7 @@ pub(crate) use super::{Reveal, Swap};
 
 pub(crate) use zeo_types::config::LyricsAlign;
 
-pub(crate) use zeo_ui_components::button::{RADIUS_MD, on_dark};
+pub(crate) use zeo_ui_components::button::{RADIUS_MD, icon_button, on_dark, tipped};
 
 pub(crate) use zeo_icons::{Icon, icon};
 
