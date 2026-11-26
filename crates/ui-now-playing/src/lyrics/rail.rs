@@ -155,9 +155,9 @@ pub(crate) fn offset_rail() -> AnyElement {
     let panel = view()
         .items_center()
         .gap(px(2.0))
-        .py(px(3.0))
-        .px(px(3.0))
-        .rounded(px(10.0))
+        .py(px(4.0))
+        .px(px(1.0))
+        .rounded(px(12.0))
         .bg(white_a(0.06))
         // 平时隐藏，悬停歌词区（或键盘焦点在栏内）浮现；弹层打开时指针在
         // 弹层上、不在歌词区里，靠 `open` 保持可见。

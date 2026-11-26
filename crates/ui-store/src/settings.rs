@@ -52,6 +52,12 @@ pub fn set_lyrics_timestamps(on: bool) {
     std::thread::spawn(move || library_store().set_lyrics_timestamps(on));
 }
 
+/// 全屏歌词渐进模糊开关（立即生效并保存）。
+pub fn set_lyrics_blur(on: bool) {
+    update_config(|c| c.lyrics_blur = on);
+    std::thread::spawn(move || library_store().set_lyrics_blur(on));
+}
+
 /// 全局歌词偏移（立即生效并保存；钳到 ±30000 毫秒）。
 pub fn set_global_lyrics_offset(ms: i64) {
     let ms = ms.clamp(-30000, 30000);

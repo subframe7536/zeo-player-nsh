@@ -115,6 +115,11 @@ impl LibraryStore {
         self.update_config(|c| c.lyrics_timestamps = on);
     }
 
+    /// 全屏歌词渐进模糊开关。
+    pub fn set_lyrics_blur(&self, on: bool) {
+        self.update_config(|c| c.lyrics_blur = on);
+    }
+
     /// 本地同名图片文件是否优先于内嵌封面。
     pub fn prefer_local_covers(&self) -> bool {
         self.config().prefer_local_covers

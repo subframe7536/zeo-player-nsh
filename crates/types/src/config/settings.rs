@@ -60,6 +60,9 @@ pub struct LibraryConfig {
     /// 全屏歌词行悬停时显示该行时间戳（占位在行尾，长歌词盖不住）。
     #[serde(default = "default_true")]
     pub lyrics_timestamps: bool,
+    /// 全屏歌词非当前行渐进模糊（关闭后仅保留上下边缘淡出）。
+    #[serde(default = "default_true")]
+    pub lyrics_blur: bool,
     /// 本地同名图片（jpg / jpeg / png / webp）优先于内嵌封面。
     #[serde(default = "default_true")]
     pub prefer_local_covers: bool,
@@ -157,6 +160,7 @@ impl Default for LibraryConfig {
             prefer_local_lyrics: default_true(),
             global_lyrics_offset_ms: 0,
             lyrics_timestamps: true,
+            lyrics_blur: true,
             prefer_local_covers: default_true(),
             show_covers: default_true(),
             delete_permanently: false,

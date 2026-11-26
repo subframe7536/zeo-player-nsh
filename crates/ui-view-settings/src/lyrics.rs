@@ -61,6 +61,23 @@ pub(crate) fn lyrics_timestamps_section() -> View {
     )
 }
 
+/// 歌词模糊：全屏页对远离当前行的歌词施加渐进模糊。
+pub(crate) fn lyrics_blur_section() -> View {
+    let s = store();
+    setting_section(
+        "歌词模糊",
+        "全屏播放页对远离当前行的歌词施加渐进模糊，关闭后保持全部清晰。",
+        Some(
+            zeo_ui_components::form::switch(
+                move || s.library.with(|l| l.config.lyrics_blur),
+                "歌词模糊",
+                zeo_ui_store::set_lyrics_blur,
+            )
+            .into_element(),
+        ),
+    )
+}
+
 /// 全局歌词偏移：所有曲目统一提前 / 延后（毫秒；与每首曲目的手动偏移相加生效）。
 pub(crate) fn lyrics_offset_section() -> View {
     let s = store();
