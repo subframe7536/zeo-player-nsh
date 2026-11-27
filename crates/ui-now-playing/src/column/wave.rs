@@ -37,8 +37,12 @@ pub(crate) fn waveform_seek() -> View {
         let _ = s.waveform.get();
         let my = grow_gen.get() + 1;
         grow_gen.set(my);
-        grow.set(0.0);
-        schedule_grow(grow, grow_gen.clone(), my, Instant::now());
+        if untracked(reduce_motion) {
+            grow.set(1.0);
+        } else {
+            grow.set(0.0);
+            schedule_grow(grow, grow_gen.clone(), my, Instant::now());
+        }
     });
     let duration = move || s.playback.with(|p| p.duration);
     const H: f32 = 26.0;
@@ -85,33 +89,30 @@ pub(crate) fn waveform_seek() -> View {
                     size(px(bar), px(bh)),
                 ));
             }
-            // 已播部分 = 亮条裁到 [0, head]：头左侧全亮、头下的那根只亮
-            // 到头、右侧全暗，与逐根算 `played` 同效，但裁切宽随槽位原生侧
-            // 变化，painter 本身不用因进度重录。
-            for &rect in &rects {
-                p = std::mem::take(&mut p)
-                    .fill_color(dim)
-                    .begin_path()
-                    .round_rect(rect, radius)
-                    .fill();
-            }
-            let clip: Arc<[PathOp]> = Arc::new([PathOp::Rect([
-                Num::Const(0.0),
-                Num::Const(0.0),
-                head_n,
-                Num::Const(H),
-            ])]);
-            p = std::mem::take(&mut p)
-                .save()
-                .clip_path(&clip, FillRule::NonZero);
-            for &rect in &rects {
-                p = std::mem::take(&mut p)
+            // 暗条与亮条各合并为单次 begin_path + 批量 round_rect + fill，将绘制命令从 2*BARS 降为 2 次。
+            if !rects.is_empty() {
+                let mut draw = std::mem::take(&mut p).fill_color(dim).begin_path();
+                for &rect in &rects {
+                    draw = draw.round_rect(rect, radius);
+                }
+                p = draw.fill();
+
+                let clip: Arc<[PathOp]> = Arc::new([PathOp::Rect([
+                    Num::Const(0.0),
+                    Num::Const(0.0),
+                    head_n,
+                    Num::Const(H),
+                ])]);
+                let mut draw_lit = std::mem::take(&mut p)
+                    .save()
+                    .clip_path(&clip, FillRule::NonZero)
                     .fill_color(lit)
-                    .begin_path()
-                    .round_rect(rect, radius)
-                    .fill();
+                    .begin_path();
+                for &rect in &rects {
+                    draw_lit = draw_lit.round_rect(rect, radius);
+                }
+                p = draw_lit.fill().restore();
             }
-            p = std::mem::take(&mut p).restore();
         });
         p
     };

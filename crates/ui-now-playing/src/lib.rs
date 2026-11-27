@@ -209,6 +209,7 @@ impl Swap {
         let (content, shift, lyrics_shift) = (swap.content, swap.shift, swap.lyrics_shift);
         let (backdrop, under_alpha, top, under) =
             (swap.backdrop, swap.under_alpha, swap.top, swap.under);
+        let swap_gen = Rc::new(std::cell::Cell::new(0u64));
         effect(move || {
             let (ready, next) = s
                 .track
@@ -217,20 +218,33 @@ impl Swap {
             if !ready || current == next {
                 return;
             }
+            let my_gen = swap_gen.get().wrapping_add(1);
+            swap_gen.set(my_gen);
             let calm = untracked(reduce_motion);
-            under.set(current);
             top.set(next.clone());
+            if calm {
+                // 无动画模式下无需保留底层模糊图，避免双倍 blur(32px) 重绘。
+                under.set(None);
+                under_alpha.set(0.0);
+                backdrop.set(1.0);
+                return;
+            }
+            under.set(current);
             if next.is_some() {
                 under_alpha.set(1.0);
-                backdrop.set(if calm { 1.0 } else { 0.0 });
-                if !calm {
-                    let _ = backdrop.timing(1.0, 700.0, Easing::EaseOut);
-                }
-            } else if calm {
-                under_alpha.set(0.0);
+                backdrop.set(0.0);
+                let _ = backdrop.timing(1.0, 700.0, Easing::EaseOut);
             } else {
                 let _ = under_alpha.timing(0.0, 700.0, Easing::EaseOut);
             }
+            let swap_gen = swap_gen.clone();
+            spawn(async move {
+                timer(std::time::Duration::from_millis(750)).await;
+                if swap_gen.get() == my_gen {
+                    under.set(None);
+                    under_alpha.set(0.0);
+                }
+            });
         });
         let key = computed(move || s.track.with(|t| (t.path.clone(), t.index)));
         let previous = RefCell::new(None::<(Option<String>, i64)>);
