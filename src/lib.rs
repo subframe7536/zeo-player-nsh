@@ -89,6 +89,11 @@ fn app_content() -> AnyElement {
     // 正在收起（淡出动画中）；收起途中再打开会取消它。
     let full_closing = signal(false);
     let fade = animated_value(0.0);
+    // 全屏播放完全盖住窗口（淡入结束）时不再绘制底下的主界面。Windows 后端
+    // 按脏区重画、没有遮挡剔除：歌词滚动的每一帧都会把被盖住的侧栏 / 列表 /
+    // 封面在脏区里再画一遍（实测滚动掉到约 30 fps）。`invisible()` 只跳过
+    // 绘制，布局与状态都保留，收起一开始就恢复，淡出时底下照常可见。
+    let full_covered = signal(false);
     let open = {
         Rc::new(move || {
             if full_open.get_untracked() && !full_closing.get_untracked() {
@@ -100,9 +105,16 @@ fn app_content() -> AnyElement {
             global::<zeo_ui_now_playing::Reveal>().update(|r| r.0 = r.0.wrapping_add(1));
             if untracked(reduce_motion) {
                 fade.set(1.0);
-            } else {
-                let _ = fade.timing(1.0, zeo_ui_now_playing::IN_MS, zeo_ui_now_playing::IN_EASE);
+                full_covered.set(true);
+                return;
             }
+            let end = fade.timing(1.0, zeo_ui_now_playing::IN_MS, zeo_ui_now_playing::IN_EASE);
+            spawn(async move {
+                // 淡入途中又收起了（动画被替换，返回 false）：保持绘制。
+                if end.await && full_open.get_untracked() && !full_closing.get_untracked() {
+                    full_covered.set(true);
+                }
+            });
         }) as Rc<dyn Fn()>
     };
     let close = {
@@ -110,6 +122,7 @@ fn app_content() -> AnyElement {
             if !full_open.get_untracked() || full_closing.get_untracked() {
                 return;
             }
+            full_covered.set(false);
             full_closing.set(true);
             if untracked(reduce_motion) {
                 fade.set(0.0);
@@ -158,6 +171,7 @@ fn app_content() -> AnyElement {
                 view()
                     .flex_1()
                     .flex_row()
+                    .style_when(move || full_covered.get(), |st| st.invisible())
                     .child(zeo_ui_frame::sidebar())
                     .child(
                         view()
@@ -446,6 +460,9 @@ fn bench(open_full: Rc<dyn Fn()>) {
         });
         return;
     }
+    if std::env::var("ZEO_PLAYER_BENCH").as_deref() == Ok("lyrics") {
+        return bench_lyrics(open_full);
+    }
     // `scroll`：只跑浏览 + 滚网格，不放歌不开全屏（测列表滚动内存）。
     let scroll_only = std::env::var("ZEO_PLAYER_BENCH").as_deref() == Ok("scroll");
     let nav = global::<Nav>();
@@ -505,6 +522,69 @@ fn bench(open_full: Rc<dyn Fn()>) {
             }
         }
         wait(6).await;
+        step("done");
+    });
+}
+
+/// `ZEO_PLAYER_BENCH=lyrics`：静音放第一首带时间轴歌词（≥ 24 行）的歌、打开
+/// 全屏，先静置（`idle`），再每 300 ms 往后跳 3 行让歌词连续动画滚动
+/// （`scrolling`）。帧耗时用 PresentMon 抓主窗口的 Present（`--fps` 的读数
+/// 不含这个窗口的绘制）。
+#[cfg(any(debug_assertions, test))]
+fn bench_lyrics(open_full: Rc<dyn Fn()>) {
+    spawn(async move {
+        let s = zeo_ui_store::store();
+        let step = |name: &str| eprintln!("ZEO_PLAYER_BENCH step {name}");
+        let wait = |ms: u64| timer(std::time::Duration::from_millis(ms));
+        while s.library.with_untracked(|l| l.progress.scanning)
+            || s.tracks.with_untracked(|t| t.is_empty())
+        {
+            wait(500).await;
+        }
+        zeo_ui_store::set_volume_live(0.0);
+        let tracks = s.tracks.get_untracked();
+        let mut times = Vec::new();
+        for index in 0..tracks.len().min(200) {
+            zeo_ui_store::play_list(&tracks, index);
+            for _ in 0..20 {
+                wait(100).await;
+                if s.lyrics.with_untracked(Option::is_some) {
+                    break;
+                }
+            }
+            times = s.lyrics.with_untracked(|l| {
+                l.as_ref()
+                    .filter(|l| l.output.timed && l.output.lines.len() >= 24)
+                    .map(|l| {
+                        l.output
+                            .lines
+                            .iter()
+                            .map(|line| line.time)
+                            .filter(|t| *t >= 0.0)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            });
+            if times.len() >= 24 {
+                break;
+            }
+        }
+        if times.is_empty() {
+            step("no-lyrics");
+            return;
+        }
+        zeo_ui_store::set_volume_live(0.0);
+        open_full();
+        wait(3000).await;
+        step("idle");
+        wait(5000).await;
+        step("scrolling");
+        let mut line = 0;
+        for _ in 0..40 {
+            line = (line + 3) % (times.len() - 4);
+            zeo_ui_store::seek_to(times[line] + 0.05);
+            wait(300).await;
+        }
         step("done");
     });
 }

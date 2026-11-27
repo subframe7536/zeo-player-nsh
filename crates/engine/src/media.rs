@@ -214,6 +214,9 @@ mod smtc_thumbnail {
             }
             let set = match &new {
                 Some(path) => {
+                    // `StorageFile` 只收规范的绝对路径：相对路径、`..`、`/`
+                    // 分隔符都报 0x800700A1（路径含无效字符），先规范化。
+                    let path = std::path::absolute(path).unwrap_or_else(|_| path.clone());
                     StorageFile::GetFileFromPathAsync(&HSTRING::from(&*path.to_string_lossy()))
                         .and_then(|op| op.join())
                         .and_then(|file| RandomAccessStreamReference::CreateFromFile(&file))

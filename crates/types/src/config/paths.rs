@@ -18,11 +18,12 @@ pub fn data_dir() -> PathBuf {
         return PathBuf::from(dir);
     }
     if cfg!(debug_assertions) {
-        // CARGO_MANIFEST_DIR 是 crates/types：回两级到仓库根。
-        return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .join(".nsh")
-            .join("dev-data");
+        // CARGO_MANIFEST_DIR 是 crates/types：取两级父目录到仓库根。不拼
+        // `../..`：带 `..` 的路径 Windows `StorageFile` 不收（SMTC 封面
+        // 报 0x800700A1）。
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let root = manifest.ancestors().nth(2).unwrap_or(manifest);
+        return root.join(".nsh").join("dev-data");
     }
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
