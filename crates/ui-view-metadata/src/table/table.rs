@@ -50,55 +50,54 @@ pub(crate) fn table(
         let start = win_start.min(total);
         let end = win_end.min(total).max(start);
         let slice = &list[start..end];
-        let map = rows.get();
         let active = visible_cols.get();
-        let mut data = DataTableRows::new(slice.len());
-        // 仅对当前可见窗口切片查表与生成文本，避免全库数万行全量物化
-        let row_ptrs: Vec<Option<&MetaRow>> = slice
-            .iter()
-            .map(|t| map.get(t.path.as_str()).map(|r| r.as_ref()))
-            .collect();
-        for &(key, ..) in COLUMNS {
-            if !active.contains(key) {
-                continue;
+        rows.with(|map| {
+            let mut data = DataTableRows::new(slice.len());
+            // 仅对当前可见窗口切片零拷贝借用查表与生成文本，避免克隆整个 rows HashMap
+            let row_ptrs: Vec<Option<&MetaRow>> = slice
+                .iter()
+                .map(|t| map.get(t.path.as_str()).map(|r| r.as_ref()))
+                .collect();
+            for &(key, ..) in COLUMNS {
+                if !active.contains(key) {
+                    continue;
+                }
+                data = data.texts(
+                    key,
+                    slice
+                        .iter()
+                        .zip(row_ptrs.iter())
+                        .map(|(t, row)| cell_value(key, t, *row)),
+                );
             }
-            data = data.texts(
-                key,
-                slice
-                    .iter()
-                    .zip(row_ptrs.iter())
-                    .map(|(t, row)| cell_value(key, t, *row)),
-            );
-        }
-        data
+            data
+        })
     });
 
     let row_classes = move || -> Vec<SharedString> {
-        let set = selected.get();
         let total = displayed.with(|v| v.len());
         let (win_start, win_end) = visible_window.get();
         let start = win_start.min(total);
         let end = win_end.min(total).max(start);
-        displayed.with(|v| {
-            let slice = &v[start..end];
-            if set.is_empty() {
-                return vec![SharedString::new_static("bg-card"); slice.len()];
-            }
-            let active = SharedString::new_static("bg-primary/10");
-            let card = SharedString::new_static("bg-card");
-            slice
-                .iter()
-                .map(|t| {
-                    if set.contains(&t.path) {
-                        // 与侧栏悬停同一个 8% 主色（`primary().opacity(0.08)`，
-                        // sidebar.rs）——选中行跟着主题色走，不再用 accent 灰底。
-                        active.clone()
-                    } else {
-                        // 未选中行设不透明背景，横向滚动时固定列不会透光重叠文字。
-                        card.clone()
-                    }
-                })
-                .collect()
+        selected.with(|set| {
+            displayed.with(|v| {
+                let slice = &v[start..end];
+                if set.is_empty() {
+                    return vec![SharedString::new_static("bg-card"); slice.len()];
+                }
+                let active = SharedString::new_static("bg-primary/10");
+                let card = SharedString::new_static("bg-card");
+                slice
+                    .iter()
+                    .map(|t| {
+                        if set.contains(&t.path) {
+                            active.clone()
+                        } else {
+                            card.clone()
+                        }
+                    })
+                    .collect()
+            })
         })
     };
 
