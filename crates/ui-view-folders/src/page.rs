@@ -91,17 +91,24 @@ pub fn Folders() -> impl IntoElement {
     effect(move || {
         let cur_files = filtered_files.get();
         let all = s.tracks.get();
-        let visible: BTreeSet<String> = cur_files
+        let has_sel = selected_paths.with_untracked(|p| !p.is_empty());
+        let has_anchor = anchor_path.with_untracked(Option::is_some);
+        if !has_sel && !has_anchor {
+            return;
+        }
+        let visible: std::collections::HashSet<&str> = cur_files
             .iter()
-            .filter_map(|&idx| all.get(idx).map(|t| t.path.clone()))
+            .filter_map(|&idx| all.get(idx).map(|t| t.path.as_str()))
             .collect();
-        selected_paths.update(|paths| {
-            paths.retain(|p| visible.contains(p));
-        });
-        if let Some(ref a) = anchor_path.get_untracked() {
-            if !visible.contains(a) {
-                anchor_path.set(None);
-            }
+        if has_sel {
+            selected_paths.update(|paths| {
+                paths.retain(|p| visible.contains(p.as_str()));
+            });
+        }
+        if let Some(ref a) = anchor_path.get_untracked()
+            && !visible.contains(a.as_str())
+        {
+            anchor_path.set(None);
         }
     });
 

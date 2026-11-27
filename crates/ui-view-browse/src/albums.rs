@@ -16,8 +16,9 @@ pub fn Albums() -> impl IntoElement {
             vec![(album_key(t), album, artist)]
         }))
     });
+    let empty = computed(move || s.tracks.with(|t| t.is_empty()));
     view().flex_1().child(dynamic(move || {
-        if s.tracks.with(|t| t.is_empty()) {
+        if empty.get() {
             return no_library().into_element();
         }
         match selected.get() {

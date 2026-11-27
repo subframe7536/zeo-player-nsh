@@ -44,8 +44,9 @@ pub(crate) fn create_folder_ui() -> FolderUi {
         expanded: s.folder_expanded,
         message: s.folder_message,
     });
+    let roots_memo = computed(move || s.library.with(|l| l.config.roots.clone()));
     let tree = computed(move || {
-        let roots = s.library.with(|l| l.config.roots.clone());
+        let roots = roots_memo.get();
         let tracks = s.tracks.get();
         let mut extra: BTreeSet<String> = s.dirs.get().iter().cloned().collect();
         for d in s.folder_extra.get() {
@@ -62,7 +63,8 @@ pub(crate) fn create_folder_ui() -> FolderUi {
         place(&tree, s.folder_sel.get().as_deref())
     });
     let all_rows = computed(move || {
-        let r = flatten_with(&tree.get(), &s.folder_expanded.get());
+        let t = tree.get();
+        let r = s.folder_expanded.with(|exp| flatten_with(&t, exp));
         Rc::new(r)
     });
     let files = computed(move || here.with(|p| p.all.clone()));
