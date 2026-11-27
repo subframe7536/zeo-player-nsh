@@ -130,23 +130,67 @@ pub fn apply_batch_matches(
     let on_prepare = Arc::new(on_prepare);
     std::thread::spawn(move || {
         let total = plans.len();
-        let mut items: Vec<(String, TagEdits)> = Vec::with_capacity(total);
-        for (idx, (path, cand)) in plans.into_iter().enumerate() {
-            let edits = build_batch_edits(
-                &svc,
-                Path::new(&path),
-                &cand,
-                &fields,
-                write_policy,
-                &artist_sep,
-            );
-            if !edits.is_empty() {
-                items.push((path, edits));
-            }
-            let cb = on_prepare.clone();
-            let done = idx + 1;
-            post_prep.post(move || cb(done, total));
+        if total == 0 {
+            post.post(move || {
+                on_done(BatchSaved {
+                    written: Vec::new(),
+                    errors: Vec::new(),
+                })
+            });
+            return;
         }
+        // 受控并发（最多 4 线程）+ 批次内按封面 URL 去重缓存，避免同专辑重复下载高清封面。
+        let workers = total.min(4);
+        let next_idx = std::sync::atomic::AtomicUsize::new(0);
+        let done_cnt = std::sync::atomic::AtomicUsize::new(0);
+        let results: std::sync::Mutex<Vec<Option<(String, TagEdits)>>> =
+            std::sync::Mutex::new(vec![None; total]);
+        let cover_cache: std::sync::Mutex<HashMap<String, Option<(Vec<u8>, String)>>> =
+            std::sync::Mutex::new(HashMap::new());
+
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                let svc = &svc;
+                let plans = &plans;
+                let fields = &fields;
+                let artist_sep = &artist_sep;
+                let next_idx = &next_idx;
+                let done_cnt = &done_cnt;
+                let results = &results;
+                let cover_cache = &cover_cache;
+                let on_prepare = &on_prepare;
+                let post_prep = &post_prep;
+                scope.spawn(move || loop {
+                    let idx = next_idx.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if idx >= total {
+                        break;
+                    }
+                    let (path, cand) = &plans[idx];
+                    let edits = build_batch_edits(
+                        svc,
+                        Path::new(path),
+                        cand,
+                        fields,
+                        write_policy,
+                        artist_sep,
+                        cover_cache,
+                    );
+                    if !edits.is_empty() {
+                        results.lock().unwrap()[idx] = Some((path.clone(), edits));
+                    }
+                    let done = done_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    let cb = on_prepare.clone();
+                    post_prep.post(move || cb(done, total));
+                });
+            }
+        });
+
+        let items: Vec<(String, TagEdits)> = results
+            .into_inner()
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .collect();
         if items.is_empty() {
             post.post(move || {
                 on_done(BatchSaved {
@@ -169,6 +213,7 @@ fn build_batch_edits(
     fields: &MatchFields,
     policy: WritePolicy,
     artist_sep: &str,
+    cover_cache: &std::sync::Mutex<HashMap<String, Option<(Vec<u8>, String)>>>,
 ) -> TagEdits {
     let existing = if policy == WritePolicy::FillEmpty {
         zeo_metadata::write::read_fields(path).unwrap_or_default()
@@ -234,18 +279,30 @@ fn build_batch_edits(
                 if fields.cover_sidecar {
                     zeo_metadata::covers::find_sidecar(path).is_none()
                 } else {
-                    !zeo_metadata::read_meta(path)
+                    !MetaCache::global()
+                        .get(path)
                         .map(|m| m.has_art)
                         .unwrap_or(false)
                 }
             }
         };
-        if need_cover && let Ok((data, mime)) = svc.download_cover(url) {
+        if need_cover {
+            let cached = cover_cache.lock().unwrap().get(url).cloned();
+            let fetched = match cached {
+                Some(v) => v,
+                None => {
+                    let v = svc.download_cover(url).ok();
+                    cover_cache.lock().unwrap().insert(url.to_owned(), v.clone());
+                    v
+                }
+            };
+            if let Some((data, mime)) = fetched {
             let edit = CoverEdit::Replace { data, mime };
-            if fields.cover_sidecar {
-                edits.cover_file = Some(edit);
-            } else {
-                edits.cover = Some(edit);
+                if fields.cover_sidecar {
+                    edits.cover_file = Some(edit);
+                } else {
+                    edits.cover = Some(edit);
+                }
             }
         }
     }
