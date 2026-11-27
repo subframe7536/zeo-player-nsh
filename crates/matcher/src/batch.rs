@@ -29,7 +29,21 @@ where
     if total == 0 {
         return Vec::new();
     }
-    let workers = config.concurrency.clamp(1, 4).min(total);
+    let sources: Arc<Vec<MatchSource>> = Arc::new(
+        config
+            .sources
+            .iter()
+            .copied()
+            .filter(|s| *s != MatchSource::Smart)
+            .collect(),
+    );
+    let max_workers = config.concurrency.clamp(1, 4);
+    // 智能聚合模式每首歌会并发请求所有源：按总并发预算收敛外层工作线程数，避免嵌套放大。
+    let workers = if config.smart_aggregate && sources.len() > 1 {
+        (max_workers / sources.len()).max(1).min(total)
+    } else {
+        max_workers.min(total)
+    };
     let tracks = Arc::new(tracks);
     let next_idx = Arc::new(AtomicUsize::new(0));
     let results: Arc<Mutex<Vec<Option<BatchItemResult>>>> = Arc::new(Mutex::new(vec![None; total]));
@@ -47,6 +61,7 @@ where
             let cancel = cancel.clone();
             let on_progress = on_progress.clone();
             let config = config.clone();
+            let sources = sources.clone();
 
             scope.spawn(move || {
                 loop {
@@ -58,7 +73,7 @@ where
                         break;
                     }
                     let track = &tracks[idx];
-                    let item = match_one(&service, track, &config, &cancel);
+                    let item = match_one(&service, track, &config, &sources, &cancel);
                     if cancel.load(Ordering::Relaxed) {
                         break;
                     }
@@ -88,23 +103,29 @@ where
                     on_progress(progress);
 
                     if config.min_delay_ms > 0 && !cancel.load(Ordering::Relaxed) {
-                        // 轻量确定性抖动，避免多线程同拍撞限流。
+                        // 轻量确定性抖动 + 分段睡眠以快速响应取消信号。
                         let jitter = ((idx + worker_id * 7) % 5) as u64 * 30;
-                        std::thread::sleep(Duration::from_millis(config.min_delay_ms + jitter));
+                        let mut rem = config.min_delay_ms + jitter;
+                        while rem > 0 && !cancel.load(Ordering::Relaxed) {
+                            let step = rem.min(50);
+                            std::thread::sleep(Duration::from_millis(step));
+                            rem -= step;
+                        }
                     }
                 }
             });
         }
     });
 
-    let guard = results.lock().unwrap_or_else(|e| e.into_inner());
-    guard.iter().flatten().cloned().collect()
+    let mut guard = results.lock().unwrap_or_else(|e| e.into_inner());
+    std::mem::take(&mut *guard).into_iter().flatten().collect()
 }
 
 fn match_one(
     service: &MatcherService,
     track: &BatchTrackInput,
     config: &BatchConfig,
+    sources: &[MatchSource],
     cancel: &AtomicBool,
 ) -> BatchItemResult {
     let query = build_query(
@@ -124,12 +145,6 @@ fn match_one(
         };
     }
 
-    let sources: Vec<MatchSource> = config
-        .sources
-        .iter()
-        .copied()
-        .filter(|s| *s != MatchSource::Smart)
-        .collect();
     if sources.is_empty() {
         return BatchItemResult {
             path: track.path.clone(),
@@ -141,7 +156,7 @@ fn match_one(
     }
 
     if config.smart_aggregate {
-        match service.search_multi(&sources, &query, 8) {
+        match service.search_multi(sources, &query, 8) {
             Ok(mut ranked) => {
                 ranked.truncate(5);
                 return classify(&track.path, ranked, config.strictness, None);
@@ -167,7 +182,7 @@ fn match_one(
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        match service.search(source, &query, 10) {
+        match service.search(*source, &query, 10) {
             Ok(mut ranked) => {
                 any_ok = true;
                 if let Some(top) = ranked.first()

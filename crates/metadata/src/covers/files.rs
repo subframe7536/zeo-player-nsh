@@ -36,9 +36,19 @@ pub fn evict(path: &Path) {
 /// 删掉比 `keep` 小的列表封面文件（`drain_covers` 把信号换到大文件
 /// 之后调）：每个音频文件最多一份缓存封面，升档后旧的小图清掉。
 pub fn prune_smaller(path: &Path, keep: u32) {
+    if keep <= TINY {
+        return;
+    }
     let Some(key) = cache_key(path) else {
         return;
     };
+    prune_smaller_keyed(key, keep);
+}
+
+pub(crate) fn prune_smaller_keyed(key: u64, keep: u32) {
+    if keep <= TINY {
+        return;
+    }
     let dir = cache_dir();
     for side in [TINY, THUMB] {
         if side < keep {
@@ -69,7 +79,11 @@ pub(crate) fn list_cover(path: &Path, side: u32) -> Option<(u32, PathBuf)> {
             }
         }
     }
-    Some((side, cover_file(path, side)?))
+    let out = cover_file_keyed(path, key, side, cover_source, true)?;
+    if side > TINY {
+        prune_smaller_keyed(key, side);
+    }
+    Some((side, out))
 }
 
 pub(crate) fn cache_key(path: &Path) -> Option<u64> {
@@ -94,7 +108,7 @@ pub(crate) fn cache_key(path: &Path) -> Option<u64> {
 /// 字节（解码失败也要原样写出交给系统解码，同旧行为）。
 pub(crate) enum CoverSrc {
     Img(image::DynamicImage),
-    Raw(Vec<u8>),
+    Raw(Vec<u8>, Option<String>),
 }
 
 /// `path` 的封面来源，按「本地同名图片优先」开关取序；首选来源失败
@@ -116,10 +130,10 @@ pub(crate) fn cover_source_for(path: &Path, prefer: bool) -> Option<CoverSrc> {
 /// 只看内嵌封面（`MetaCache` 记了无图直接 `None`，不解码）。
 pub(crate) fn embedded_source(path: &Path) -> Option<CoverSrc> {
     MetaCache::global().get(path).ok()?.has_art.then_some(())?;
-    let (bytes, _) = crate::read_artwork(path)?;
+    let (bytes, mime) = crate::read_artwork(path)?;
     Some(match image::load_from_memory(&bytes) {
         Ok(img) => CoverSrc::Img(img),
-        Err(_) => CoverSrc::Raw(bytes),
+        Err(_) => CoverSrc::Raw(bytes, mime),
     })
 }
 
@@ -131,11 +145,12 @@ pub(crate) fn cover_source(path: &Path) -> Option<CoverSrc> {
 pub(crate) fn decode_cover(path: &Path) -> Option<image::DynamicImage> {
     match cover_source(path)? {
         CoverSrc::Img(img) => Some(img),
-        CoverSrc::Raw(bytes) => image::load_from_memory(&bytes).ok(),
+        CoverSrc::Raw(bytes, _) => image::load_from_memory(&bytes).ok(),
     }
 }
 
 /// `path` 的封面缩到 `side` 像素以内、存为 JPEG（已缓存则直接返回）。
+#[cfg(test)]
 pub(crate) fn cover_file(path: &Path, side: u32) -> Option<PathBuf> {
     cover_file_keyed(path, cache_key(path)?, side, cover_source, true)
 }
@@ -181,14 +196,15 @@ pub(crate) fn cover_file_keyed(
     let tmp = out.with_extension("tmp");
     match src {
         CoverSrc::Img(img) => {
-            if record_hue && MetaCache::global().art_hue(path).is_none() {
-                store_hue(path, palette_hue(&img));
-            }
+            // 先缩放到目标尺寸再提色，避免对 2000px+ 原图做两次缩放。
             let img = if img.width() > side || img.height() > side {
                 img.resize(side, side, image::imageops::FilterType::Triangle)
             } else {
                 img
             };
+            if record_hue && MetaCache::global().art_hue(path).is_none() {
+                store_hue(path, palette_hue(&img));
+            }
             let rgb = image::DynamicImage::ImageRgb8(img.to_rgb8());
             let file = std::fs::File::create(&tmp).ok()?;
             let mut writer = std::io::BufWriter::new(file);
@@ -197,8 +213,60 @@ pub(crate) fn cover_file_keyed(
                 .ok()?;
         }
         // 解不开的格式：原样写出，交给系统解码。
-        CoverSrc::Raw(bytes) => std::fs::write(&tmp, &bytes).ok()?,
+        CoverSrc::Raw(bytes, _) => std::fs::write(&tmp, &bytes).ok()?,
     }
     std::fs::rename(&tmp, &out).ok()?;
     Some(out)
+}
+
+/// 队尾预载：单次解码同时生成 `TINY` 列表缩略图与 `LARGE` 全屏大封面 URI，避免双重解码。
+pub(crate) fn warm_cover(path: &Path) -> Option<(u32, PathBuf)> {
+    let key = cache_key(path)?;
+    let dir = cache_dir();
+    let existing = [TINY, THUMB].into_iter().find_map(|s| {
+        let f = dir.join(format!("{key:016x}-{s}.jpg"));
+        f.is_file().then_some((s, f))
+    });
+    let has_art = super::has_cached_artwork(path, key);
+    if let Some((s, f)) = existing {
+        ensure_hue(path, &f);
+        if !has_art {
+            super::artwork_uri(path);
+        }
+        return Some((s, f));
+    }
+    let src = cover_source(path)?;
+    let out = dir.join(format!("{key:016x}-{TINY}.jpg"));
+    std::fs::create_dir_all(&dir).ok()?;
+    let tmp = out.with_extension("tmp");
+    match src {
+        CoverSrc::Img(img) => {
+            let thumb = if img.width() > TINY || img.height() > TINY {
+                img.resize(TINY, TINY, image::imageops::FilterType::Triangle)
+            } else {
+                img.clone()
+            };
+            if MetaCache::global().art_hue(path).is_none() {
+                store_hue(path, palette_hue(&thumb));
+            }
+            let rgb = image::DynamicImage::ImageRgb8(thumb.to_rgb8());
+            let file = std::fs::File::create(&tmp).ok()?;
+            let mut writer = std::io::BufWriter::new(file);
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut writer, 85)
+                .encode_image(&rgb)
+                .ok()?;
+            std::fs::rename(&tmp, &out).ok()?;
+            if !has_art {
+                super::cache_artwork_from_src(path, key, CoverSrc::Img(img));
+            }
+        }
+        CoverSrc::Raw(bytes, mime) => {
+            std::fs::write(&tmp, &bytes).ok()?;
+            std::fs::rename(&tmp, &out).ok()?;
+            if !has_art {
+                super::cache_artwork_from_src(path, key, CoverSrc::Raw(bytes, mime));
+            }
+        }
+    }
+    Some((TINY, out))
 }

@@ -2,7 +2,7 @@ use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
-use super::{TINY, artwork_uri, list_cover};
+use super::{TINY, list_cover, warm_cover};
 
 /// 已完成的（曲目路径, 实际尺寸, 缩略图路径），工作线程写、界面取走。
 type Done = Arc<Mutex<Vec<(String, u32, Option<String>)>>>;
@@ -66,8 +66,7 @@ fn pool() -> &'static Pool {
                             }
                             Job::Warm(path) => {
                                 let p = Path::new(&path);
-                                let got = list_cover(p, TINY);
-                                artwork_uri(p);
+                                let got = warm_cover(p);
                                 done.lock().unwrap().push((
                                     path,
                                     got.as_ref().map(|(s, _)| *s).unwrap_or(TINY),

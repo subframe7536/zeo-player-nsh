@@ -70,7 +70,7 @@ fn cover_source_respects_local_first() {
     }
     let hue_of = |src: Option<CoverSrc>| match src? {
         CoverSrc::Img(img) => palette_hue(&img).map(|(h, _)| h),
-        CoverSrc::Raw(_) => None,
+        CoverSrc::Raw(..) => None,
     };
     let local = hue_of(cover_source_for(path, true)).expect("sidecar 应有主色调");
     assert!(
