@@ -15,10 +15,16 @@ pub fn updates_supported() -> bool {
     zeo_updater::supported()
 }
 
-/// 检查更新（手动按钮与启动自动检查共用；检查中重复点直接跳过）。
+/// 手动检查更新（「设置 › 关于」调用；检查中重复点直接跳过）。
+/// 只更新 `Store::update` 状态在设置页内联呈现，不弹「发现新版本」弹窗。
+pub fn check_for_update() {
+    run_check(false);
+}
+
+/// 发起一次更新检查；`prompt` 为真时检查到新版本会弹出 `update_prompt`。
 /// `Ready`（已装好等重启）也不再查：后台的自动检查不能把待重启的
 /// 状态盖回「有新版本」。
-pub fn check_for_update() {
+fn run_check(prompt: bool) {
     let s = store();
     if !updates_supported()
         || s.update.with(|u| {
@@ -49,9 +55,9 @@ pub fn check_for_update() {
             Err(e) => UpdateState::Error(e),
         };
         post.post(move || {
-            // 有更新就弹详情弹窗（手动与启动的自动检查都弹；弹窗里能就地
-            // 关掉自动检查）。失败 / 已是最新不打扰。
-            if matches!(next, UpdateState::Available { .. }) {
+            // 仅启动自动检查发现更新时弹详情弹窗（弹窗里能就地关掉自动检查）。
+            // 设置页手动检查只在「关于」页内联展示；失败 / 已是最新不打扰。
+            if prompt && matches!(next, UpdateState::Available { .. }) {
                 s.update_prompt.set(true);
             }
             s.update.set(next);
@@ -101,12 +107,11 @@ pub fn remove_update_leftovers() {
     }
 }
 
-/// 启动时的自动检查（「自动检查更新」开着才跑；静默——只在「关于」
-/// 页呈现，不打断）。
+/// 启动时的自动检查（「自动检查更新」开着才跑；发现新版本时弹详情弹窗）。
 pub fn auto_check_updates() {
     let s = store();
     if s.library.with(|l| l.config.auto_check_updates) {
-        check_for_update();
+        run_check(true);
     }
 }
 
