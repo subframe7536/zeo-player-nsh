@@ -29,12 +29,11 @@ impl<T: Default> Default for Same<T> {
     }
 }
 
-/// 播放进度与开关（≈10 Hz 变化）。
+/// 播放冷状态（播放/暂停、加载中、总时长、音量、循环模式；进度拆分至 `Store.playback_time`）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Playback {
     pub playing: bool,
     pub loading: bool,
-    pub time: f64,
     pub duration: f64,
     pub volume: f64,
     /// 队列循环模式（顺序 / 单曲 / 随机）。
@@ -99,6 +98,12 @@ pub struct Lyrics {
 #[derive(Clone, Copy)]
 pub struct Store {
     pub playback: Signal<Playback>,
+    /// 当前播放位置（秒，≈10 Hz 变化；独立于冷状态信号避免无关 UI 高频重算）。
+    pub playback_time: Signal<f64>,
+    /// 「列表中显示封面」独立派生信号（避免所有封面槽位订阅整个 `library`）。
+    pub covers_on: Memo<bool>,
+    /// 「我喜欢」曲目路径集合（O(1) 查找且与普通歌单变更隔离）。
+    pub liked_set: Signal<Same<std::collections::HashSet<String>>>,
     /// 播放 / 暂停的用户意图：点击立刻记下目标态，播放键马上形变，
     /// 不等引擎命令的轮询回传（见 `toggle` / `shown_playing`）。
     /// `Instant` 是**截止时刻**——引擎一直没跟上（没有可播曲目之类）

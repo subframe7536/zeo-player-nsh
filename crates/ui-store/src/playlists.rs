@@ -27,16 +27,22 @@ pub(crate) fn change_playlists(f: impl FnOnce(&mut Vec<Playlist>)) {
     // 所有改收藏的路径都会过这里——点喜欢、右键「加到我喜欢」、歌单编辑。
     let fav_after = favorite_paths(&lists);
     if fav_before != fav_after {
+        let before_set: std::collections::HashSet<&str> =
+            fav_before.iter().map(String::as_str).collect();
+        let after_set: std::collections::HashSet<&str> =
+            fav_after.iter().map(String::as_str).collect();
         let added: Vec<String> = fav_after
             .iter()
-            .filter(|p| !fav_before.contains(p))
+            .filter(|p| !before_set.contains(p.as_str()))
             .cloned()
             .collect();
         let removed: Vec<String> = fav_before
             .iter()
-            .filter(|p| !fav_after.contains(p))
+            .filter(|p| !after_set.contains(p.as_str()))
             .cloned()
             .collect();
+        s.liked_set
+            .set(Same(Arc::new(fav_after.into_iter().collect())));
         let now = zeo_types::config::unix_now();
         zeo_db::later(move || {
             for p in &added {
@@ -180,12 +186,7 @@ pub fn remove_from_playlist(id: u64, path: &str) {
 
 /// `path` 在「我喜欢」里。读取即订阅。
 pub fn is_liked(path: &str) -> bool {
-    store().playlists.with(|l| {
-        l.iter().any(|p| {
-            p.favorite
-                && matches!(&p.kind, Kind::Manual { tracks } if tracks.iter().any(|t| t == path))
-        })
-    })
+    store().liked_set.with(|set| set.contains(path))
 }
 
 /// 喜欢 / 取消喜欢 `path`：加到「我喜欢」最前面，或从中移除。

@@ -66,23 +66,34 @@ pub struct DeleteAsk {
 /// 各手动歌单（含「我喜欢」）都清掉；文件不碰（还在时下次扫描会重新
 /// 入库）。正在播放这首就停掉。
 pub fn remove_record(path: &str) {
-    let s = store();
-    if s.track.with_untracked(|t| t.path.as_deref() == Some(path)) {
-        player().stop();
-    }
     let fs_path = Path::new(path);
     zeo_metadata::covers::evict(fs_path);
-    MetaCache::global().remove(fs_path);
-    let db_path = path.to_owned();
-    zeo_db::later(move || zeo_db::remove_meta(&db_path));
+    remove_records(&[path.to_owned()]);
+}
+
+/// 批量从曲库移除多条记录（合并歌单写盘、索引克隆、元数据缓存与 SQLite 事务为一次操作）。
+pub fn remove_records(paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+    let s = store();
+    let drop_set: std::collections::HashSet<&str> = paths.iter().map(String::as_str).collect();
+    if s.track
+        .with_untracked(|t| t.path.as_deref().is_some_and(|p| drop_set.contains(p)))
+    {
+        player().stop();
+    }
+    MetaCache::global().remove_batch(paths);
+    let db_paths = paths.to_vec();
+    zeo_db::later(move || zeo_db::remove_meta_batch(&db_paths));
     change_playlists(|lists| {
         for p in lists.iter_mut() {
             if let Kind::Manual { tracks } = &mut p.kind {
-                tracks.retain(|t| t != path);
+                tracks.retain(|t| !drop_set.contains(t.as_str()));
             }
         }
     });
-    library_store().remove_track(path);
+    library_store().remove_tracks(paths);
     s.tracks.set(Same(library_store().tracks()));
 }
 
@@ -155,6 +166,8 @@ pub fn confirm_delete_file() {
         let mut gone_paths = Vec::new();
         for p in &ask.paths {
             let path = Path::new(p);
+            // 删文件前在后台线程清理封面缓存（删完文件后 cache_key 无法命中）。
+            zeo_metadata::covers::evict(path);
             let mut gone = !path.exists();
             for _ in 0..10 {
                 if gone {
@@ -171,9 +184,7 @@ pub fn confirm_delete_file() {
             }
         }
         ui.post(move || {
-            for p in gone_paths {
-                remove_record(&p);
-            }
+            remove_records(&gone_paths);
         });
     });
 }
@@ -254,12 +265,15 @@ pub(crate) fn now_playing(snap: &zeo_engine::audio::Snapshot) -> NowPlaying {
 
 /// 当前歌词行（ap-spec：提前 0.5 s，开头 1 s 内不提前）。
 pub fn active_index(output: &LyricsOutput, time: f64) -> i64 {
-    let lookahead = if time > 1.0 { 0.5 } else { 0.0 };
-    let mut active = -1;
-    for (i, line) in output.lines.iter().enumerate() {
-        if line.time >= 0.0 && line.time <= time + lookahead {
-            active = i as i64;
-        }
+    let target = time + if time > 1.0 { 0.5 } else { 0.0 };
+    if target < 0.0 {
+        return -1;
     }
-    active
+    // lines 按时间升序排列，使用二分查找将 O(N) 降为 O(log N)。
+    let pos = output.lines.partition_point(|line| line.time <= target);
+    if pos > 0 && output.lines[pos - 1].time >= 0.0 {
+        (pos - 1) as i64
+    } else {
+        -1
+    }
 }
