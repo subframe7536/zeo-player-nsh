@@ -302,6 +302,26 @@ pub(crate) fn match_card(
         }
     };
 
+    let reset_draft = {
+        let lyric_token = lyric_token.clone();
+        move || {
+            // 取消在途的在线封面下载与歌词拉取，避免重置后被旧回调覆盖。
+            lyric_token.fetch_add(1, Ordering::Relaxed);
+            draft.update(|d| {
+                d.values = d.original.clone();
+                d.cover = None;
+                d.cover_src = None;
+                d.cover_file = None;
+                d.cover_file_src = None;
+                d.lrc_text = d.lrc_original.clone();
+                d.error = None;
+            });
+            form_gen.update(|g| *g += 1);
+            lyrics_gen.update(|g| *g += 1);
+            status.set(Some("已重置为原始元数据".to_owned()));
+        }
+    };
+
     let options: Vec<SelectOption> = MatchSource::ALL
         .into_iter()
         .map(|src| {
@@ -365,165 +385,214 @@ pub(crate) fn match_card(
             move || {
                 searching.get() || status.with(Option::is_some) || !candidates.with(Vec::is_empty)
             },
-            move || {
-                view()
-                    .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(8.0))
-                    .child(
-                        text(move || {
-                            if searching.get() {
-                                "正在搜索在线元数据…".to_owned()
-                            } else if let Some(s) = status.get() {
-                                s
-                            } else {
-                                format!(
-                                    "找到 {} 条候选，点击任一项回填表单",
-                                    candidates.with(Vec::len)
-                                )
-                            }
-                        })
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .number_of_lines(1)
-                        .text_size(px(12.0))
-                        .line_height(px(16.0))
-                        .text_color(muted_fg()),
-                    )
-                    .child(when(
-                        move || !candidates.with(Vec::is_empty),
-                        move || {
-                            text_button(
-                                Variant::Ghost,
-                                Size::Xs,
-                                None,
-                                if expanded.get() {
-                                    "收起候选"
-                                } else {
-                                    "展开候选"
-                                },
-                                move || expanded.update(|e| *e = !*e),
-                            )
-                        },
-                    ))
-            },
-        ))
-        .child(when(
-            move || expanded.get() && !candidates.with(Vec::is_empty),
             {
+                let reset_draft = reset_draft.clone();
                 let apply_candidate = apply_candidate.clone();
                 move || {
-                    let list = candidates.get();
-                    let apply_inner = apply_candidate.clone();
-                    scroll().max_h(px(220.0)).child(
-                        view().gap(px(2.0)).children(
-                            list.into_iter()
-                                .map(move |item| {
-                                    let cand = item.candidate.clone();
-                                    let key = format!("{:?}-{}", cand.source, cand.source_id);
-                                    let thumb_sig = computed(move || {
-                                        thumbs
-                                            .with(|m| m.get(&key).cloned())
-                                            .map(SharedString::from)
-                                    });
-                                    let sub = {
-                                        let mut parts = Vec::new();
-                                        let a = cand.joined_artists(" / ");
-                                        if !a.is_empty() {
-                                            parts.push(a);
-                                        }
-                                        if let Some(alb) = &cand.album {
-                                            parts.push(alb.clone());
-                                        }
-                                        if let Some(y) = &cand.year {
-                                            parts.push(y.clone());
-                                        }
-                                        parts.join(" · ")
-                                    };
-                                    let dur_label = cand.duration_ms.map(|ms| {
-                                        let base = format_duration_ms(ms);
-                                        if let Some(d) =
-                                            item.duration_diff_ms.and_then(format_diff_ms)
-                                        {
-                                            format!("{base} ({d})")
+                    let reset_draft = reset_draft.clone();
+                    let apply_candidate = apply_candidate.clone();
+                    nsh_base::collapsible()
+                        .open(move || expanded.get() && !candidates.with(Vec::is_empty))
+                        .reveal(true)
+                        .child(
+                            view()
+                                .flex_row()
+                                .items_center()
+                                .justify_between()
+                                .gap(px(8.0))
+                                .child(
+                                    text(move || {
+                                        if searching.get() {
+                                            "正在搜索在线元数据…".to_owned()
+                                        } else if let Some(s) = status.get() {
+                                            s
                                         } else {
-                                            base
+                                            format!(
+                                                "找到 {} 条候选，点击任一项回填表单",
+                                                candidates.with(Vec::len)
+                                            )
                                         }
-                                    });
-                                    let apply = apply_inner.clone();
-                                    let pick_cand = cand.clone();
-                                    let row = view()
-                                        .flex_row()
-                                        .items_center()
-                                        .gap(px(10.0))
-                                        .p(px(6.0))
-                                        .rounded(px(RADIUS_MD))
-                                        .hover(|st| st.bg(hover()))
-                                        .role(AccessibilityRole::Button)
-                                        .label(format!("选择候选 {}", cand.title))
-                                        .on_press(move || apply(pick_cand.clone()))
-                                        .child(when(store::covers_on, move || {
-                                            cover(move || thumb_sig.get(), Some(40.0), 6.0)
-                                        }))
-                                        .child(
-                                            view()
-                                                .flex_1()
-                                                .min_w(px(0.0))
-                                                .gap(px(2.0))
-                                                .child(
-                                                    view()
-                                                        .flex_row()
-                                                        .items_center()
-                                                        .gap(px(6.0))
-                                                        .child(
-                                                            text(cand.title.clone())
-                                                                .flex_shrink(1.0)
-                                                                .min_w(px(0.0))
-                                                                .number_of_lines(1)
-                                                                .text_size(px(13.0))
-                                                                .line_height(px(15.0))
-                                                                .font_weight(FontWeight::MEDIUM)
-                                                                .text_color(fg()),
-                                                        )
-                                                        .child(badge(
-                                                            cand.source.short_label(),
-                                                            false,
-                                                        ))
-                                                        .child(
-                                                            item.tags
-                                                                .best
-                                                                .then(|| badge("最佳", true)),
-                                                        )
-                                                        .child(
-                                                            (!item.tags.best
-                                                                && item.tags.duration_close)
-                                                                .then(|| badge("时长一致", false)),
-                                                        ),
+                                    })
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .number_of_lines(1)
+                                    .text_size(px(12.0))
+                                    .line_height(px(16.0))
+                                    .text_color(muted_fg()),
+                                )
+                                .child(when(
+                                    move || !candidates.with(Vec::is_empty),
+                                    move || {
+                                        view()
+                                            .flex_row()
+                                            .items_center()
+                                            .gap(px(4.0))
+                                            .child(tipped(
+                                                icon_button(
+                                                    || Icon::RotateCcw,
+                                                    12.0,
+                                                    "重置为原始元数据",
+                                                    muted_fg,
+                                                    reset_draft.clone(),
                                                 )
-                                                .child(
-                                                    text(sub)
-                                                        .number_of_lines(1)
-                                                        .text_size(px(12.0))
-                                                        .line_height(px(14.0))
-                                                        .text_color(muted_fg()),
+                                                .disabled(move || {
+                                                    draft.with(|d| d.saving || !has_any_edits(d))
+                                                }),
+                                                "重置为原始元数据",
+                                            ))
+                                            .child(tipped(
+                                                icon_button(
+                                                    move || {
+                                                        if expanded.get() {
+                                                            Icon::ChevronUp
+                                                        } else {
+                                                            Icon::ChevronDown
+                                                        }
+                                                    },
+                                                    12.0,
+                                                    "收起或展开候选",
+                                                    muted_fg,
+                                                    move || expanded.update(|e| *e = !*e),
                                                 ),
-                                        )
-                                        .child(dur_label.map(|d| {
-                                            text(d)
-                                                .text_size(px(11.0))
-                                                .line_height(px(13.0))
-                                                .text_color(faint())
-                                        }));
-                                    if item.duration_far {
-                                        row.opacity(0.45).into_element()
-                                    } else {
-                                        row.into_element()
-                                    }
-                                })
-                                .collect::<Vec<_>>(),
-                        ),
-                    )
+                                                move || {
+                                                    SharedString::from(if expanded.get() {
+                                                        "收起候选"
+                                                    } else {
+                                                        "展开候选"
+                                                    })
+                                                },
+                                            ))
+                                    },
+                                )),
+                        )
+                        .content(view().pt(px(8.0)).child(dynamic(move || {
+                            let list = candidates.get();
+                            let apply_inner = apply_candidate.clone();
+                            scroll()
+                                .max_h(px(220.0))
+                                .child(
+                                    view().gap(px(2.0)).children(
+                                        list.into_iter()
+                                            .map(move |item| {
+                                                let cand = item.candidate.clone();
+                                                let key =
+                                                    format!("{:?}-{}", cand.source, cand.source_id);
+                                                let thumb_sig = computed(move || {
+                                                    thumbs
+                                                        .with(|m| m.get(&key).cloned())
+                                                        .map(SharedString::from)
+                                                });
+                                                let sub = {
+                                                    let mut parts = Vec::new();
+                                                    let a = cand.joined_artists(" / ");
+                                                    if !a.is_empty() {
+                                                        parts.push(a);
+                                                    }
+                                                    if let Some(alb) = &cand.album {
+                                                        parts.push(alb.clone());
+                                                    }
+                                                    if let Some(y) = &cand.year {
+                                                        parts.push(y.clone());
+                                                    }
+                                                    parts.join(" · ")
+                                                };
+                                                let dur_label = cand.duration_ms.map(|ms| {
+                                                    let base = format_duration_ms(ms);
+                                                    if let Some(d) = item
+                                                        .duration_diff_ms
+                                                        .and_then(format_diff_ms)
+                                                    {
+                                                        format!("{base} ({d})")
+                                                    } else {
+                                                        base
+                                                    }
+                                                });
+                                                let apply = apply_inner.clone();
+                                                let pick_cand = cand.clone();
+                                                let row = view()
+                                                    .flex_row()
+                                                    .items_center()
+                                                    .gap(px(10.0))
+                                                    .p(px(6.0))
+                                                    .rounded(px(RADIUS_MD))
+                                                    .hover(|st| st.bg(hover()))
+                                                    .role(AccessibilityRole::Button)
+                                                    .label(format!("选择候选 {}", cand.title))
+                                                    .on_press(move || apply(pick_cand.clone()))
+                                                    .child(when(store::covers_on, move || {
+                                                        cover(
+                                                            move || thumb_sig.get(),
+                                                            Some(40.0),
+                                                            6.0,
+                                                        )
+                                                    }))
+                                                    .child(
+                                                        view()
+                                                            .flex_1()
+                                                            .min_w(px(0.0))
+                                                            .gap(px(2.0))
+                                                            .child(
+                                                                view()
+                                                                    .flex_row()
+                                                                    .items_center()
+                                                                    .gap(px(6.0))
+                                                                    .child(
+                                                                        text(cand.title.clone())
+                                                                            .flex_shrink(1.0)
+                                                                            .min_w(px(0.0))
+                                                                            .number_of_lines(1)
+                                                                            .text_size(px(13.0))
+                                                                            .line_height(px(15.0))
+                                                                            .font_weight(
+                                                                                FontWeight::MEDIUM,
+                                                                            )
+                                                                            .text_color(fg()),
+                                                                    )
+                                                                    .child(badge(
+                                                                        cand.source.short_label(),
+                                                                        false,
+                                                                    ))
+                                                                    .child(item.tags.best.then(
+                                                                        || badge("最佳", true),
+                                                                    ))
+                                                                    .child(
+                                                                        (!item.tags.best
+                                                                            && item
+                                                                                .tags
+                                                                                .duration_close)
+                                                                            .then(|| {
+                                                                                badge(
+                                                                                    "时长一致",
+                                                                                    false,
+                                                                                )
+                                                                            }),
+                                                                    ),
+                                                            )
+                                                            .child(
+                                                                text(sub)
+                                                                    .number_of_lines(1)
+                                                                    .text_size(px(12.0))
+                                                                    .line_height(px(14.0))
+                                                                    .text_color(muted_fg()),
+                                                            ),
+                                                    )
+                                                    .child(dur_label.map(|d| {
+                                                        text(d)
+                                                            .text_size(px(11.0))
+                                                            .line_height(px(13.0))
+                                                            .text_color(faint())
+                                                    }));
+                                                if item.duration_far {
+                                                    row.opacity(0.45).into_element()
+                                                } else {
+                                                    row.into_element()
+                                                }
+                                            })
+                                            .collect::<Vec<_>>(),
+                                    ),
+                                )
+                                .into_element()
+                        })))
                 }
             },
         ))

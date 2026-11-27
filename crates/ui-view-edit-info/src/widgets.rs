@@ -1,16 +1,44 @@
 use super::*;
 
-/// 「标签在上、控件在下」的一格：`flex_1` 在行里等分宽度。
-pub(crate) fn labeled(label: &'static str, child: impl IntoElement) -> View {
+/// 字段已修改的小徽章（主题色淡底 + 主色字，与在线匹配卡片徽章同款）。
+pub(crate) fn modified_badge(label: &'static str) -> View {
+    view()
+        .px(px(5.0))
+        .py(px(1.0))
+        .rounded(px(4.0))
+        .bg(move || primary().opacity(0.14))
+        .child(
+            text(label)
+                .text_size(px(10.0))
+                .line_height(px(12.0))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(move || primary()),
+        )
+}
+
+/// 「标签在上、控件在下」的一格：`flex_1` 在行里等分宽度；`dirty` 为真时在标签旁显示「已修改」标识。
+pub(crate) fn labeled(
+    label: &'static str,
+    dirty: impl Fn() -> bool + 'static,
+    child: impl IntoElement,
+) -> View {
     view()
         .flex_1()
         .min_w(px(0.0))
         .gap(px(6.0))
         .child(
-            text(label)
-                .text_size(px(13.0))
-                .line_height(px(13.0))
-                .text_color(muted_fg()),
+            view()
+                .flex_row()
+                .items_center()
+                .h(px(18.0))
+                .gap(px(6.0))
+                .child(
+                    text(label)
+                        .text_size(px(13.0))
+                        .line_height(px(13.0))
+                        .text_color(muted_fg()),
+                )
+                .child(when(dirty, || modified_badge("已修改"))),
         )
         .child(child)
 }
@@ -18,10 +46,12 @@ pub(crate) fn labeled(label: &'static str, child: impl IntoElement) -> View {
 /// 标签字段区：文本字段 + 流派标签输入 + 数字行（标签都在输入框上方）。
 pub(crate) fn fields(draft: Signal<TagDraft>) -> View {
     let row = |child: View| view().flex_row().gap(px(12.0)).child(child);
+    let dirty = move |field: TagField| move || draft.with(|d| field_dirty(d, field));
     view()
         .gap(px(14.0))
         .child(row(labeled(
             "标题",
+            dirty(TagField::Title),
             field_input("标题", TagField::Title, draft)
                 .auto_focus(true)
                 .w_full(),
@@ -32,10 +62,12 @@ pub(crate) fn fields(draft: Signal<TagDraft>) -> View {
                 .gap(px(12.0))
                 .child(labeled(
                     "艺术家",
+                    dirty(TagField::Artist),
                     field_input("艺术家", TagField::Artist, draft).w_full(),
                 ))
                 .child(labeled(
                     "专辑艺术家",
+                    dirty(TagField::AlbumArtist),
                     field_input("专辑艺术家", TagField::AlbumArtist, draft).w_full(),
                 )),
         )
@@ -45,24 +77,36 @@ pub(crate) fn fields(draft: Signal<TagDraft>) -> View {
                 .gap(px(12.0))
                 .child(labeled(
                     "专辑",
+                    dirty(TagField::Album),
                     field_input("专辑", TagField::Album, draft).w_full(),
                 ))
                 .child(labeled(
                     "作曲",
+                    dirty(TagField::Composer),
                     field_input("作曲", TagField::Composer, draft).w_full(),
                 )),
         )
-        .child(row(labeled("标签", genre_row(draft))))
+        .child(row(labeled(
+            "标签",
+            dirty(TagField::Genre),
+            genre_row(draft),
+        )))
         .child(
             view()
                 .flex_row()
                 .gap(px(12.0))
                 .child(labeled(
                     "年份",
+                    dirty(TagField::Year),
                     field_input("年份", TagField::Year, draft).w_full(),
                 ))
                 .child(labeled(
                     "音轨",
+                    move || {
+                        draft.with(|d| {
+                            field_dirty(d, TagField::Track) || field_dirty(d, TagField::TrackTotal)
+                        })
+                    },
                     pair(
                         draft,
                         "音轨号",
@@ -73,11 +117,17 @@ pub(crate) fn fields(draft: Signal<TagDraft>) -> View {
                 ))
                 .child(labeled(
                     "碟号",
+                    move || {
+                        draft.with(|d| {
+                            field_dirty(d, TagField::Disc) || field_dirty(d, TagField::DiscTotal)
+                        })
+                    },
                     pair(draft, "碟号", TagField::Disc, "碟总数", TagField::DiscTotal),
                 )),
         )
         .child(row(labeled(
             "注释",
+            dirty(TagField::Comment),
             field_input("注释", TagField::Comment, draft).w_full(),
         )))
 }

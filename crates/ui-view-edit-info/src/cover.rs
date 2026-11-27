@@ -125,12 +125,25 @@ pub(crate) fn file_card(draft: Signal<TagDraft>) -> View {
                 .min_w(px(0.0))
                 .gap(px(6.0))
                 .child(
-                    text(name)
-                        .text_size(px(14.0))
-                        .line_height(px(14.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(fg())
-                        .number_of_lines(1),
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .h(px(18.0))
+                        .gap(px(6.0))
+                        .child(
+                            text(name)
+                                .flex_shrink(1.0)
+                                .min_w(px(0.0))
+                                .text_size(px(14.0))
+                                .line_height(px(14.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(fg())
+                                .number_of_lines(1),
+                        )
+                        .child(when(
+                            move || draft.with(cover_dirty),
+                            || modified_badge("封面已修改"),
+                        )),
                 )
                 .child(
                     text(dir)

@@ -34,14 +34,14 @@ impl MatchSource {
         MatchSource::MusicBrainz,
     ];
 
-    /// 界面显示的中文平台名称。
+    /// 界面显示的平台名称（国内平台使用缩写）。
     pub fn label(self) -> &'static str {
         match self {
             MatchSource::Smart => "智能聚合",
-            MatchSource::QQMusic => "QQ 音乐",
-            MatchSource::NetEase => "网易云音乐",
-            MatchSource::Kugou => "酷狗音乐",
-            MatchSource::Kuwo => "酷我音乐",
+            MatchSource::QQMusic => "QM",
+            MatchSource::NetEase => "NCM",
+            MatchSource::Kugou => "KGM",
+            MatchSource::Kuwo => "KWM",
             MatchSource::MusicBrainz => "MusicBrainz",
         }
     }
@@ -50,10 +50,10 @@ impl MatchSource {
     pub fn short_label(self) -> &'static str {
         match self {
             MatchSource::Smart => "聚合",
-            MatchSource::QQMusic => "QQ",
-            MatchSource::NetEase => "网易云",
-            MatchSource::Kugou => "酷狗",
-            MatchSource::Kuwo => "酷我",
+            MatchSource::QQMusic => "QM",
+            MatchSource::NetEase => "NCM",
+            MatchSource::Kugou => "KGM",
+            MatchSource::Kuwo => "KWM",
             MatchSource::MusicBrainz => "MB",
         }
     }

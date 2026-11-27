@@ -269,12 +269,13 @@ pub fn tab_list() -> TabsElement {
 pub fn tab_trigger(
     on: impl Fn() -> bool + Copy + 'static,
     glyph: Option<Icon>,
-    label: &'static str,
+    label: impl Into<SharedString>,
     press: impl Fn() + 'static,
 ) -> TabElement {
+    let label: SharedString = label.into();
     tab()
         .selected(on)
-        .accessibility_label(label)
+        .accessibility_label(label.clone())
         .on_press(move |_: &()| press())
         .h_full()
         .px(px(8.0))

@@ -1,4 +1,4 @@
-//! QQ 音乐数据源适配。
+//! QM 数据源适配。
 //!
 //! 接口参考 `xhongc/music-tag-web` (`qm.py`) 与 `SPlayer-Dev/SPlayer-Next` (`qqmusic`)：
 //! - 搜索：`POST https://u.y.qq.com/cgi-bin/musicu.fcg`（`DoSearchForQQMusicDesktop`）
@@ -66,11 +66,11 @@ impl MetadataProvider for QQMusicProvider {
                 "QQ%E9%9F%B3%E4%B9%90/73222 CFNetwork/1406.0.3 Darwin/22.4.0",
             )
             .send(payload.to_string())
-            .map_err(|e| format!("QQ 音乐搜索失败: {e}"))?;
+            .map_err(|e| format!("QM 搜索失败: {e}"))?;
         let text = resp
             .body_mut()
             .read_to_string()
-            .map_err(|e| format!("读取 QQ 音乐响应失败: {e}"))?;
+            .map_err(|e| format!("读取 QM 响应失败: {e}"))?;
         parse_search_response(&text)
     }
 
@@ -85,21 +85,20 @@ impl MetadataProvider for QQMusicProvider {
             .header("Referer", "https://y.qq.com/")
             .header(
                 "User-Agent",
-                "QQ音乐/73222 CFNetwork/1406.0.2 Darwin/22.4.0",
+                "QQ%E9%9F%B3%E4%B9%90/73222 CFNetwork/1406.0.2 Darwin/22.4.0",
             )
             .call()
-            .map_err(|e| format!("QQ 音乐歌词请求失败: {e}"))?;
+            .map_err(|e| format!("QM 歌词请求失败: {e}"))?;
         let text = resp
             .body_mut()
             .read_to_string()
-            .map_err(|e| format!("读取 QQ 音乐歌词响应失败: {e}"))?;
+            .map_err(|e| format!("读取 QM 歌词响应失败: {e}"))?;
         parse_lyric_response(&text)
     }
 }
 
 pub(crate) fn parse_search_response(body: &str) -> Result<Vec<MatchCandidate>, String> {
-    let v: Value =
-        serde_json::from_str(body).map_err(|e| format!("解析 QQ 音乐 JSON 失败: {e}"))?;
+    let v: Value = serde_json::from_str(body).map_err(|e| format!("解析 QM JSON 失败: {e}"))?;
     let Some(list) = v
         .pointer("/music.search.SearchCgiService.DoSearchForQQMusicDesktop/data/body/song/list")
         .and_then(Value::as_array)
@@ -190,7 +189,7 @@ pub(crate) fn parse_search_response(body: &str) -> Result<Vec<MatchCandidate>, S
 
 pub(crate) fn parse_lyric_response(body: &str) -> Result<Option<String>, String> {
     let v: Value =
-        serde_json::from_str(body).map_err(|e| format!("解析 QQ 音乐歌词 JSON 失败: {e}"))?;
+        serde_json::from_str(body).map_err(|e| format!("解析 QM 歌词 JSON 失败: {e}"))?;
     let Some(encoded) = v.get("lyric").and_then(Value::as_str) else {
         return Ok(None);
     };
@@ -199,7 +198,7 @@ pub(crate) fn parse_lyric_response(body: &str) -> Result<Option<String>, String>
     }
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(encoded.trim())
-        .map_err(|e| format!("Base64 解码 QQ 音乐歌词失败: {e}"))?;
+        .map_err(|e| format!("Base64 解码 QM 歌词失败: {e}"))?;
     let text = String::from_utf8_lossy(&decoded).trim().to_owned();
     if text.is_empty() {
         Ok(None)

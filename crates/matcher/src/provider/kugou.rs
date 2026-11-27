@@ -1,4 +1,4 @@
-//! 酷狗音乐数据源适配。
+//! KGM 数据源适配。
 //!
 //! 接口参考 `xhongc/music-tag-web` (`kugou.py`) 与 `SPlayer-Dev/SPlayer-Next` (`kugou/search.ts`)：
 //! - 搜索：`https://complexsearch.kugou.com/v2/search/song`（MD5 签名）
@@ -63,11 +63,11 @@ impl MetadataProvider for KugouProvider {
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             )
             .call()
-            .map_err(|e| format!("酷狗音乐搜索失败: {e}"))?;
+            .map_err(|e| format!("KGM 搜索失败: {e}"))?;
         let text = resp
             .body_mut()
             .read_to_string()
-            .map_err(|e| format!("读取酷狗音乐响应失败: {e}"))?;
+            .map_err(|e| format!("读取 KGM 响应失败: {e}"))?;
         parse_search_response(&text)
     }
 
@@ -84,11 +84,11 @@ impl MetadataProvider for KugouProvider {
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             )
             .call()
-            .map_err(|e| format!("酷狗歌词请求失败: {e}"))?;
+            .map_err(|e| format!("KGM 歌词请求失败: {e}"))?;
         let text = resp
             .body_mut()
             .read_to_string()
-            .map_err(|e| format!("读取酷狗歌词响应失败: {e}"))?;
+            .map_err(|e| format!("读取 KGM 歌词响应失败: {e}"))?;
         let trimmed = text.trim();
         if trimmed.is_empty() {
             Ok(None)
@@ -99,7 +99,7 @@ impl MetadataProvider for KugouProvider {
 }
 
 pub(crate) fn parse_search_response(body: &str) -> Result<Vec<MatchCandidate>, String> {
-    let v: Value = serde_json::from_str(body).map_err(|e| format!("解析酷狗 JSON 失败: {e}"))?;
+    let v: Value = serde_json::from_str(body).map_err(|e| format!("解析 KGM JSON 失败: {e}"))?;
     let Some(list) = v.pointer("/data/lists").and_then(Value::as_array) else {
         return Ok(Vec::new());
     };

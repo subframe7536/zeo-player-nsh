@@ -20,7 +20,7 @@ pub struct MatchQuery {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MatchCandidate {
     pub source: MatchSource,
-    /// 平台曲目 ID（如 QQ mid、网易云 id、酷狗 hash、酷我 rid、MB recording id）。
+    /// 平台曲目 ID（如 QM mid、NCM id、KGM hash、KWM rid、MB recording id）。
     pub source_id: String,
     /// 辅助 ID（如 QQ 数字 songid，用于歌词或详情兜底）。
     pub ext_id: Option<String>,

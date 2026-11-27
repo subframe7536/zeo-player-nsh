@@ -1,4 +1,4 @@
-//! 酷我音乐数据源适配。
+//! KWM 数据源适配。
 //!
 //! 接口参考 `xhongc/music-tag-web` (`kuwo.py`)：
 //! - 搜索：`https://www.kuwo.cn/api/www/search/searchMusicBykeyWord`（`Hm_token` + `Cross = md5(sha1(token))`）
@@ -68,11 +68,11 @@ impl MetadataProvider for KuwoProvider {
             .header("Cross", &cross)
             .header("Cookie", &cookie)
             .call()
-            .map_err(|e| format!("酷我音乐搜索失败: {e}"))?;
+            .map_err(|e| format!("KWM 搜索失败: {e}"))?;
         let text = resp
             .body_mut()
             .read_to_string()
-            .map_err(|e| format!("读取酷我音乐响应失败: {e}"))?;
+            .map_err(|e| format!("读取 KWM 响应失败: {e}"))?;
         parse_search_response(&text)
     }
 
@@ -94,17 +94,17 @@ impl MetadataProvider for KuwoProvider {
             .header("Cross", &cross)
             .header("Cookie", &cookie)
             .call()
-            .map_err(|e| format!("酷我歌词请求失败: {e}"))?;
+            .map_err(|e| format!("KWM 歌词请求失败: {e}"))?;
         let text = resp
             .body_mut()
             .read_to_string()
-            .map_err(|e| format!("读取酷我歌词响应失败: {e}"))?;
+            .map_err(|e| format!("读取 KWM 歌词响应失败: {e}"))?;
         parse_lyric_response(&text)
     }
 }
 
 pub(crate) fn parse_search_response(body: &str) -> Result<Vec<MatchCandidate>, String> {
-    let v: Value = serde_json::from_str(body).map_err(|e| format!("解析酷我 JSON 失败: {e}"))?;
+    let v: Value = serde_json::from_str(body).map_err(|e| format!("解析 KWM JSON 失败: {e}"))?;
     let Some(list) = v.pointer("/data/list").and_then(Value::as_array) else {
         return Ok(Vec::new());
     };
@@ -178,7 +178,7 @@ pub(crate) fn parse_search_response(body: &str) -> Result<Vec<MatchCandidate>, S
 
 pub(crate) fn parse_lyric_response(body: &str) -> Result<Option<String>, String> {
     let v: Value =
-        serde_json::from_str(body).map_err(|e| format!("解析酷我歌词 JSON 失败: {e}"))?;
+        serde_json::from_str(body).map_err(|e| format!("解析 KWM 歌词 JSON 失败: {e}"))?;
     let Some(lines) = v.pointer("/data/lrclist").and_then(Value::as_array) else {
         return Ok(None);
     };

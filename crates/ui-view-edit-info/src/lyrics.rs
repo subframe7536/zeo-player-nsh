@@ -14,10 +14,21 @@ pub(crate) fn lyrics_block(draft: Signal<TagDraft>, remount: Signal<u32>) -> Vie
                 .items_center()
                 .justify_between()
                 .child(
-                    text("歌词")
-                        .text_size(px(13.0))
-                        .line_height(px(13.0))
-                        .text_color(muted_fg()),
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .h(px(18.0))
+                        .gap(px(6.0))
+                        .child(
+                            text("歌词")
+                                .text_size(px(13.0))
+                                .line_height(px(13.0))
+                                .text_color(muted_fg()),
+                        )
+                        .child(when(
+                            move || draft.with(lyrics_dirty),
+                            || modified_badge("已修改"),
+                        )),
                 )
                 .child(
                     view()

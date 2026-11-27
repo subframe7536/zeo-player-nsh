@@ -1,4 +1,4 @@
-//! 网易云音乐数据源适配。
+//! NCM 数据源适配。
 //!
 //! 使用 `linuxapi` 转发协议（AES-128-ECB + 固定密钥 `rFgB&h#%2?^eDg:Q`，
 //! 无需大整数 RSA 依赖），参考 `xhongc/music-tag-web` (`encrypt.py` / `music_resource.py`)
@@ -42,10 +42,10 @@ impl NetEaseProvider {
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             )
             .send(body)
-            .map_err(|e| format!("网易云音乐请求失败: {e}"))?;
+            .map_err(|e| format!("NCM 请求失败: {e}"))?;
         resp.body_mut()
             .read_to_string()
-            .map_err(|e| format!("读取网易云音乐响应失败: {e}"))
+            .map_err(|e| format!("读取 NCM 响应失败: {e}"))
     }
 
     fn sized_cover(url: &str, size: u32) -> String {
@@ -58,7 +58,7 @@ impl NetEaseProvider {
     }
 }
 
-/// AES-128-ECB + PKCS7 填充 → 大写十六进制（网易云 `linuxapi` 协议）。
+/// AES-128-ECB + PKCS7 填充 → 大写十六进制（NCM `linuxapi` 协议）。
 pub(crate) fn linux_encrypt(plain: &str) -> String {
     let bytes = plain.as_bytes();
     let pad = 16 - (bytes.len() % 16);
@@ -102,7 +102,7 @@ impl MetadataProvider for NetEaseProvider {
         let id: i64 = candidate
             .source_id
             .parse()
-            .map_err(|_| "无效的网易云歌曲 ID".to_owned())?;
+            .map_err(|_| "无效的 NCM 歌曲 ID".to_owned())?;
         let text = self.post_linux_api(
             "https://music.163.com/api/song/lyric?lv=-1&kv=-1&tv=-1",
             json!({ "id": id }),
@@ -112,7 +112,7 @@ impl MetadataProvider for NetEaseProvider {
 }
 
 pub(crate) fn parse_search_response(body: &str) -> Result<Vec<MatchCandidate>, String> {
-    let v: Value = serde_json::from_str(body).map_err(|e| format!("解析网易云 JSON 失败: {e}"))?;
+    let v: Value = serde_json::from_str(body).map_err(|e| format!("解析 NCM JSON 失败: {e}"))?;
     let Some(songs) = v.pointer("/result/songs").and_then(Value::as_array) else {
         return Ok(Vec::new());
     };
@@ -194,7 +194,7 @@ pub(crate) fn parse_search_response(body: &str) -> Result<Vec<MatchCandidate>, S
 
 pub(crate) fn parse_lyric_response(body: &str) -> Result<Option<String>, String> {
     let v: Value =
-        serde_json::from_str(body).map_err(|e| format!("解析网易云歌词 JSON 失败: {e}"))?;
+        serde_json::from_str(body).map_err(|e| format!("解析 NCM 歌词 JSON 失败: {e}"))?;
     let lrc = v
         .pointer("/lrc/lyric")
         .and_then(Value::as_str)
