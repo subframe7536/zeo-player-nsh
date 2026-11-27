@@ -7,7 +7,7 @@ use nsh_core::element::ComponentBuilder;
 use nsh_core::prelude::*;
 
 use zeo_engine::audio::LoopMode;
-use zeo_icons::{Icon, icon_dyn};
+use zeo_icons::{Icon, icon, icon_dyn};
 use zeo_ui_components::artists::artist_links;
 use zeo_ui_components::button::{RADIUS_MD, Size, Variant, icon_button, shell, tipped};
 use zeo_ui_components::cover::cover;
@@ -23,7 +23,9 @@ use zeo_ui_store::{
 fn side_width() -> f32 {
     let w = layout_width();
     if w >= 1080.0 {
-        260.0
+        // 右段最宽的内容（静音 + 96 音量滑条 + 队列 + 展开）约 210，留一点余量；
+        // 其余让给中间的进度条。
+        232.0
     } else if w >= 900.0 {
         180.0
     } else {
@@ -64,7 +66,28 @@ pub fn player_bar(on_expand: Rc<dyn Fn()>, queue_open: Signal<bool>) -> View {
                 .rounded(px(RADIUS_MD))
                 .active(|st| st.opacity(0.7))
                 .on_press(move |_: &()| expand())
-                .child(cover(artwork, Some(48.0), RADIUS_MD).shadow_sm()),
+                .child(
+                    // 悬停封面：压一层半透明暗色，中间浮出展开图标（触发区是整张
+                    // 封面，遮罩自己不吃事件）。
+                    view()
+                        .group()
+                        .child(cover(artwork, Some(48.0), RADIUS_MD).shadow_sm())
+                        .child(
+                            view()
+                                .absolute()
+                                .inset_0()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(RADIUS_MD))
+                                .bg(black_a(0.45))
+                                .pointer_events(PointerEvents::None)
+                                .opacity(0.0)
+                                .group_hover(|st| st.opacity(1.0))
+                                .transition_opacity()
+                                .duration(150.0)
+                                .child(icon(Icon::Expand, 18.0, || white_a(0.95))),
+                        ),
+                ),
         )
         .child(
             view()
