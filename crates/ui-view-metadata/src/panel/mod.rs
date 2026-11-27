@@ -51,6 +51,7 @@ pub(crate) use zeo_ui_store::{self as store, poster};
 
 mod batch;
 mod batch_export;
+mod batch_match;
 mod batch_ops;
 mod batch_preview;
 mod batch_rename;
@@ -68,6 +69,7 @@ mod widgets;
 
 pub(crate) use batch::*;
 pub(crate) use batch_export::*;
+pub(crate) use batch_match::*;
 pub(crate) use batch_ops::*;
 pub(crate) use batch_preview::*;
 pub(crate) use batch_rename::*;

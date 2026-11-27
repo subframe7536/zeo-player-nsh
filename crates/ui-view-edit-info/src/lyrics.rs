@@ -3,13 +3,9 @@ use super::*;
 /// 「歌词」块：标题行右侧是「从文件导入」按钮与「保存到」目标（`.lrc`
 /// 侧车文件或内嵌标签，默认跟已有文件走），下面一行提示 + 多行输入；
 /// 两种目标各自的草稿互不影响（切回去内容还在），保存时只写选中的那处。
-pub(crate) fn lyrics_block(draft: Signal<TagDraft>) -> View {
+pub(crate) fn lyrics_block(draft: Signal<TagDraft>, remount: Signal<u32>) -> View {
     let lrc_exists = untracked(|| draft.with(|d| d.lrc_exists));
     let file_mode = move || draft.with(|d| d.lrc_target);
-    // 外部整段换文本（导入）时递增它：输入框非受控，`default_value` 只在
-    // 挂载时生效，换 key 逼它按草稿里的新文本重新挂载（目标切换同理，
-    // 各目标的草稿经 `initial` 各自恢复）。
-    let remount = signal(0u32);
     view()
         .gap(px(8.0))
         .child(
@@ -18,10 +14,21 @@ pub(crate) fn lyrics_block(draft: Signal<TagDraft>) -> View {
                 .items_center()
                 .justify_between()
                 .child(
-                    text("歌词")
-                        .text_size(px(13.0))
-                        .line_height(px(13.0))
-                        .text_color(muted_fg()),
+                    view()
+                        .flex_row()
+                        .items_center()
+                        .h(px(18.0))
+                        .gap(px(6.0))
+                        .child(
+                            text("歌词")
+                                .text_size(px(13.0))
+                                .line_height(px(13.0))
+                                .text_color(muted_fg()),
+                        )
+                        .child(when(
+                            move || draft.with(lyrics_dirty),
+                            || modified_badge("已修改"),
+                        )),
                 )
                 .child(
                     view()

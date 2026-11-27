@@ -157,6 +157,11 @@ impl LibraryStore {
         self.update_config(|c| c.metadata_columns = Some(cols));
     }
 
+    /// 元数据自动匹配偏好（持久化）。
+    pub fn set_match_prefs(&self, prefs: MatchPrefs) {
+        self.update_config(|c| c.match_prefs = prefs);
+    }
+
     pub fn set_delete_permanently(&self, on: bool) {
         self.update_config(|c| c.delete_permanently = on);
     }

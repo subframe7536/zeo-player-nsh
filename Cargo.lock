@@ -6373,6 +6373,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "zeo-matcher"
+version = "0.0.0"
+dependencies = [
+ "aes",
+ "base64 0.22.1",
+ "md-5",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+ "sha1 0.11.0",
+ "ureq",
+ "zeo-types",
+]
+
+[[package]]
 name = "zeo-metadata"
 version = "0.0.0"
 dependencies = [
@@ -6504,6 +6519,7 @@ dependencies = [
  "zeo-engine",
  "zeo-keybinds",
  "zeo-library",
+ "zeo-matcher",
  "zeo-metadata",
  "zeo-playlists",
  "zeo-shell",
@@ -6546,7 +6562,9 @@ dependencies = [
  "rfd",
  "zeo-engine",
  "zeo-icons",
+ "zeo-matcher",
  "zeo-metadata",
+ "zeo-types",
  "zeo-ui-components",
  "zeo-ui-store",
  "zeo-ui-views-base",
@@ -6599,6 +6617,7 @@ dependencies = [
  "zeo-engine",
  "zeo-icons",
  "zeo-library",
+ "zeo-matcher",
  "zeo-metadata",
  "zeo-player",
  "zeo-playlists",

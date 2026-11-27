@@ -1,5 +1,38 @@
 use super::*;
 
+/// 单个标签字段是否相对打开时的原值有改动。
+pub(crate) fn field_dirty(d: &TagDraft, field: TagField) -> bool {
+    let old = d.original.get(&field).map(|s| s.trim()).unwrap_or_default();
+    let new = d.values.get(&field).map(|s| s.trim()).unwrap_or_default();
+    new != old
+}
+
+/// 当前选中的封面目标是否有改动。
+pub(crate) fn cover_dirty(d: &TagDraft) -> bool {
+    if d.cover_target {
+        d.cover_file.is_some()
+    } else {
+        d.cover.is_some()
+    }
+}
+
+/// 当前选中的歌词目标是否有改动。
+pub(crate) fn lyrics_dirty(d: &TagDraft) -> bool {
+    if d.lrc_target {
+        d.lrc_text.trim() != d.lrc_original.trim()
+    } else {
+        field_dirty(d, TagField::Lyrics)
+    }
+}
+
+/// 草稿里是否有任意一项相对原值发生改动（用于控制「重置」按钮可用态）。
+pub(crate) fn has_any_edits(d: &TagDraft) -> bool {
+    d.cover.is_some()
+        || d.cover_file.is_some()
+        || d.lrc_text.trim() != d.lrc_original.trim()
+        || TagField::ALL.iter().any(|&f| field_dirty(d, f))
+}
+
 /// 草稿 → 写回改动：与原值相同的字段 Keep；改空的 Clear。歌词按
 /// `lrc_target` 只走一条道——写 `.lrc` 时内嵌标签原样留着（另一栏的
 /// 草稿不生效）。

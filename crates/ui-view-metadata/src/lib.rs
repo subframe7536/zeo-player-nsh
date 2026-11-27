@@ -1,6 +1,6 @@
 //! 「元数据」视图：全库曲目的标签表格（nsh-base `DataTable` + 复选框
-//! 多选），右侧单选 / 批量编辑面板；工具栏有乱码修复 / 批量重命名 /
-//! 标签历史三个弹窗入口（前两者作用于当前所选）。
+//! 多选），右侧单选 / 批量编辑面板；工具栏有批量自动匹配 / 乱码修复 /
+//! 批量重命名 / 标签历史弹窗入口。
 //!
 //! 行的标签值是视图自有状态（`rows` 信号）：后台线程分批用
 //! `write::read_row` 读出，不进 `MetaCache` / SQLite（全局元数据缓存
@@ -57,9 +57,10 @@ pub fn page() -> View {
             .unwrap_or_else(default_columns)
     }));
     let col_widths = signal(HashMap::<String, f32>::new());
-    // 工具栏批量工具（乱码修复 / 批量重命名，选中至少一首可用）与标签历史
+    // 工具栏批量工具（自动匹配 / 乱码修复 / 批量重命名，选中至少一首可用）与标签历史
     // （只选中恰好一首时可用）的弹窗开关；`reload` 是历史还原写盘后让右侧
     // 单选面板重建的计数。
+    let match_open = signal(false);
     let encoding_open = signal(false);
     let rename_open = signal(false);
     let history_open = signal(false);
@@ -75,6 +76,15 @@ pub fn page() -> View {
             return;
         }
         zeo_ui_store::set_metadata_columns(cols);
+    });
+
+    // 响应曲目右键多选「自动匹配元数据…」：预选目标路径并弹出批量匹配弹窗。
+    effect(move || {
+        if let Some(paths) = s.pending_batch_match.get() {
+            selected.set(paths.into_iter().collect());
+            match_open.set(true);
+            s.pending_batch_match.set(None);
+        }
     });
 
     // 同步修剪：清掉离开曲库的路径与选中集。曲目元数据直接由 SQLite / 索引条目供给，
@@ -143,9 +153,16 @@ pub fn page() -> View {
             };
             let filter_w = move || {
                 if zeo_ui_components::tracks::content_break() < 860.0 {
-                    120.0
+                    92.0
                 } else {
                     260.0
+                }
+            };
+            let toolbar_gap = move || {
+                if zeo_ui_components::tracks::content_break() < 860.0 {
+                    5.0
+                } else {
+                    8.0
                 }
             };
             let panel_default_w = move || {
@@ -198,7 +215,7 @@ pub fn page() -> View {
                     view()
                         .flex_row()
                         .items_center()
-                        .gap(px(8.0))
+                        .gap(move || px(toolbar_gap()))
                         .px(px(PAGE_X))
                         .pb(px(16.0))
                         .child(
@@ -229,6 +246,7 @@ pub fn page() -> View {
                                 ),
                         )
                         .child(column_selector(visible_cols))
+                        .child(panel::match_button(match_open, has_selection))
                         .child(panel::encoding_button(encoding_open, has_selection))
                         .child(panel::rename_button(rename_open, has_selection))
                         .child(panel::history_button(history_open, can_history))
@@ -290,7 +308,7 @@ pub fn page() -> View {
                                 .items_center()
                                 .gap(px(6.0))
                                 .child(mark)
-                                // 窄窗口省掉「全选」文字只留复选框：工具栏加了两颗
+                                // 窄窗口省掉「全选」文字只留复选框：工具栏加了多颗
                                 // 批量工具钮，文字再占 34pt 会把行尾挤出可视区。
                                 .child(when(
                                     move || zeo_ui_components::tracks::content_break() >= 860.0,
@@ -391,6 +409,13 @@ pub fn page() -> View {
         }))
         // 批量工具与标签历史弹窗（页面级：入口是工具栏图标钮；作用目标按
         // 打开时的所选快照算，清空选中会连带收掉弹窗）。
+        .child(when(
+            move || match_open.get() && has_selection.get(),
+            move || {
+                let (order, entries, _) = panel::tool_context(displayed, selected);
+                panel::batch_match_dialog(order, entries, rows, match_open)
+            },
+        ))
         .child(when(
             move || encoding_open.get() && has_selection.get(),
             move || {

@@ -12,6 +12,8 @@ zeo-ui-store.workspace = true
 zeo-icons.workspace = true
 zeo-ui-components.workspace = true
 zeo-metadata.workspace = true
+zeo-matcher.workspace = true
+zeo-types.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 rfd = { version = "0.17", default-features = false }

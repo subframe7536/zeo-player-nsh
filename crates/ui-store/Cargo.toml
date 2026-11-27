@@ -16,6 +16,7 @@ zeo-types.workspace = true
 zeo-keybinds.workspace = true
 zeo-db.workspace = true
 zeo-metadata.workspace = true
+zeo-matcher.workspace = true
 zeo-library.workspace = true
 zeo-playlists.workspace = true
 zeo-engine.workspace = true
