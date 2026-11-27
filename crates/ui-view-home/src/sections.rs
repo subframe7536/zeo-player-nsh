@@ -30,7 +30,7 @@ pub(crate) fn rank_artists(
 }
 
 /// 热门艺术家：`artist_plays` 拆分合并后播放多的前 8，卡上是居中头像 +
-/// 名 +「N 首」（含该歌手的曲目数）；固定宽卡单行横排、放不下横向滚动；
+/// 名 +「N 首」（含该歌手的曲目数）；固定宽卡排成网格、放不下折行；
 /// 点卡进「艺术家」详情。
 pub(crate) fn hot_artists(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
     let s = store();
@@ -43,59 +43,50 @@ pub(crate) fn hot_artists(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
             return view().into_element();
         }
         let tracks = s.tracks.get();
-        let shelf = Shelf::new("home-artists-shelf", names.len());
-        let strip = shelf.strip(|mut strip| {
-            for name in names {
-                let mine = |t: &&TrackEntry| t.artists.contains(&name);
-                // 头像取含该歌手且有封面的第一首曲目（没有则首字占位）。
-                let cover_path = stored(
-                    tracks
-                        .iter()
-                        .find(|t| mine(t) && t.has_art)
-                        .map(|t| t.path.clone()),
-                );
-                let count = tracks.iter().filter(|t| mine(t)).count();
-                let art_name = stored(name.clone());
-                let press_name = name.clone();
-                strip = strip.child(
-                    card_shell(name.clone())
+        let grid = card_grid("home-artists-grid").children(names.into_iter().map(|name| {
+            let mine = |t: &&TrackEntry| t.artists.contains(&name);
+            // 头像取含该歌手且有封面的第一首曲目（没有则首字占位）。
+            let cover_path = stored(
+                tracks
+                    .iter()
+                    .find(|t| mine(t) && t.has_art)
+                    .map(|t| t.path.clone()),
+            );
+            let count = tracks.iter().filter(|t| mine(t)).count();
+            let art_name = stored(name.clone());
+            let press_name = name.clone();
+            card_shell(name.clone())
+                .items_center()
+                .on_press(move |_: &()| zeo_ui_store::open_artist(&press_name))
+                .child(when(covers_on, move || {
+                    avatar(move || cover_path.get(), move || art_name.get(), None)
+                }))
+                .child(
+                    view()
+                        .w_full()
                         .items_center()
-                        .on_press(move |_: &()| zeo_ui_store::open_artist(&press_name))
-                        .child(when(covers_on, move || {
-                            avatar(
-                                move || cover_path.get(),
-                                move || art_name.get(),
-                                Some(CARD_ART),
-                            )
-                        }))
+                        .gap(px(STACK_GAP))
                         .child(
-                            view()
-                                .items_center()
-                                .gap(px(STACK_GAP))
-                                .child(
-                                    text(name.clone())
-                                        .number_of_lines(1)
-                                        .text_size(px(14.0))
-                                        .line_height(px(14.0))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(fg()),
-                                )
-                                .child(
-                                    text(format!("{count} 首"))
-                                        .number_of_lines(1)
-                                        .text_size(px(12.0))
-                                        .line_height(px(12.0))
-                                        .text_color(muted_fg()),
-                                ),
+                            text(name.clone())
+                                .number_of_lines(1)
+                                .text_size(px(14.0))
+                                .line_height(px(14.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(fg()),
+                        )
+                        .child(
+                            text(format!("{count} 首"))
+                                .number_of_lines(1)
+                                .text_size(px(12.0))
+                                .line_height(px(12.0))
+                                .text_color(muted_fg()),
                         ),
-                );
-            }
-            strip
-        });
+                )
+        }));
         view()
             .gap(px(16.0))
-            .child(shelf.title("热门艺术家"))
-            .child(strip)
+            .child(section_title("热门艺术家"))
+            .child(grid)
             .into_element()
     })
     .into_element()
@@ -150,7 +141,7 @@ pub(crate) fn new_added(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
     .into_element()
 }
 
-/// 最近播放：随机推荐同款卡，单行横排、放不下横向滚动；按播放时间
+/// 最近播放：随机推荐同款卡，排成网格、放不下折行；按播放时间
 /// 倒序（零播放的按入库时间排在末）。整节同一个队列，点卡从本卡开
 /// 始播。空榜出空态。
 pub(crate) fn recent(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
@@ -177,17 +168,16 @@ pub(crate) fn recent(stats: Signal<zeo_db::PlayStats>) -> AnyElement {
                 .into_element();
         }
         let queue = Rc::new(list);
-        let shelf = Shelf::new("home-recent-shelf", queue.len());
-        let strip = shelf.strip(|mut strip| {
-            for (i, t) in queue.iter().enumerate() {
-                strip = strip.child(card(t, i, queue.clone()));
-            }
-            strip
-        });
+        let grid = card_grid("home-recent-grid").children(
+            queue
+                .iter()
+                .enumerate()
+                .map(|(i, t)| card(t, i, queue.clone())),
+        );
         view()
             .gap(px(16.0))
-            .child(shelf.title("最近播放"))
-            .child(strip)
+            .child(section_title("最近播放"))
+            .child(grid)
             .into_element()
     })
     .into_element()

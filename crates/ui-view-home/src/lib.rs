@@ -32,12 +32,12 @@ pub(crate) use zeo_ui_store::theme::*;
 
 pub(crate) use zeo_ui_store::{cover_for, covers_on, play_list, player, queue_add, store};
 
+mod grid;
 mod sections;
-mod shelf;
 mod widgets;
 
+pub(crate) use grid::*;
 pub(crate) use sections::*;
-pub(crate) use shelf::*;
 pub(crate) use widgets::*;
 
 /// 千分位（页头与统计卡的大数）。

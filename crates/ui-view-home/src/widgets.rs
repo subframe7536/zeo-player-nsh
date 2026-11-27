@@ -155,11 +155,10 @@ pub(crate) fn section_title(title: &'static str) -> Text {
         .text_color(fg())
 }
 
-/// 卡条里封面 / 头像的边长与卡片内边距：卡宽固定为两者之和，翻页
-/// 范围按它算，卡条从左排起、放不下横向滚动。
+/// 取封面缩略图的名义边长（决定用哪一档缓存封面；实际封面随列宽铺满）。
 pub(crate) const CARD_ART: f32 = 160.0;
-pub(crate) const STRIP_MIN_W: f32 = CARD_ART + CARD_PAD * 2.0;
-pub(crate) const STRIP_GAP: f32 = 8.0;
+/// 网格每列的最小宽度（含卡片内边距）：窗口变窄列数递减、变宽递增。
+pub(crate) const MIN_CARD_W: f32 = 184.0;
 
 /// 节间距。
 pub(crate) const SECTION_GAP: f32 = 40.0;

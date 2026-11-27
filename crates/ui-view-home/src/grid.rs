@@ -1,107 +1,34 @@
 use super::*;
 
-/// 横向卡条的翻页状态：`el` 指到条子本体，`offset` 随 `on_scroll`、
-/// `viewport` 随 `on_layout` 刷新。`min_content` 是所有固定宽卡排开
-/// 的内容宽——它不超过视口时整行放得下、条子不滚。
-#[derive(Clone, Copy)]
-pub(crate) struct Shelf {
-    pub(crate) el: ElementRef,
-    pub(crate) offset: Signal<f32>,
-    pub(crate) viewport: Signal<f32>,
-    pub(crate) min_content: f32,
-    pub(crate) id: &'static str,
+/// 网格容器宽：内容两侧各让 `PAGE_X - CARD_PAD`（封面与节标题同一条内容
+/// 线，卡的悬停底色向外多出一圈）。
+fn grid_width() -> f32 {
+    content_break() - 2.0 * (PAGE_X - CARD_PAD)
 }
 
-impl Shelf {
-    pub(crate) fn new(id: &'static str, cards: usize) -> Self {
-        Self {
-            el: element_ref(),
-            offset: signal(0.0),
-            viewport: signal(0.0),
-            min_content: cards as f32 * (STRIP_MIN_W + STRIP_GAP) - STRIP_GAP,
-            id,
-        }
-    }
-
-    /// 滚得到的最大 offset；≤ 0 即整行放得下。
-    pub(crate) fn max(&self) -> f32 {
-        (self.min_content - self.viewport.get()).max(0.0)
-    }
-
-    /// 节标题行：左标题，右侧 ◀ ▶ 翻页钮（只在滚得动时出现，到边
-    /// 禁用）；点一下滚近一屏、留一截衔接。竖向滚轮不归它——嵌套
-    /// 滚动按轴选，滚轮仍是整页滚动，翻页钮是鼠标够到后半截的
-    /// 唯一入口（横向手势 / 触控板横滑也能滚）。
-    pub(crate) fn title(&self, title: &'static str) -> View {
-        let this = *self;
-        view()
-            .flex_row()
-            .items_center()
-            // 固定行高：翻页钮随滚动需要出现 / 消失时内容不跳。
-            .h(px(28.0))
-            .child(section_title(title))
-            .child(view().flex_1())
-            .child(when(
-                move || this.max() > 0.5,
-                move || {
-                    let page = move || this.viewport.get() * 0.9;
-                    view()
-                        .flex_row()
-                        .gap(px(2.0))
-                        .child(
-                            icon_button(
-                                || Icon::ChevronLeft,
-                                14.0,
-                                "往前翻",
-                                muted_fg,
-                                move || {
-                                    let x = (this.offset.get() - page()).max(0.0);
-                                    this.el.scroll_to(point(Points(x), Points::ZERO), true);
-                                },
-                            )
-                            .disabled(move || this.offset.get() <= 0.5),
-                        )
-                        .child(
-                            icon_button(
-                                || Icon::ChevronRight,
-                                14.0,
-                                "往后翻",
-                                muted_fg,
-                                move || {
-                                    let x = (this.offset.get() + page()).min(this.max());
-                                    this.el.scroll_to(point(Points(x), Points::ZERO), true);
-                                },
-                            )
-                            .disabled(move || this.offset.get() >= this.max() - 0.5),
-                        )
-                },
-            ))
-    }
-
-    /// 横向 Scroll：一行横排、藏滚动条，固定宽的卡从左排起。`mx(-CARD_PAD)`
-    /// 抵掉卡的内边距，封面与节标题落在同一条内容线上（悬停底色向外
-    /// 多出一圈）。`fill` 把卡塞进来。
-    pub(crate) fn strip(&self, fill: impl FnOnce(Scroll) -> Scroll) -> Scroll {
-        let this = *self;
-        fill(
-            scroll()
-                .horizontal()
-                .scrollbar(false)
-                .mx(px(-CARD_PAD))
-                .gap(px(STRIP_GAP))
-                .element_ref(&this.el)
-                .test_id(this.id)
-                .on_layout(move |b: &Bounds<Points>| this.viewport.set(b.size.width.0))
-                .on_scroll(move |e: &ScrollEvent| this.offset.set(e.offset.x.0)),
-        )
-    }
+/// 当前窗口宽度下的列数：每列至少 [`MIN_CARD_W`]，2–8 列。`content_break`
+/// 跟着窗口宽度实时变（含拖动缩放途中），列数与卡宽随之重算。
+fn grid_cols() -> f32 {
+    (grid_width() / MIN_CARD_W).floor().clamp(2.0, 8.0)
 }
 
-/// 卡条里的一张卡的外壳：固定宽（封面边长 + 内边距）、左对齐、悬停
-/// 底色铺满整卡。卡条从左排起，放不下横向滚动。
+/// 一张卡的宽：列宽取整并让出 1 pt，避免浮点累计误差把最后一列挤到下一行。
+fn card_w() -> f32 {
+    (grid_width() / grid_cols()).floor() - 1.0
+}
+
+/// 响应式卡片网格：卡宽按列数均分、一行放不下折到下一行（纵向增长，
+/// 不横向滚动）。`mx(-CARD_PAD)` 抵掉卡的内边距，封面与节标题落在同一
+/// 条内容线上。
+pub(crate) fn card_grid(id: &'static str) -> View {
+    view().flex_row().flex_wrap().mx(px(-CARD_PAD)).test_id(id)
+}
+
+/// 网格里的一张卡的外壳：宽随列数变（封面铺满、正方形）、悬停底色铺满
+/// 整卡。
 pub(crate) fn card_shell(label: String) -> ButtonElement {
     button()
-        .w(px(STRIP_MIN_W))
+        .w(move || px(card_w()))
         .flex_shrink_0()
         .gap(px(CARD_ART_GAP))
         .items_start()
@@ -122,7 +49,7 @@ pub(crate) fn card(t: &TrackEntry, index: usize, five: Rc<Vec<TrackEntry>>) -> B
     card_shell(t.display_title().to_owned())
         .on_press(move |_: &()| play_list(&five, index))
         .child(when(covers_on, move || {
-            cover_initial(src, letter, Some(CARD_ART), CARD_ART_RADIUS)
+            cover_initial(src, letter, None, CARD_ART_RADIUS)
         }))
         .child(
             view()

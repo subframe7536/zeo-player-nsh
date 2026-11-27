@@ -145,10 +145,10 @@ fn home_counts_a_play() {
 
     // 「热门艺术家」深链：点歌手卡直接落进「歌手」详情（复用 Artists）。
     // 多歌手已按分隔符拆开（「测试歌手 A; 测试歌手 B」→ A、B 两张卡），
-    // 歌手名同时是行内 / 播放条的链接钮，限定在卡条里点。
+    // 歌手名同时是行内 / 播放条的链接钮，限定在卡片网格里点。
     // 首页长页面下滚一段，避开底部浮动播放条。
     let _ = app.scroll("text:热门艺术家", px(480.0));
-    app.press("id:home-artists-shelf >> role:button[测试歌手 A]")
+    app.press("id:home-artists-grid >> role:button[测试歌手 A]")
         .unwrap();
     app.wait_for("label:返回").unwrap();
     // 回网格并把选中复位，别留给后面的侧栏用例。
@@ -165,12 +165,11 @@ fn home_counts_a_play() {
     app.press("label:关闭设置").unwrap();
 }
 
-/// 「最近播放」单行横排：窄窗放不下时标题行出翻页钮、条子沿横轴滚
-/// 得动、到边的钮禁用；窗口拉宽全放下后钮消失。（语料只有几首
-/// 歌、一两个歌手：「最近播放」一定溢出，「热门艺术家」没有播放
-/// 记录时整节不渲染，也不会溢出，所以翻页钮恰有一对。）
+/// 「最近播放」「热门艺术家」是响应式网格：没有翻页钮，网格不撑出窗口，
+/// 卡宽（封面边长）随窗口宽度换列数而变。（语料只有几首歌、一两个歌手，
+/// 折行本身不一定触发，所以断言列宽与边界，不数行。）
 #[test]
-fn home_recent_shelf_scrolls_horizontally() {
+fn home_recent_grid_is_responsive() {
     let mut app = start(760.0, 600.0);
     if !isolate() {
         return eprintln!("跳过：没有 {CORPUS}");
@@ -178,57 +177,38 @@ fn home_recent_shelf_scrolls_horizontally() {
     app.wait_for_within("label:立即播放", Duration::from_secs(20))
         .unwrap();
     app.wait_for("最近播放").unwrap();
-    // 卡按 200pt 排不下 → 翻页钮挂出来；起点处「往前翻」禁用。
     assert_eq!(
         app.screen().count("label:往后翻"),
-        Ok(1),
-        "{:?}",
+        Ok(0),
+        "网格不再有翻页钮: {:?}",
         texts(&app)
     );
-    assert_eq!(app.screen().enabled("label:往前翻"), Ok(false));
-    // 条子本体沿横轴滚（视口若被内容撑到 max-content 宽，这里报错）。
-    app.scroll("id:home-recent-shelf", px(300.0))
-        .expect("卡条应能横向滚动");
-    // 翻页钮一次滚近一屏：右翻后左翻解禁，回到起点再禁用。
-    // 并行用例会经共享曲库 / 播放记录触发本节重建——按压若落在重建间隙
-    // 的已卸载节点上就丢了（或按下时按钮暂时不存在）：按到解禁为止。
-    let mut paged = false;
-    for _ in 0..10 {
-        let _ = app.press("label:往后翻");
-        if app
-            .wait_until(
-                "右翻后「往前翻」应解禁",
-                Duration::from_secs(2),
-                |s| s.enabled("label:往前翻") == Ok(true),
-            )
-            .is_ok()
-        {
-            paged = true;
-            break;
-        }
-    }
-    assert!(paged, "右翻后「往前翻」应解禁: {:?}", texts(&app));
-    // 回翻同样可能被重建间隙吃掉按压，照上法重试。
-    let mut back = false;
-    for _ in 0..10 {
-        let _ = app.press("label:往前翻");
-        if app
-            .wait_until(
-                "回翻后「往前翻」应禁用",
-                Duration::from_secs(2),
-                |s| s.enabled("label:往前翻") == Ok(false),
-            )
-            .is_ok()
-        {
-            back = true;
-            break;
-        }
-    }
-    assert!(back, "回翻后「往前翻」应禁用: {:?}", texts(&app));
-    // 拉宽到全放下 → 翻页钮消失。
-    app.set_viewport(size(px(2200.0), px(900.0))).unwrap();
-    app.wait_until("放宽后翻页钮应收起", Duration::from_secs(5), |s| {
-        s.count("label:往后翻") == Ok(0)
+    // (网格右缘, 第一张封面边长)。
+    let measure = |app: &Headless| {
+        let grid = app
+            .screen()
+            .layout("id:home-recent-grid")
+            .unwrap()
+            .expect("最近播放网格应在页面里")
+            .bounds;
+        let cover = app
+            .screen()
+            .layout("id:home-recent-grid >> id:cover >> nth=0")
+            .unwrap()
+            .expect("网格里应有封面")
+            .bounds;
+        (grid.origin.x.0 + grid.size.width.0, cover.size.width.0)
+    };
+    let (right, narrow) = measure(&app);
+    assert!(right <= 760.0, "网格不应撑出窗口: {right}");
+    app.set_viewport(size(px(1600.0), px(900.0))).unwrap();
+    app.wait_until("拉宽后封面应换列宽", Duration::from_secs(5), |s| {
+        s.layout("id:home-recent-grid >> id:cover >> nth=0")
+            .ok()
+            .flatten()
+            .is_some_and(|l| (l.bounds.size.width.0 - narrow).abs() > 4.0)
     })
     .unwrap();
+    let (right, _) = measure(&app);
+    assert!(right <= 1600.0, "拉宽后网格不应撑出窗口: {right}");
 }
