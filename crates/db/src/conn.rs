@@ -5,7 +5,7 @@ use std::time::Duration;
 use rusqlite::Connection;
 
 /// 当前表结构版本（`PRAGMA user_version`）。改表时加一，并在 [`migrate`] 里迁移。
-pub(crate) const SCHEMA_VERSION: i32 = 10;
+pub(crate) const SCHEMA_VERSION: i32 = 11;
 
 pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE IF NOT EXISTS tracks (
@@ -187,6 +187,12 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             );
             CREATE INDEX IF NOT EXISTS tag_snapshots_batch ON tag_snapshots(batch);
             CREATE INDEX IF NOT EXISTS tag_snapshots_path ON tag_snapshots(path);",
+        )?;
+    }
+    if version < 11 {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS likes_time ON likes(liked_at);
+             CREATE INDEX IF NOT EXISTS added_time ON added(added_at DESC, path);",
         )?;
     }
     if version < SCHEMA_VERSION {

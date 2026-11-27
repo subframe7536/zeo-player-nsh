@@ -142,13 +142,19 @@ pub fn remove_like(path: &str) {
 
 /// 把升级前已存在的收藏路径补进表（`liked_at = 0`：有记录但不计新增）。
 pub fn backfill_likes(paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
     with("补收藏时间", |conn| {
-        let mut stmt =
-            conn.prepare_cached("INSERT OR IGNORE INTO likes (path, liked_at) VALUES (?1, 0)")?;
-        for p in paths {
-            stmt.execute(params![p])?;
+        let tx = conn.transaction()?;
+        {
+            let mut stmt =
+                tx.prepare_cached("INSERT OR IGNORE INTO likes (path, liked_at) VALUES (?1, 0)")?;
+            for p in paths {
+                stmt.execute(params![p])?;
+            }
         }
-        Ok(())
+        tx.commit()
     });
 }
 
@@ -199,13 +205,20 @@ pub fn reconcile_added(paths: &[String], now: u64) {
 /// 升级前的老曲目回填：用文件修改时间当入库时间的近似（`INSERT OR
 /// IGNORE`——已经记过的不动）。`entries = (路径, 文件修改时间)`。
 pub fn backfill_added(entries: &[(String, u64)]) {
+    if entries.is_empty() {
+        return;
+    }
     let done = with("补入库时间", |conn| {
-        let mut stmt =
-            conn.prepare_cached("INSERT OR IGNORE INTO added (path, added_at) VALUES (?1, ?2)")?;
-        for (p, modified) in entries {
-            stmt.execute(params![p, *modified as i64])?;
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "INSERT OR IGNORE INTO added (path, added_at) VALUES (?1, ?2)",
+            )?;
+            for (p, modified) in entries {
+                stmt.execute(params![p, *modified as i64])?;
+            }
         }
-        Ok(())
+        tx.commit()
     });
     if done.is_some() {
         ADDED_GEN.fetch_add(1, Ordering::Relaxed);
@@ -255,6 +268,7 @@ pub struct PlayStats {
 
 /// 连续天数：本地日序号倒序（去重）从 `today`（或它没听时的昨天）往回
 /// 数，断档即停。`days` 为 DESC 序。
+#[cfg(test)]
 pub(crate) fn streak_days(days: &[i64], today: i64) -> u64 {
     let mut expected = if days.first().is_some_and(|&d| d >= today) {
         today
@@ -299,16 +313,28 @@ pub(crate) fn play_stats_on(
         [week_start as i64],
         |r| r.get::<_, i64>(0),
     )? as u64;
-    // 本地日序号（去重倒序）：offset 是本地时区相对 UTC 的秒数。
-    let days: Vec<i64> = conn
-        .prepare(
-            "SELECT DISTINCT CAST((played_at + ?1) / 86400 AS INTEGER) d \
-             FROM plays ORDER BY d DESC",
-        )?
-        .query_map([offset], |r| r.get::<_, i64>(0))?
-        .collect::<Result<_, _>>()?;
+    // 利用 plays_time 索引逆序流式迭代计算连续收听天数，遇到断档立即停止。
     let today = zeo_types::config::local_day(zeo_types::config::unix_now(), offset);
-    let streak = streak_days(&days, today);
+    let streak = {
+        let mut stmt = conn.prepare_cached("SELECT played_at FROM plays ORDER BY played_at DESC")?;
+        let mut rows = stmt.query([])?;
+        let mut expected: Option<i64> = None;
+        let mut n = 0u64;
+        while let Some(row) = rows.next()? {
+            let played_at: i64 = row.get(0)?;
+            let d = (played_at + offset) / 86400;
+            let exp = *expected.get_or_insert_with(|| if d >= today { today } else { today - 1 });
+            if d > exp {
+                continue;
+            }
+            if d < exp {
+                break;
+            }
+            n += 1;
+            expected = Some(exp - 1);
+        }
+        n
+    };
     let ranked = |sql: &str| -> rusqlite::Result<Vec<(String, u64)>> {
         conn.prepare(sql)?
             .query_map([limit], |r| {

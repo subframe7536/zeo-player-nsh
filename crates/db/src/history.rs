@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 
 use crate::conn::with;
 
@@ -74,28 +74,40 @@ pub(crate) fn add_tag_batch_on(
 }
 
 pub(crate) fn tag_batches_on(conn: &Connection) -> rusqlite::Result<Vec<TagBatch>> {
-    // 文件都没了（`remove_meta` 清掉了快照）的空批次顺手清掉。
-    conn.execute(
-        "DELETE FROM tag_batches WHERE id NOT IN (SELECT DISTINCT batch FROM tag_snapshots)",
-        [],
-    )?;
-    let mut batches: Vec<TagBatch> = conn
-        .prepare("SELECT id, created_at, summary FROM tag_batches ORDER BY id DESC")?
-        .query_map([], |r| {
-            Ok(TagBatch {
-                id: r.get(0)?,
-                created_at: r.get::<_, i64>(1)? as u64,
-                summary: r.get(2)?,
-                paths: Vec::new(),
-            })
-        })?
-        .collect::<Result<_, _>>()?;
-    let mut paths = conn.prepare("SELECT path FROM tag_snapshots WHERE batch = ?1")?;
-    for batch in &mut batches {
-        batch.paths = paths
-            .query_map([batch.id], |r| r.get(0))?
-            .collect::<Result<_, _>>()?;
+    let mut by_batch: HashMap<i64, Vec<String>> = HashMap::new();
+    {
+        let mut stmt =
+            conn.prepare_cached("SELECT batch, path FROM tag_snapshots ORDER BY id")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        for row in rows {
+            let (batch, path) = row?;
+            by_batch.entry(batch).or_default().push(path);
+        }
     }
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, created_at, summary FROM tag_batches ORDER BY id DESC",
+    )?;
+    let batches: Vec<TagBatch> = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)? as u64,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .filter_map(|row| match row {
+            Ok((id, created_at, summary)) => {
+                let paths = by_batch.remove(&id)?;
+                Some(Ok(TagBatch {
+                    id,
+                    created_at,
+                    summary,
+                    paths,
+                }))
+            }
+            Err(e) => Some(Err(e)),
+        })
+        .collect::<Result<_, _>>()?;
     Ok(batches)
 }
 
@@ -104,29 +116,24 @@ pub(crate) fn tag_snapshots_on(
     batch: i64,
     only: &HashSet<String>,
 ) -> rusqlite::Result<Vec<TagSnapshot>> {
-    let ids: Vec<(i64, String)> = conn
-        .prepare("SELECT id, path FROM tag_snapshots WHERE batch = ?1 ORDER BY id")?
-        .query_map([batch], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<Result<_, _>>()?;
+    if only.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare_cached(
+        "SELECT path, fields, cover_touched, cover, cover_mime \
+         FROM tag_snapshots WHERE batch = ?1 ORDER BY id",
+    )?;
+    let mut rows = stmt.query([batch])?;
     let mut out = Vec::new();
-    for (id, path) in ids.into_iter().filter(|(_, p)| only.contains(p)) {
-        let row = conn
-            .query_row(
-                "SELECT fields, cover_touched, cover, cover_mime FROM tag_snapshots WHERE id = ?1",
-                [id],
-                |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, i64>(1)?,
-                        r.get::<_, Option<Vec<u8>>>(2)?,
-                        r.get::<_, Option<String>>(3)?,
-                    ))
-                },
-            )
-            .optional()?;
-        let Some((fields, touched, cover, mime)) = row else {
+    while let Some(r) = rows.next()? {
+        let path: String = r.get(0)?;
+        if !only.contains(&path) {
             continue;
-        };
+        }
+        let fields: String = r.get(1)?;
+        let touched: i64 = r.get(2)?;
+        let cover: Option<Vec<u8>> = r.get(3)?;
+        let mime: Option<String> = r.get(4)?;
         out.push(TagSnapshot {
             path,
             fields: serde_json::from_str(&fields).unwrap_or_default(),
