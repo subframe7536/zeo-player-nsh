@@ -7,20 +7,23 @@ use super::*;
 /// 只能等它，于是输出断续。现在两边只读写原子量：`write` / `read` 是累计
 /// 样本数，`discard` 之前的样本作废（seek / 换曲时由引擎设成当前 `write`，
 /// 回调下次取数时跳过）。
+#[repr(align(64))]
+struct CachePadded<T>(T);
+
 pub struct Ring {
     pub(crate) slots: OnceLock<Box<[AtomicU32]>>,
-    pub(crate) write: AtomicU64,
-    pub(crate) read: AtomicU64,
-    pub(crate) discard: AtomicU64,
+    write: CachePadded<AtomicU64>,
+    read: CachePadded<AtomicU64>,
+    discard: CachePadded<AtomicU64>,
 }
 
 impl Ring {
     pub fn new() -> Ring {
         Ring {
             slots: OnceLock::new(),
-            write: AtomicU64::new(0),
-            read: AtomicU64::new(0),
-            discard: AtomicU64::new(0),
+            write: CachePadded(AtomicU64::new(0)),
+            read: CachePadded(AtomicU64::new(0)),
+            discard: CachePadded(AtomicU64::new(0)),
         }
     }
 
@@ -38,35 +41,47 @@ impl Ring {
 
     /// 待播的样本数。
     pub fn len(&self) -> usize {
-        let w = self.write.load(Ordering::Acquire);
+        let w = self.write.0.load(Ordering::Acquire);
         let r = self
             .read
+            .0
             .load(Ordering::Acquire)
-            .max(self.discard.load(Ordering::Acquire));
+            .max(self.discard.0.load(Ordering::Acquire));
         w.saturating_sub(r) as usize
     }
 
-    /// 生产者：写入放得下的整帧，返回写入的样本数。
+    /// 生产者：写入放得下的整帧，返回写入的样本数（两段连续切片消除逐样本取模）。
     pub(crate) fn push(&self, data: &[f32], channels: usize) -> usize {
         let Some(slots) = self.slots.get() else {
             return 0;
         };
-        let cap = slots.len() as u64;
-        let free = (cap as usize).saturating_sub(self.len());
+        let cap = slots.len();
+        let free = cap.saturating_sub(self.len());
         let n = data.len().min(free);
         let n = n - n % channels.max(1);
-        let w = self.write.load(Ordering::Relaxed);
-        for (i, &sample) in data[..n].iter().enumerate() {
-            slots[((w + i as u64) % cap) as usize].store(sample.to_bits(), Ordering::Relaxed);
+        if n == 0 {
+            return 0;
         }
-        self.write.store(w + n as u64, Ordering::Release);
+        let w = self.write.0.load(Ordering::Relaxed);
+        let pos = (w % cap as u64) as usize;
+        let first = n.min(cap - pos);
+        for (slot, &sample) in slots[pos..pos + first].iter().zip(&data[..first]) {
+            slot.store(sample.to_bits(), Ordering::Relaxed);
+        }
+        if n > first {
+            for (slot, &sample) in slots[..n - first].iter().zip(&data[first..n]) {
+                slot.store(sample.to_bits(), Ordering::Relaxed);
+            }
+        }
+        self.write.0.store(w + n as u64, Ordering::Release);
         n
     }
 
     /// 生产者：作废还没播放的样本。
     pub(crate) fn clear(&self) {
         self.discard
-            .store(self.write.load(Ordering::Relaxed), Ordering::Release);
+            .0
+            .store(self.write.0.load(Ordering::Relaxed), Ordering::Release);
     }
 
     /// 消费者：按顺序取最多 `max` 个样本交给 `sink(序号, 样本)`，返回取出的数量。
@@ -74,20 +89,28 @@ impl Ring {
         let Some(slots) = self.slots.get() else {
             return 0;
         };
-        let cap = slots.len() as u64;
-        let w = self.write.load(Ordering::Acquire);
+        let cap = slots.len();
+        let w = self.write.0.load(Ordering::Acquire);
         let r = self
             .read
+            .0
             .load(Ordering::Relaxed)
-            .max(self.discard.load(Ordering::Acquire));
+            .max(self.discard.0.load(Ordering::Acquire));
         let n = (w.saturating_sub(r) as usize).min(max);
-        for i in 0..n {
-            sink(
-                i,
-                f32::from_bits(slots[((r + i as u64) % cap) as usize].load(Ordering::Relaxed)),
-            );
+        if n == 0 {
+            return 0;
         }
-        self.read.store(r + n as u64, Ordering::Release);
+        let pos = (r % cap as u64) as usize;
+        let first = n.min(cap - pos);
+        for (i, slot) in slots[pos..pos + first].iter().enumerate() {
+            sink(i, f32::from_bits(slot.load(Ordering::Relaxed)));
+        }
+        if n > first {
+            for (i, slot) in slots[..n - first].iter().enumerate() {
+                sink(first + i, f32::from_bits(slot.load(Ordering::Relaxed)));
+            }
+        }
+        self.read.0.store(r + n as u64, Ordering::Release);
         n
     }
 }

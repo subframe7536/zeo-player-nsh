@@ -36,15 +36,21 @@ fn peaking(f0: f32, rate: f32, db: f32) -> [f32; 5] {
 /// 相邻几何中点与频带两端。前级按它下压，让 EQ 的提升不会把输出
 /// 推过满幅——不然推子只要往上，响处就被 ±1 硬削出失真。
 fn combined_headroom_db(tgts: &[[f32; 5]; 10], rate: f32) -> f32 {
-    let mut freqs: Vec<f32> = Vec::with_capacity(22);
-    freqs.push(20.0f32.min(0.45 * rate));
+    // 固定 21 个采样点（20Hz + 10 中心频点 + 9 几何中点 + 20kHz），使用栈数组避免实时音频回调内堆分配。
+    let nyq = 0.45 * rate;
+    let mut freqs = [0.0f32; 21];
+    let mut idx = 0;
+    freqs[idx] = 20.0f32.min(nyq);
+    idx += 1;
     for (i, &f0) in BANDS.iter().enumerate() {
-        freqs.push(f0.min(0.45 * rate));
+        freqs[idx] = f0.min(nyq);
+        idx += 1;
         if let Some(&next) = BANDS.get(i + 1) {
-            freqs.push((f0 * next).sqrt().min(0.45 * rate));
+            freqs[idx] = (f0 * next).sqrt().min(nyq);
+            idx += 1;
         }
     }
-    freqs.push(20_000.0f32.min(0.45 * rate));
+    freqs[idx] = 20_000.0f32.min(nyq);
     let mut max_db = 0.0_f64;
     for f in freqs {
         let w = f64::from(2.0 * std::f32::consts::PI * f / rate);
@@ -131,6 +137,9 @@ impl Equalizer {
     /// 按 `rate` 算目标系数：增益为 0 或频点 ≥ 0.45·rate 的段目标是恒等。
     /// 已激活时朝新目标渐变（保留滤波器状态），未激活且配置平直时保持旁路。
     pub fn configure(&mut self, cfg: &EqConfig, rate: u32) {
+        if !self.active && cfg.is_flat() {
+            return;
+        }
         let rate_f = rate as f32;
         let enabled = cfg.enabled;
         let mut tgts = [IDENTITY; 10];
@@ -153,9 +162,6 @@ impl Equalizer {
         } else {
             1.0
         };
-        if !self.active && cfg.is_flat() {
-            return;
-        }
         // 旁路 → 激活也走同一渐变：系数从恒等起步推到目标约 5 ms——
         // 直接落目标的话，非零系数配零状态首样本就有 (b0−1)·x 的台阶。
         self.active = true;
@@ -212,6 +218,64 @@ impl Equalizer {
         }
         let nch = channels.min(MAX_CHANNELS);
         let frames = data.len() / channels;
+        if self.ramp_left == 0 {
+            // 稳态快路径：外层按段、内层按块，滤波器系数与 z1/z2 常驻寄存器，且跳过每样本 band.on 分支。
+            let preamp = self.preamp;
+            if preamp != 1.0 {
+                if nch == channels {
+                    for s in data[..frames * channels].iter_mut() {
+                        *s *= preamp;
+                    }
+                } else {
+                    for frame in data[..frames * channels].chunks_exact_mut(channels) {
+                        for s in &mut frame[..nch] {
+                            *s *= preamp;
+                        }
+                    }
+                }
+            }
+            for band in self.bands.iter_mut() {
+                if !band.on {
+                    continue;
+                }
+                let [b0, b1, b2, a1, a2] = band.coef;
+                if channels == 2 && nch == 2 {
+                    let (mut z1_l, mut z2_l) = (band.z1[0], band.z2[0]);
+                    let (mut z1_r, mut z2_r) = (band.z1[1], band.z2[1]);
+                    for frame in data[..frames * 2].chunks_exact_mut(2) {
+                        let xl = frame[0];
+                        let yl = b0 * xl + z1_l;
+                        z1_l = b1 * xl - a1 * yl + z2_l;
+                        z2_l = b2 * xl - a2 * yl;
+                        frame[0] = if yl.abs() < 1e-15 { 0.0 } else { yl };
+
+                        let xr = frame[1];
+                        let yr = b0 * xr + z1_r;
+                        z1_r = b1 * xr - a1 * yr + z2_r;
+                        z2_r = b2 * xr - a2 * yr;
+                        frame[1] = if yr.abs() < 1e-15 { 0.0 } else { yr };
+                    }
+                    band.z1[0] = z1_l;
+                    band.z2[0] = z2_l;
+                    band.z1[1] = z1_r;
+                    band.z2[1] = z2_r;
+                } else {
+                    for ch in 0..nch {
+                        let (mut z1, mut z2) = (band.z1[ch], band.z2[ch]);
+                        for frame in data[..frames * channels].chunks_exact_mut(channels) {
+                            let x = frame[ch];
+                            let y = b0 * x + z1;
+                            z1 = b1 * x - a1 * y + z2;
+                            z2 = b2 * x - a2 * y;
+                            frame[ch] = if y.abs() < 1e-15 { 0.0 } else { y };
+                        }
+                        band.z1[ch] = z1;
+                        band.z2[ch] = z2;
+                    }
+                }
+            }
+            return;
+        }
         for f in 0..frames {
             if self.ramp_left > 0 {
                 self.advance();
@@ -228,9 +292,6 @@ impl Equalizer {
                     let y = c[0] * x + band.z1[ch];
                     band.z1[ch] = c[1] * x - c[3] * y + band.z2[ch];
                     band.z2[ch] = c[2] * x - c[4] * y;
-                    // 静默期的滤波器尾端会衰减进非规格化数（x86 上非规格
-                    // 数运算慢几十倍，占实时回调的时间）：过小直接冲零，
-                    // 归零后整链对零输入恒出零。
                     x = if y.abs() < 1e-15 { 0.0 } else { y };
                 }
                 data[base + ch] = x;
