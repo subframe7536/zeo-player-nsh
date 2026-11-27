@@ -58,10 +58,17 @@ pub(crate) fn app_section() -> View {
 pub(crate) fn update_section() -> View {
     let s = store();
     let status = move || {
-        text(status_text(&s.update.get()))
-            .text_size(px(13.0))
-            .line_height(px(13.0))
-            .text_color(muted_fg())
+        dynamic(move || {
+            view()
+                .child(status_text(&s.update.get()).map(|t| {
+                    text(t)
+                        .text_size(px(13.0))
+                        .line_height(px(13.0))
+                        .text_color(muted_fg())
+                }))
+                .into_element()
+        })
+        .into_element()
     };
     // 版本说明（有就显示，限 3 行）。
     let notes = move || {
@@ -298,7 +305,7 @@ pub fn update_dialog() -> AnyElement {
             _ => col
                 .child(dialog_header("应用更新", None))
                 .child(
-                    text(status_text(&s.update.get()))
+                    text(status_text(&s.update.get()).unwrap_or_default())
                         .text_size(px(13.0))
                         .line_height(px(13.0))
                         .text_color(muted_fg()),
@@ -416,20 +423,18 @@ fn progress_bar(received: u64, total: Option<u64>) -> View {
         )
 }
 
-/// 更新状态的一行读写法（「关于」节的状态行与弹窗兜底共用）。
-fn status_text(u: &UpdateState) -> String {
-    match u {
+/// 更新状态的一行读写法（「关于」节的状态行与弹窗兜底共用）。下载中
+/// 没有状态行：进度只在按钮（百分比）与弹窗（进度条）上。
+fn status_text(u: &UpdateState) -> Option<String> {
+    Some(match u {
         UpdateState::Idle => "尚未检查".into(),
         UpdateState::Checking => "检查更新中…".into(),
         UpdateState::Current => "已是最新版本".into(),
         UpdateState::Available { version, .. } => format!("发现新版本 v{version}"),
-        UpdateState::Downloading { received, total } => match total {
-            Some(total) if *total > 0 => format!("下载中 {} / {}", bytes(*received), bytes(*total)),
-            _ => format!("下载中 {}", bytes(*received)),
-        },
+        UpdateState::Downloading { .. } => return None,
         UpdateState::Ready { version } => format!("v{version} 已安装，重启后生效"),
         UpdateState::Error(e) => format!("更新失败：{e}"),
-    }
+    })
 }
 
 /// 「欢迎指南」节：关掉设置，重新打开首次启动时的欢迎指南。

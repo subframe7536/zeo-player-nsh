@@ -96,12 +96,22 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LR
         let old: WNDPROC = std::mem::transmute::<isize, WNDPROC>(OLD_PROC.load(Ordering::Relaxed));
         CallWindowProcW(old, hwnd, msg, w, l)
     };
-    // 重启时放行：运行器的主循环要正常返回，才会跑 `run_at_exit` 与
-    // `spawn_after_exit` 拉起新进程。
-    if msg == WM_DESTROY && !super::RESTARTING.load(Ordering::Relaxed) {
+    if msg == WM_DESTROY {
         exit_now();
     }
     result
+}
+
+/// 重启（见 `window::restart`）：先拉起新进程——NSH 的
+/// `spawn_after_exit` 在 Windows 上立刻启动程序（更新前
+/// `remember_program` 记下的路径），并用 `NSH_RESTART_AFTER` 告诉它等
+/// 本进程退出后再开窗、再做单实例判断；随后硬结束本进程。拉起失败就
+/// 留在原地，界面仍是「重启并更新」，可以再试或手动重开。
+pub(crate) fn restart() {
+    nsh_core::restart::run_at_exit();
+    if nsh_core::restart::spawn_after_exit().is_ok() {
+        exit_now();
+    }
 }
 
 /// 主窗口已销毁：直接结束进程。
