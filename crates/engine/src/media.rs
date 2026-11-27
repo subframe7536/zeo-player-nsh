@@ -9,15 +9,21 @@ use playwire::{Capabilities, Event, MediaControls, PlaybackState, PlayerConfig, 
 
 use crate::audio::{EngineCmd, Snapshot};
 
+struct MediaUpdate {
+    state: PlaybackState,
+    #[cfg(target_os = "windows")]
+    cover_path: Option<std::path::PathBuf>,
+}
+
 #[derive(Clone)]
 pub struct MediaSession {
-    tx: Sender<Box<PlaybackState>>,
+    tx: Sender<Box<MediaUpdate>>,
 }
 
 impl MediaSession {
     /// 启动媒体会话与它的串行线程；事件转成引擎命令。
     pub fn start(cmd_tx: Sender<EngineCmd>) -> MediaSession {
-        let (tx, rx) = std::sync::mpsc::channel::<Box<PlaybackState>>();
+        let (tx, rx) = std::sync::mpsc::channel::<Box<MediaUpdate>>();
         std::thread::Builder::new()
             .name("zeo-player-media".into())
             .spawn(move || {
@@ -68,18 +74,17 @@ impl MediaSession {
                 };
                 // 后端按 Track 整体 diff（含 artwork_url），重发同曲目的
                 // 封面更新会触发新一轮元数据，不需要单独的成功通知。
-                while let Ok(state) = rx.recv() {
-                    if let Err(err) = controls.set_state(&state) {
+                while let Ok(mut update) = rx.recv() {
+                    // 合并积压心跳，只提交最新一份状态。
+                    while let Ok(newer) = rx.try_recv() {
+                        update = newer;
+                    }
+                    if let Err(err) = controls.set_state(&update.state) {
                         eprintln!("zeo-player: 媒体状态发布失败: {err}");
                     }
                     #[cfg(target_os = "windows")]
                     if let Some(thumbnail) = thumbnail.as_mut() {
-                        // 与 artwork_url 同源：现查缓存，升档 / 冷生成都能跟上。
-                        let path = state.track.as_ref().and_then(|t| {
-                            zeo_metadata::covers::cached_list(std::path::Path::new(&t.id))
-                                .map(|(_, f)| f)
-                        });
-                        thumbnail.publish(path.as_deref());
+                        thumbnail.publish(update.cover_path.as_deref());
                     }
                 }
             })
@@ -95,10 +100,11 @@ impl MediaSession {
         };
         // 循环模式都在端点回绕（单曲是重播自己）：有多于一首就能切。
         let can_switch = track.queue.len() > 1;
-        // 封面现查最大的那份列表缓存（升档 96→400 后 96 文件会被删，
-        // 冷缓存则晚于换曲才生成）：随每次发布带上，没有就清空缩略图。
-        let artwork_url = zeo_metadata::covers::cached_list(std::path::Path::new(path))
-            .map(|(_, f)| file_url(&f.to_string_lossy()))
+        // 直接使用 TrackPublic 缓存的封面路径，避免 1 Hz 心跳在音频线程执行同步 stat。
+        let artwork_url = track
+            .cover_path
+            .as_ref()
+            .map(|f| file_url(&f.to_string_lossy()))
             .unwrap_or_default();
         let state = PlaybackState {
             track: Some(Track {
@@ -128,7 +134,11 @@ impl MediaSession {
                 can_seek: true,
             },
         };
-        let _ = self.tx.send(Box::new(state));
+        let _ = self.tx.send(Box::new(MediaUpdate {
+            state,
+            #[cfg(target_os = "windows")]
+            cover_path: track.cover_path.clone(),
+        }));
     }
 }
 

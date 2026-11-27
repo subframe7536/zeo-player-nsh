@@ -9,6 +9,8 @@ pub(crate) struct Loaded {
     pub(crate) out: Vec<f32>,   // 重采样产出暂存
     /// 缓冲放不下的已解码样本（下一轮先送这些）。
     pub(crate) backlog: Vec<f32>,
+    pub(crate) backlog_pos: usize,
+    pub(crate) duration: f64,
     pub(crate) src_channels: usize,
     /// 解码到了文件末尾且没预取到下一首：等缓冲里的尾巴播完再换。
     pub(crate) drain: Option<Drain>,
@@ -52,6 +54,7 @@ impl Loaded {
     pub(crate) fn reset_buffers(&mut self) {
         self.carry.clear();
         self.backlog.clear();
+        self.backlog_pos = 0;
         self.drain = None;
         self.next = None;
         self.eof = false;
@@ -135,7 +138,7 @@ impl ResamplerState {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn load_track(
     shared: &Arc<Shared>,
-    media: &MediaSession,
+    _media: &MediaSession,
     loaded: &mut Option<Loaded>,
     path: PathBuf,
     queue: Arc<Vec<String>>,
@@ -189,6 +192,8 @@ pub(crate) fn load_track(
                 carry: Vec::new(),
                 out: Vec::new(),
                 backlog: Vec::new(),
+                backlog_pos: 0,
+                duration: meta.duration,
                 src_channels,
                 drain: None,
                 cover_pending: true,
@@ -214,9 +219,7 @@ pub(crate) fn load_track(
             *shared.track.lock().unwrap() =
                 Arc::new(track_public(&path, &meta, queue, actual_index));
             shared.ready.store(true, Ordering::Relaxed);
-            // 封面由引擎循环在缓冲填起来之后生成（`load_covers`）；媒体
-            // 会话的封面在 `publish` 里现查缓存，不用单独喂。
-            publish_media(shared, media, true);
+
         }
         Err(err) => set_error(shared, &err),
     }
@@ -233,6 +236,7 @@ pub(crate) fn track_public(
     queue_index: i64,
 ) -> TrackPublic {
     let artwork = zeo_metadata::covers::cached_artwork(path);
+    let cover_path = zeo_metadata::covers::cached_list(path).map(|(_, f)| f);
     let title = if !meta.title.is_empty() {
         meta.title.clone()
     } else {
@@ -257,6 +261,7 @@ pub(crate) fn track_public(
         album,
         covers_ready: artwork.is_some(),
         artwork,
+        cover_path,
         duration: meta.duration,
         queue,
         queue_index,
@@ -337,6 +342,7 @@ pub(crate) fn complete_switch(l: &mut Loaded, shared: &Arc<Shared>, media: &Medi
     l.source = next.source;
     l.resampler = next.resampler;
     l.src_channels = next.src_channels;
+    l.duration = next.public.duration;
     l.rg = next.rg;
     let cfg = *shared.rg_config.lock().unwrap_or_else(|e| e.into_inner());
     shared
@@ -376,9 +382,8 @@ pub(crate) fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
         }
         let file = std::path::Path::new(&path);
         let cover = zeo_metadata::covers::artwork_uri(file);
-        // 系统媒体会话的封面在 publish 里现查列表缓存：这里顺手把文件
-        // 生成出来（冷缓存 / 还没显示过的曲目才缺）。
-        let _ = zeo_metadata::covers::list_cover_pub(file);
+        // 系统媒体会话封面路径缓存到 TrackPublic，避免 1 Hz 心跳重复 stat。
+        let cover_path = zeo_metadata::covers::list_cover_pub(file).map(PathBuf::from);
         {
             let mut slot = shared.track.lock().unwrap();
             if shared.cover_gen.load(Ordering::Relaxed) != gen_id
@@ -388,6 +393,7 @@ pub(crate) fn load_covers(shared: &Arc<Shared>, media: &MediaSession) {
             }
             let mut t = (**slot).clone();
             t.artwork = cover;
+            t.cover_path = cover_path;
             t.covers_ready = true;
             *slot = Arc::new(t);
         }

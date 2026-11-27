@@ -99,6 +99,8 @@ pub struct TrackPublic {
     /// 每 100ms 取一次快照，克隆 String 会是每秒几 MB 的堆流量）。
     /// 全屏模糊背景也复用它（滤镜模糊，见 `ui::now_playing`）。
     pub artwork: Option<Arc<str>>,
+    /// 已缓存的列表封面文件路径（供 1 Hz 媒体会话心跳复用，避免每秒同步 stat）。
+    pub cover_path: Option<PathBuf>,
     /// 这首的封面已生成（`artwork` 为 `None` 时即确实没有封面）。
     pub covers_ready: bool,
     pub duration: f64,
