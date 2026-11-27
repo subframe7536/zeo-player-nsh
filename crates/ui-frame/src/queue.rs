@@ -61,7 +61,7 @@ pub fn queue_button(open: Signal<bool>) -> AnyElement {
                 .overflow_hidden()
         })
         .trigger(trigger)
-        .child(queue_panel(open))
+        .child(when(move || open.get(), move || queue_panel(open)))
         .into_element()
 }
 
