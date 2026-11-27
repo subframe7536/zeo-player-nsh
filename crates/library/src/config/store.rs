@@ -252,14 +252,21 @@ impl LibraryStore {
 
     /// 记录当前窗口位置（界面侧的窗口状态效果在上报变化时调用）。
     pub fn set_window_placement(&self, placement: nsh_core::desktop::WindowPlacement) {
+        if self.set_window_placement_mem(placement) {
+            self.save();
+        }
+    }
+
+    /// 仅更新内存中的窗口位置，不触发同步写盘（配合防抖后调用 `save()` 落盘）。
+    pub fn set_window_placement_mem(&self, placement: nsh_core::desktop::WindowPlacement) -> bool {
         let mut guard = self.config.lock().unwrap();
-        if !guard.remember_frame {
-            return;
+        if !guard.remember_frame || guard.window_placement == Some(placement) {
+            return false;
         }
         let mut config = (**guard).clone();
         config.window_placement = Some(placement);
-        self.save_config(&config);
         *guard = Arc::new(config);
+        true
     }
 
     pub fn watching(&self) -> bool {
