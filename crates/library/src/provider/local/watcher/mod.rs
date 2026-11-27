@@ -209,7 +209,10 @@ fn pair_moves(
                 .ok()
                 .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
                 .map_or(0, |d| d.as_secs());
-            file_presents.entry((meta.len(), modified)).or_default().push(p);
+            file_presents
+                .entry((meta.len(), modified))
+                .or_default()
+                .push(p);
         } else if meta.is_dir() {
             dir_presents.push(p);
         }
@@ -252,9 +255,10 @@ fn pair_moves(
         }
     }
     // 没配走的「到达」路径是新内容（从外面移进来的）：留给重扫。
-    if presents.iter().any(|p| {
-        !taken_exact.contains(p.as_str()) && !taken_dirs.iter().any(|d| is_under(p, d))
-    }) {
+    if presents
+        .iter()
+        .any(|p| !taken_exact.contains(p.as_str()) && !taken_dirs.iter().any(|d| is_under(p, d)))
+    {
         dirty = true;
     }
     (pairs, dirty)

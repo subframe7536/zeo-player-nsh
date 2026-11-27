@@ -219,7 +219,6 @@ pub(crate) fn load_track(
             *shared.track.lock().unwrap() =
                 Arc::new(track_public(&path, &meta, queue, actual_index));
             shared.ready.store(true, Ordering::Relaxed);
-
         }
         Err(err) => set_error(shared, &err),
     }

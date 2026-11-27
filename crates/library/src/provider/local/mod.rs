@@ -109,15 +109,15 @@ pub(crate) fn scan(store: &LibraryStore) -> usize {
                     if let Some(entry) = read_entry_with_meta(path, meta.clone(), config_ref)
                         && passes(entry.duration, entry.size_bytes, config_ref)
                     {
-                        let has_sidecar = path
-                            .parent()
-                            .zip(path.file_stem())
-                            .is_some_and(|(dir, stem)| {
-                                sidecar_ref.contains(&(
-                                    dir.to_path_buf(),
-                                    stem.to_string_lossy().to_ascii_lowercase(),
-                                ))
-                            });
+                        let has_sidecar =
+                            path.parent()
+                                .zip(path.file_stem())
+                                .is_some_and(|(dir, stem)| {
+                                    sidecar_ref.contains(&(
+                                        dir.to_path_buf(),
+                                        stem.to_string_lossy().to_ascii_lowercase(),
+                                    ))
+                                });
                         if entry.has_art || has_sidecar {
                             zeo_metadata::covers::request_low(&entry.path);
                         }

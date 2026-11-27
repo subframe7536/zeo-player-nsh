@@ -233,7 +233,14 @@ pub fn track_row_selectable(
     on_press: impl Fn(&PressEvent) + 'static,
     on_play: impl Fn() + 'static,
 ) -> View {
-    track_row_selectable_inner(track, number, cols, Some(Rc::new(selected)), on_press, on_play)
+    track_row_selectable_inner(
+        track,
+        number,
+        cols,
+        Some(Rc::new(selected)),
+        on_press,
+        on_play,
+    )
 }
 
 fn track_row_selectable_inner(
@@ -259,7 +266,8 @@ fn track_row_selectable_inner(
     };
     let title = field(|t| t.display_title().to_owned());
     let path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
-    let liked_memo = computed(move || track.with(|t| t.as_ref().is_some_and(|t| is_liked(&t.path))));
+    let liked_memo =
+        computed(move || track.with(|t| t.as_ref().is_some_and(|t| is_liked(&t.path))));
     let liked = move || liked_memo.get();
     let hovering = signal(false);
     // 单击不播放：记下曲目与时间，同一首在 `DOUBLE_CLICK` 内再按一次才播。

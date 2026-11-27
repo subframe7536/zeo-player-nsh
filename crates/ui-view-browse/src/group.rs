@@ -115,9 +115,8 @@ pub fn avatar(
                 .text_color(muted_fg()),
         )
         .child({
-            let resolved = computed(move || {
-                cover().and_then(|p| cover_for(&p, size.unwrap_or(168.0)))
-            });
+            let resolved =
+                computed(move || cover().and_then(|p| cover_for(&p, size.unwrap_or(168.0))));
             when(
                 move || resolved.with(Option::is_some),
                 move || {

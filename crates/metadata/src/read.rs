@@ -2,8 +2,8 @@ use std::path::Path;
 
 use lofty::config::ParseOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
-use lofty::probe::Probe;
 use lofty::prelude::ItemKey;
+use lofty::probe::Probe;
 use lofty::tag::Tag;
 
 use crate::{MetaInfo, ReplayGain};
@@ -44,9 +44,13 @@ pub fn read_replaygain(path: &Path) -> ReplayGain {
     Probe::open(path)
         .ok()
         .and_then(|p| {
-            p.options(ParseOptions::new().read_properties(false).read_cover_art(false))
-                .read()
-                .ok()
+            p.options(
+                ParseOptions::new()
+                    .read_properties(false)
+                    .read_cover_art(false),
+            )
+            .read()
+            .ok()
         })
         .map(|tagged| rg_from_tagged(&tagged))
         .unwrap_or_default()
@@ -237,7 +241,11 @@ pub fn read_artwork(path: &Path) -> Option<(Vec<u8>, Option<String>)> {
 pub fn read_lyrics(path: &Path) -> Option<String> {
     let tagged = Probe::open(path)
         .ok()?
-        .options(ParseOptions::new().read_properties(false).read_cover_art(false))
+        .options(
+            ParseOptions::new()
+                .read_properties(false)
+                .read_cover_art(false),
+        )
         .read()
         .ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;

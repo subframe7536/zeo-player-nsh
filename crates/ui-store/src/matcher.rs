@@ -160,27 +160,29 @@ pub fn apply_batch_matches(
                 let cover_cache = &cover_cache;
                 let on_prepare = &on_prepare;
                 let post_prep = &post_prep;
-                scope.spawn(move || loop {
-                    let idx = next_idx.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if idx >= total {
-                        break;
+                scope.spawn(move || {
+                    loop {
+                        let idx = next_idx.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if idx >= total {
+                            break;
+                        }
+                        let (path, cand) = &plans[idx];
+                        let edits = build_batch_edits(
+                            svc,
+                            Path::new(path),
+                            cand,
+                            fields,
+                            write_policy,
+                            artist_sep,
+                            cover_cache,
+                        );
+                        if !edits.is_empty() {
+                            results.lock().unwrap()[idx] = Some((path.clone(), edits));
+                        }
+                        let done = done_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        let cb = on_prepare.clone();
+                        post_prep.post(move || cb(done, total));
                     }
-                    let (path, cand) = &plans[idx];
-                    let edits = build_batch_edits(
-                        svc,
-                        Path::new(path),
-                        cand,
-                        fields,
-                        write_policy,
-                        artist_sep,
-                        cover_cache,
-                    );
-                    if !edits.is_empty() {
-                        results.lock().unwrap()[idx] = Some((path.clone(), edits));
-                    }
-                    let done = done_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    let cb = on_prepare.clone();
-                    post_prep.post(move || cb(done, total));
                 });
             }
         });
@@ -292,12 +294,15 @@ fn build_batch_edits(
                 Some(v) => v,
                 None => {
                     let v = svc.download_cover(url).ok();
-                    cover_cache.lock().unwrap().insert(url.to_owned(), v.clone());
+                    cover_cache
+                        .lock()
+                        .unwrap()
+                        .insert(url.to_owned(), v.clone());
                     v
                 }
             };
             if let Some((data, mime)) = fetched {
-            let edit = CoverEdit::Replace { data, mime };
+                let edit = CoverEdit::Replace { data, mime };
                 if fields.cover_sidecar {
                     edits.cover_file = Some(edit);
                 } else {

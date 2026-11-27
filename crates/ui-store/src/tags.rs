@@ -126,7 +126,10 @@ pub fn save_tags_batch(
         }
         let cur_meta = current.as_ref().and_then(|cur| {
             if ok_paths.iter().any(|p| p == cur) {
-                MetaCache::global().get(Path::new(cur)).ok().map(|m| (cur.clone(), m))
+                MetaCache::global()
+                    .get(Path::new(cur))
+                    .ok()
+                    .map(|m| (cur.clone(), m))
             } else {
                 None
             }
@@ -134,7 +137,9 @@ pub fn save_tags_batch(
         post.post(move || {
             // 当前曲目写过：详情元数据已在后台读取，直接写信号避免 UI 线程同步 I/O。
             if let Some((cur_path, meta)) = cur_meta
-                && store().track.with(|t| t.path.as_deref() == Some(cur_path.as_str()))
+                && store()
+                    .track
+                    .with(|t| t.path.as_deref() == Some(cur_path.as_str()))
             {
                 store().meta.set(Some(Same(meta)));
             }

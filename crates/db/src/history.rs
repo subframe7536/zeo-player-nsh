@@ -76,17 +76,15 @@ pub(crate) fn add_tag_batch_on(
 pub(crate) fn tag_batches_on(conn: &Connection) -> rusqlite::Result<Vec<TagBatch>> {
     let mut by_batch: HashMap<i64, Vec<String>> = HashMap::new();
     {
-        let mut stmt =
-            conn.prepare_cached("SELECT batch, path FROM tag_snapshots ORDER BY id")?;
+        let mut stmt = conn.prepare_cached("SELECT batch, path FROM tag_snapshots ORDER BY id")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
             let (batch, path) = row?;
             by_batch.entry(batch).or_default().push(path);
         }
     }
-    let mut stmt = conn.prepare_cached(
-        "SELECT id, created_at, summary FROM tag_batches ORDER BY id DESC",
-    )?;
+    let mut stmt =
+        conn.prepare_cached("SELECT id, created_at, summary FROM tag_batches ORDER BY id DESC")?;
     let batches: Vec<TagBatch> = stmt
         .query_map([], |r| {
             Ok((

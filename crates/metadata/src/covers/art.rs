@@ -64,7 +64,9 @@ pub fn clear_artwork() {
 pub(crate) fn has_cached_artwork(path: &Path, key: u64) -> bool {
     let name = path.to_string_lossy();
     let cache = art_cache().lock().unwrap();
-    cache.iter().any(|(p, k, _)| p == name.as_ref() && *k == key)
+    cache
+        .iter()
+        .any(|(p, k, _)| p == name.as_ref() && *k == key)
 }
 
 pub(crate) fn cache_artwork_from_src(path: &Path, key: u64, src: CoverSrc) {

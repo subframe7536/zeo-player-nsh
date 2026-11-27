@@ -57,6 +57,12 @@ pub fn cover_for_always(path: &str, pt: f32) -> Option<SharedString> {
                 }
                 o.unwrap().run(|| signal(None::<SharedString>))
             });
+            COVER_RX.with(|rx| {
+                let mut rx = rx.borrow_mut();
+                if rx.is_none() {
+                    *rx = Some(zeo_metadata::covers::subscribe_done());
+                }
+            });
             // 不在 UI 线程执行同步 `cached_list` stat，直接交给后台线程池快速回填。
             COVERS.with(|c| c.borrow_mut().insert(path.to_owned(), (side, cover)));
             zeo_metadata::covers::request(path, side);
@@ -67,15 +73,19 @@ pub fn cover_for_always(path: &str, pt: f32) -> Option<SharedString> {
 }
 
 pub(crate) fn drain_covers() {
-    for (track, side, file) in zeo_metadata::covers::take_done() {
-        if let Some((have, cover)) = COVERS.with(|c| c.borrow().get(&track).copied()) {
-            let keep = side.max(have);
-            if side >= have {
-                COVERS.with(|c| c.borrow_mut().insert(track.clone(), (keep, cover)));
-                // None（无封面 / 来源换掉了）也要写：清掉可能已过期的旧图。
-                cover.set(file.map(SharedString::from));
+    COVER_RX.with(|rx| {
+        let Some(rx) = &*rx.borrow() else {
+            return;
+        };
+        for (track, side, file) in rx.try_iter() {
+            if let Some((have, cover)) = COVERS.with(|c| c.borrow().get(&track).copied()) {
+                let keep = side.max(have);
+                if side >= have {
+                    COVERS.with(|c| c.borrow_mut().insert(track.clone(), (keep, cover)));
+                    // None（无封面 / 来源换掉了）也要写：清掉可能已过期的旧图。
+                    cover.set(file.map(SharedString::from));
+                }
             }
-
         }
-    }
+    });
 }

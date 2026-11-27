@@ -211,9 +211,8 @@ pub fn backfill_added(entries: &[(String, u64)]) {
     let done = with("补入库时间", |conn| {
         let tx = conn.transaction()?;
         {
-            let mut stmt = tx.prepare_cached(
-                "INSERT OR IGNORE INTO added (path, added_at) VALUES (?1, ?2)",
-            )?;
+            let mut stmt =
+                tx.prepare_cached("INSERT OR IGNORE INTO added (path, added_at) VALUES (?1, ?2)")?;
             for (p, modified) in entries {
                 stmt.execute(params![p, *modified as i64])?;
             }
@@ -316,7 +315,8 @@ pub(crate) fn play_stats_on(
     // 利用 plays_time 索引逆序流式迭代计算连续收听天数，遇到断档立即停止。
     let today = zeo_types::config::local_day(zeo_types::config::unix_now(), offset);
     let streak = {
-        let mut stmt = conn.prepare_cached("SELECT played_at FROM plays ORDER BY played_at DESC")?;
+        let mut stmt =
+            conn.prepare_cached("SELECT played_at FROM plays ORDER BY played_at DESC")?;
         let mut rows = stmt.query([])?;
         let mut expected: Option<i64> = None;
         let mut n = 0u64;

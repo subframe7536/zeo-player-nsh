@@ -242,6 +242,12 @@ thread_local! {
     /// 整个 dispose——`COVERS` 清掉的只是 `Copy` 句柄，节点与它们存
     /// 的值要靠 dispose 才真正释放。
     pub(crate) static COVER_OWNER: RefCell<Option<Owner>> = const { RefCell::new(None) };
+    /// 当前界面实例的封面完成事件接收端（每实例独立订阅，避免并行测试互相抢走）。
+    pub(crate) static COVER_RX: RefCell<Option<mpsc::Receiver<zeo_metadata::covers::CoverDone>>> =
+        const { RefCell::new(None) };
+    /// 当前界面实例的封面主色调接收端。
+    pub(crate) static HUE_RX: RefCell<Option<mpsc::Receiver<zeo_metadata::covers::HueDone>>> =
+        const { RefCell::new(None) };
 }
 
 /// 应用更新的进度状态（「关于」页；检查 / 下载在后台线程跑）。

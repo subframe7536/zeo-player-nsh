@@ -136,6 +136,8 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
     STORE.with(|cell| cell.set(Some(s)));
     let (tx, posted) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
     POSTER.with(|p| *p.borrow_mut() = Some(Post(tx)));
+    COVER_RX.with(|rx| *rx.borrow_mut() = Some(zeo_metadata::covers::subscribe_done()));
+    HUE_RX.with(|rx| *rx.borrow_mut() = Some(zeo_metadata::covers::subscribe_dominant()));
     apply_accent();
     remove_update_leftovers();
     auto_check_updates();
@@ -288,8 +290,7 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
             if state.visible && !was {
                 zeo_shell::shown_by_system();
             }
-            if zeo_shell::remembered()
-                && library_store().set_window_placement_mem(state.placement)
+            if zeo_shell::remembered() && library_store().set_window_placement_mem(state.placement)
             {
                 // 400ms 防抖异步落盘，避免拖拽/缩放窗口时在 UI 线程高频同步写 library.json。
                 use std::sync::atomic::{AtomicU64, Ordering};
@@ -518,7 +519,9 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
             if map.is_empty() {
                 return Vec::new();
             }
-            map.iter().map(|(p, (side, _))| (p.clone(), *side)).collect()
+            map.iter()
+                .map(|(p, (side, _))| (p.clone(), *side))
+                .collect()
         });
         if requested.is_empty() {
             return;

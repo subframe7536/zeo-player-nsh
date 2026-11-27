@@ -259,7 +259,9 @@ impl LibraryStore {
                     Some(dest.to_owned())
                 } else {
                     normalized.iter().find_map(|(_, dest, under)| {
-                        t.path.strip_prefix(under).map(|rest| format!("{dest}{sep}{rest}"))
+                        t.path
+                            .strip_prefix(under)
+                            .map(|rest| format!("{dest}{sep}{rest}"))
                     })
                 };
                 let Some(path) = mapped else {
@@ -300,7 +302,8 @@ impl LibraryStore {
                     dirs_touched = true;
                     dest.to_owned()
                 } else if let Some(new_d) = normalized.iter().find_map(|(_, dest, under)| {
-                    d.strip_prefix(under).map(|rest| format!("{dest}{sep}{rest}"))
+                    d.strip_prefix(under)
+                        .map(|rest| format!("{dest}{sep}{rest}"))
                 }) {
                     dirs_touched = true;
                     new_d
