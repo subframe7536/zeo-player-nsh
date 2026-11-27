@@ -221,15 +221,7 @@ pub fn track_row(
     cols: Columns,
     on_play: impl Fn() + 'static,
 ) -> View {
-    let s = store();
-    let current = computed(move || {
-        track.with(|t| {
-            let Some(t) = t else { return false };
-            s.track
-                .with(|now| now.path.as_deref() == Some(t.path.as_str()))
-        })
-    });
-    track_row_selectable(track, number, cols, move || current.get(), |_| {}, on_play)
+    track_row_selectable_inner(track, number, cols, None, |_| {}, on_play)
 }
 
 /// 支持外部控制选中态与点击事件的曲目行变体。
@@ -241,6 +233,24 @@ pub fn track_row_selectable(
     on_press: impl Fn(&PressEvent) + 'static,
     on_play: impl Fn() + 'static,
 ) -> View {
+    track_row_selectable_inner(
+        track,
+        number,
+        cols,
+        Some(Rc::new(selected)),
+        on_press,
+        on_play,
+    )
+}
+
+fn track_row_selectable_inner(
+    track: Memo<Option<TrackEntry>>,
+    number: Memo<String>,
+    cols: Columns,
+    selected: Option<Rc<dyn Fn() -> bool>>,
+    on_press: impl Fn(&PressEvent) + 'static,
+    on_play: impl Fn() + 'static,
+) -> View {
     let s = store();
     let current = computed(move || {
         track.with(|t| {
@@ -249,21 +259,30 @@ pub fn track_row_selectable(
                 .with(|now| now.path.as_deref() == Some(t.path.as_str()))
         })
     });
+    let selected: Rc<dyn Fn() -> bool> = selected.unwrap_or_else(|| Rc::new(move || current.get()));
     let playing = move || current.get() && shown_playing();
     let field = move |f: fn(&TrackEntry) -> String| {
         move || track.with(|t| t.as_ref().map(f).unwrap_or_default())
     };
     let title = field(|t| t.display_title().to_owned());
     let path = move || track.with_untracked(|t| t.as_ref().map(|t| t.path.clone()));
-    let liked = move || track.with(|t| t.as_ref().is_some_and(|t| is_liked(&t.path)));
+    let liked_memo =
+        computed(move || track.with(|t| t.as_ref().is_some_and(|t| is_liked(&t.path))));
+    let liked = move || liked_memo.get();
     let hovering = signal(false);
     // 单击不播放：记下曲目与时间，同一首在 `DOUBLE_CLICK` 内再按一次才播。
     let on_play = Rc::new(on_play);
     let on_play_cell = on_play.clone();
     let last = Rc::new(RefCell::new(None::<(String, Instant)>));
-    let sel_bg = selected.clone();
-    let sel_hover = selected.clone();
-    let sel_state = selected;
+    let sel_bg = {
+        let s = selected.clone();
+        move || s()
+    };
+    let sel_hover = {
+        let s = selected.clone();
+        move || s()
+    };
+    let sel_state = move || selected();
     view()
         .h(px(ROW))
         .flex_row()

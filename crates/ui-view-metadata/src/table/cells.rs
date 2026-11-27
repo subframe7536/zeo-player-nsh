@@ -204,7 +204,7 @@ pub(crate) fn entry_cell_cow<'a>(key: &str, t: &'a TrackEntry) -> Cow<'a, str> {
             _ => Cow::Borrowed(""),
         },
         "pictures" => {
-            if zeo_metadata::covers::find_sidecar(std::path::Path::new(&t.path)).is_some() {
+            if has_sidecar_cached(&t.path, t.stamp) {
                 Cow::Borrowed("文件")
             } else if t.has_art {
                 Cow::Borrowed("内嵌")
@@ -258,4 +258,27 @@ pub(crate) fn compare_text(a: &str, b: &str) -> Ordering {
             .cmp(&b.to_lowercase())
             .then_with(|| a.cmp(b))
     }
+}
+
+/// 按 `(path, stamp)` 缓存侧车封面存在性，避免元数据表格滚动与排序重复执行同步磁盘 stat。
+fn has_sidecar_cached(path: &str, stamp: u64) -> bool {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static CACHE: RefCell<HashMap<String, (u64, bool)>> = RefCell::new(HashMap::new());
+    }
+    CACHE.with(|c| {
+        let mut map = c.borrow_mut();
+        if let Some(&(s, has)) = map.get(path)
+            && s == stamp
+        {
+            return has;
+        }
+        let has = zeo_metadata::covers::find_sidecar(std::path::Path::new(path)).is_some();
+        if map.len() > 20_000 {
+            map.clear();
+        }
+        map.insert(path.to_owned(), (stamp, has));
+        has
+    })
 }

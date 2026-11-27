@@ -65,11 +65,13 @@ pub(crate) fn scan(store: &LibraryStore) -> usize {
     store.done.store(0, Ordering::Relaxed);
     store.total.store(0, Ordering::Relaxed);
     let config = store.config();
-    let mut files: Vec<PathBuf> = Vec::new();
+    let mut files: Vec<(PathBuf, Option<std::fs::Metadata>)> = Vec::new();
     let mut dirs: Vec<String> = Vec::new();
+    let mut sidecar_stems: std::collections::HashSet<(PathBuf, String)> =
+        std::collections::HashSet::new();
     for root in &config.roots {
         (*store.current.lock().unwrap()).clone_from(root);
-        collect_audio_and_dirs(Path::new(root), &mut files, &mut dirs);
+        collect_audio_and_dirs(Path::new(root), &mut files, &mut dirs, &mut sidecar_stems);
     }
     dirs.sort_unstable();
     dirs.dedup();
@@ -77,30 +79,66 @@ pub(crate) fn scan(store: &LibraryStore) -> usize {
     store.total.store(files.len(), Ordering::Relaxed);
     let cache = MetaCache::global();
     cache.begin_batch();
-    let mut entries: Vec<TrackEntry> = Vec::with_capacity(files.len());
-    for (i, path) in files.iter().enumerate() {
-        if let Some(name) = path.file_name() {
-            *store.current.lock().unwrap() = name.to_string_lossy().into_owned();
+
+    let workers = std::thread::available_parallelism()
+        .map_or(2, |n| n.get())
+        .clamp(1, 4)
+        .min(files.len().max(1));
+    let next_idx = std::sync::atomic::AtomicUsize::new(0);
+    let collected: std::sync::Mutex<Vec<TrackEntry>> =
+        std::sync::Mutex::new(Vec::with_capacity(files.len()));
+    let sidecar_ref = &sidecar_stems;
+    let files_ref = &files;
+    let config_ref = &config;
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                let mut local_entries = Vec::new();
+                loop {
+                    let i = next_idx.fetch_add(1, Ordering::Relaxed);
+                    if i >= files_ref.len() {
+                        break;
+                    }
+                    let (path, meta) = &files_ref[i];
+                    if i % 8 == 0
+                        && let Some(name) = path.file_name()
+                    {
+                        *store.current.lock().unwrap() = name.to_string_lossy().into_owned();
+                    }
+                    if let Some(entry) = read_entry_with_meta(path, meta.clone(), config_ref)
+                        && passes(entry.duration, entry.size_bytes, config_ref)
+                    {
+                        let has_sidecar =
+                            path.parent()
+                                .zip(path.file_stem())
+                                .is_some_and(|(dir, stem)| {
+                                    sidecar_ref.contains(&(
+                                        dir.to_path_buf(),
+                                        stem.to_string_lossy().to_ascii_lowercase(),
+                                    ))
+                                });
+                        if entry.has_art || has_sidecar {
+                            zeo_metadata::covers::request_low(&entry.path);
+                        }
+                        local_entries.push(entry);
+                    }
+                    store.done.fetch_add(1, Ordering::Relaxed);
+                }
+                if !local_entries.is_empty() {
+                    collected.lock().unwrap().extend(local_entries);
+                }
+            });
         }
-        if let Some(entry) = read_entry(path, &config)
-            && passes(entry.duration, entry.size_bytes, &config)
-        {
-            // 封面缩略图交给后台线程池预生成（低优先级，界面可见的请求
-            // 插队）：扫描完浏览列表不用再转圈。本地同名图片也算有封面。
-            if entry.has_art || zeo_metadata::covers::find_sidecar(Path::new(&entry.path)).is_some()
-            {
-                zeo_metadata::covers::request_low(&entry.path);
-            }
-            entries.push(entry);
-        }
-        store.done.store(i + 1, Ordering::Relaxed);
-    }
+    });
+
+    let mut entries = collected.into_inner().unwrap();
     cache.end_batch();
     // 已不存在的文件从缓存和数据库里去掉；被过滤的保留元数据（阈值改回
     // 就不用重读标签）。
     let keep: std::collections::HashSet<String> = files
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|(p, _)| p.to_string_lossy().into_owned())
         .collect();
     cache.retain(&keep);
     sort_tracks(&mut entries);
@@ -125,7 +163,14 @@ pub(crate) fn rebuild(store: &LibraryStore) -> usize {
     scan(store)
 }
 
-fn collect_audio_and_dirs(root: &Path, files: &mut Vec<PathBuf>, dirs: &mut Vec<String>) {
+const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp"];
+
+fn collect_audio_and_dirs(
+    root: &Path,
+    files: &mut Vec<(PathBuf, Option<std::fs::Metadata>)>,
+    dirs: &mut Vec<String>,
+    sidecar_stems: &mut std::collections::HashSet<(PathBuf, String)>,
+) {
     for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
         .into_iter()
@@ -145,8 +190,19 @@ fn collect_audio_and_dirs(root: &Path, files: &mut Vec<PathBuf>, dirs: &mut Vec<
             .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.to_ascii_lowercase());
-        if ext.is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.as_str())) {
-            files.push(entry.into_path());
+        let Some(ext) = ext else {
+            continue;
+        };
+        if AUDIO_EXTENSIONS.contains(&ext.as_str()) {
+            let meta = entry.metadata().ok();
+            files.push((entry.into_path(), meta));
+        } else if IMAGE_EXTENSIONS.contains(&ext.as_str())
+            && let (Some(dir), Some(stem)) = (entry.path().parent(), entry.path().file_stem())
+        {
+            sidecar_stems.insert((
+                dir.to_path_buf(),
+                stem.to_string_lossy().to_ascii_lowercase(),
+            ));
         }
     }
 }
@@ -160,6 +216,19 @@ fn passes(duration: f64, size_bytes: u64, config: &LibraryConfig) -> bool {
 /// 读一个文件的索引条目；读不出标签/属性的文件跳过。
 pub(crate) fn read_entry(path: &Path, config: &LibraryConfig) -> Option<TrackEntry> {
     let entry = MetaCache::global().entry(path).ok()?;
+    Some(track_entry(
+        path.to_string_lossy().into_owned(),
+        &entry,
+        config,
+    ))
+}
+
+pub(crate) fn read_entry_with_meta(
+    path: &Path,
+    meta: Option<std::fs::Metadata>,
+    config: &LibraryConfig,
+) -> Option<TrackEntry> {
+    let entry = MetaCache::global().entry_with_meta(path, meta).ok()?;
     Some(track_entry(
         path.to_string_lossy().into_owned(),
         &entry,

@@ -58,11 +58,18 @@ fn events() -> &'static Mutex<Sender<notify::Event>> {
                 loop {
                     // 等第一批变化。
                     let Ok(first) = rx.recv() else { return };
+                    const MAX_DEBOUNCE: Duration = Duration::from_secs(10);
                     let mut batch = vec![first];
-                    let mut last = Instant::now();
-                    // 收集到变化停下来为止。
+                    let started = Instant::now();
+                    let mut last = started;
+                    // 收集到变化停下来为止，但设置最大等待上限避免持续写入导致事件无限积压。
                     loop {
-                        match rx.recv_timeout(QUIET.saturating_sub(last.elapsed())) {
+                        let remain_quiet = QUIET.saturating_sub(last.elapsed());
+                        let remain_max = MAX_DEBOUNCE.saturating_sub(started.elapsed());
+                        if remain_max.is_zero() {
+                            break;
+                        }
+                        match rx.recv_timeout(remain_quiet.min(remain_max)) {
                             Ok(event) => {
                                 batch.push(event);
                                 last = Instant::now();
@@ -185,21 +192,72 @@ fn pair_moves(
 ) -> (Vec<(String, String)>, bool) {
     gones.sort();
     gones.dedup();
+    // 预建路径索引与按 (size, modified) 索引的到达文件表：每个 present 只 stat 一次，
+    // 避免批量重命名时的 O(G * P) stat 风暴与 O(G * T) 线性扫描。
+    let track_by_path: std::collections::HashMap<&str, &TrackEntry> =
+        tracks.iter().map(|t| (t.path.as_str(), t)).collect();
+    let mut file_presents: std::collections::HashMap<(u64, u64), Vec<&String>> =
+        std::collections::HashMap::new();
+    let mut dir_presents: Vec<&String> = Vec::new();
+    for p in presents {
+        let Ok(meta) = std::fs::metadata(p) else {
+            continue;
+        };
+        if meta.is_file() {
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs());
+            file_presents
+                .entry((meta.len(), modified))
+                .or_default()
+                .push(p);
+        } else if meta.is_dir() {
+            dir_presents.push(p);
+        }
+    }
+
     let mut pairs: Vec<(String, String)> = Vec::new();
+    let mut taken_exact: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut taken_dirs: Vec<String> = Vec::new();
     let mut dirty = false;
+
     for from in gones.iter() {
         if pairs.iter().any(|(f, _)| is_under(from, f)) {
             continue;
         }
-        match find_dest(from, presents, &pairs, tracks) {
-            Some(to) => pairs.push((from.clone(), to)),
+        let matched = if let Some(t) = track_by_path.get(from.as_str()) {
+            file_presents
+                .get(&(t.size_bytes, t.modified))
+                .and_then(|cands| {
+                    let mut hit = cands.iter().filter(|p| {
+                        !taken_exact.contains(p.as_str())
+                            && !taken_dirs.iter().any(|d| is_under(p, d))
+                    });
+                    let only = hit.next()?;
+                    hit.next().is_none().then(|| (*only).clone())
+                })
+        } else if !dir_presents.is_empty() {
+            find_dest(from, presents, &pairs, tracks)
+        } else {
+            None
+        };
+        match matched {
+            Some(to) => {
+                if !track_by_path.contains_key(from.as_str()) {
+                    taken_dirs.push(to.clone());
+                }
+                taken_exact.insert(to.clone());
+                pairs.push((from.clone(), to));
+            }
             None => dirty = true,
         }
     }
     // 没配走的「到达」路径是新内容（从外面移进来的）：留给重扫。
     if presents
         .iter()
-        .any(|p| !pairs.iter().any(|(_, t)| p == t || is_under(p, t)))
+        .any(|p| !taken_exact.contains(p.as_str()) && !taken_dirs.iter().any(|d| is_under(p, d)))
     {
         dirty = true;
     }
@@ -247,13 +305,13 @@ fn reconcile(events: &[notify::Event], lib: &LibraryStore) -> usize {
             _ => dirty = true,
         }
     }
-    for (from, to) in moves {
-        lib.move_path(&from, &to);
+    if !moves.is_empty() {
+        lib.move_paths(&moves);
     }
     let (pairs, pair_dirty) = pair_moves(&mut gones, &presents, &lib.tracks());
     dirty |= pair_dirty;
-    for (from, to) in pairs {
-        lib.move_path(&from, &to);
+    if !pairs.is_empty() {
+        lib.move_paths(&pairs);
     }
     if dirty {
         lib.scan();

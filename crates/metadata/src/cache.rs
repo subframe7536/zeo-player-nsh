@@ -73,6 +73,22 @@ impl MetaCache {
         self.pending.lock().unwrap().retain(|(p, _)| *p != key);
     }
 
+    /// 批量移除多条缓存（批量删除记录）。
+    pub fn remove_batch(&self, paths: &[String]) {
+        if paths.is_empty() {
+            return;
+        }
+        let drop_set: HashSet<&str> = paths.iter().map(String::as_str).collect();
+        self.entries
+            .lock()
+            .unwrap()
+            .retain(|p, _| !drop_set.contains(p.as_str()));
+        self.pending
+            .lock()
+            .unwrap()
+            .retain(|(p, _)| !drop_set.contains(p.as_str()));
+    }
+
     /// 移除 `path` 下（含自身）的全部条目（文件夹删除 / 根摘除）：连
     /// 待写队列与数据库行一起清，文件还在时下次扫描会重新入库。
     pub fn remove_under(&self, path: &str) {
@@ -199,31 +215,47 @@ impl MetaCache {
             let mut info = (*entry.value).clone();
             info.art_hue = hue;
             entry.value = Arc::new(info);
-            (key, entry.clone())
+            (key.clone(), entry.clone())
         };
-        let flush = {
-            let mut pending = self.pending.lock().unwrap();
-            pending.push(row);
-            !self.batching.load(Ordering::Relaxed) || pending.len() >= FLUSH_AT
-        };
-        if flush {
-            self.flush();
+        if self.batching.load(Ordering::Relaxed) {
+            let flush = {
+                let mut pending = self.pending.lock().unwrap();
+                pending.push(row);
+                pending.len() >= FLUSH_AT
+            };
+            if flush {
+                self.flush();
+            }
+        } else if let Some((h, sat)) = hue {
+            // 非扫描批处理期仅异步更新两列，避免 37 列整行 INSERT OR REPLACE。
+            zeo_db::later(move || zeo_db::update_art_hue_batch(&[(key, stamp, h, sat)]));
+        } else {
+            zeo_db::later(move || zeo_db::set_meta_hue(&key, stamp, None));
         }
     }
 
     /// 同 [`Self::get`]，连同文件指纹、大小与修改时间。
     pub fn entry(&self, path: &Path) -> Result<CacheEntry, String> {
-        let key = path.to_string_lossy().into_owned();
         let file = std::fs::metadata(path).ok();
+        self.entry_with_meta(path, file)
+    }
+
+    /// 复用调用方已取得的 `Metadata`（如 `WalkDir` 遍历结果），省去一次重复 `stat`。
+    pub fn entry_with_meta(
+        &self,
+        path: &Path,
+        file: Option<std::fs::Metadata>,
+    ) -> Result<CacheEntry, String> {
+        let key = path.to_string_lossy().into_owned();
         let stamp = file.as_ref().map_or(0, file_stamp);
         if let Some(entry) = self.entries.lock().unwrap().get(&key)
             && entry.stamp == stamp
         {
             return Ok(entry.clone());
         }
-        // 内存条目可能被隐藏丢掉：先试数据库行（指纹一致直接用，免
-        // 重读文件）；已在库的条目不进 `pending` 再写一遍。
-        if let Some(entry) = zeo_db::load_meta_row(&key)
+        // 仅当内存条目曾被隐藏丢弃时才回查 SQLite，避免冷扫描每首新文件做无效单行查库。
+        if self.dropped.load(Ordering::Relaxed)
+            && let Some(entry) = zeo_db::load_meta_row(&key)
             && entry.stamp == stamp
         {
             self.entries

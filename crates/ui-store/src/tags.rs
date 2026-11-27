@@ -41,14 +41,17 @@ pub fn save_tags(
         if is_current {
             player().reload_current(position, playing);
         }
+        let updated_meta = if result.is_ok() && is_current {
+            MetaCache::global().get(Path::new(&path)).ok()
+        } else {
+            None
+        };
         post.post(move || {
-            // 当前曲目的详情元数据（`s.meta`）只在换曲时重读——保存后
-            // 同一路径不触发，这里手动刷。
-            if result.is_ok()
+            // 当前曲目的详情元数据（`s.meta`）已在后台线程读取，直接写入信号避免 UI 线程读盘/查库。
+            if let Some(meta) = updated_meta
                 && store()
                     .track
                     .with(|t| t.path.as_deref() == Some(path.as_str()))
-                && let Ok(meta) = MetaCache::global().get(Path::new(&path))
             {
                 store().meta.set(Some(Same(meta)));
             }
@@ -121,11 +124,22 @@ pub fn save_tags_batch(
         if !ok_paths.is_empty() {
             library_store().refresh_paths(&ok_paths);
         }
+        let cur_meta = current.as_ref().and_then(|cur| {
+            if ok_paths.iter().any(|p| p == cur) {
+                MetaCache::global()
+                    .get(Path::new(cur))
+                    .ok()
+                    .map(|m| (cur.clone(), m))
+            } else {
+                None
+            }
+        });
         post.post(move || {
-            // 当前曲目写过：详情元数据手动刷（`s.meta` 只在换曲时重读）。
-            if let Some(cur) = store().track.with(|t| t.path.clone())
-                && ok_paths.iter().any(|p| *p == cur)
-                && let Ok(meta) = MetaCache::global().get(Path::new(&cur))
+            // 当前曲目写过：详情元数据已在后台读取，直接写信号避免 UI 线程同步 I/O。
+            if let Some((cur_path, meta)) = cur_meta
+                && store()
+                    .track
+                    .with(|t| t.path.as_deref() == Some(cur_path.as_str()))
             {
                 store().meta.set(Some(Same(meta)));
             }
@@ -243,41 +257,52 @@ pub fn restore_tag_batch(
     done: impl FnOnce(BatchSaved) + Send + 'static,
 ) -> usize {
     use zeo_metadata::write::{CoverEdit, Edit, TagEdits, TagField};
-    let items: Vec<(String, TagEdits)> = zeo_db::tag_snapshots(batch, only)
-        .into_iter()
-        .map(|snap| {
-            let fields = snap
-                .fields
-                .iter()
-                .filter_map(|(id, old)| {
-                    let field = TagField::from_id(id)?;
-                    let edit = if old.is_empty() {
-                        Edit::Clear
-                    } else {
-                        Edit::Set(old.clone())
-                    };
-                    Some((field, edit))
-                })
-                .collect();
-            let cover = snap.cover.map(|old| match old {
-                Some((data, mime)) => CoverEdit::Replace { data, mime },
-                None => CoverEdit::Remove,
-            });
-            (
-                snap.path,
-                TagEdits {
-                    fields,
-                    cover,
-                    ..TagEdits::default()
-                },
-            )
-        })
-        .collect();
-    let count = items.len();
+    let count = only.len();
     if count == 0 {
         done(BatchSaved::default());
-    } else {
-        save_tags_batch(items, "还原", done);
+        return 0;
     }
+    let only = only.clone();
+    let post = poster();
+    // 将含封面 BLOB 的 SQLite 快照查询移至后台线程，避免阻塞 UI 线程。
+    std::thread::spawn(move || {
+        let items: Vec<(String, TagEdits)> = zeo_db::tag_snapshots(batch, &only)
+            .into_iter()
+            .map(|snap| {
+                let fields = snap
+                    .fields
+                    .iter()
+                    .filter_map(|(id, old)| {
+                        let field = TagField::from_id(id)?;
+                        let edit = if old.is_empty() {
+                            Edit::Clear
+                        } else {
+                            Edit::Set(old.clone())
+                        };
+                        Some((field, edit))
+                    })
+                    .collect();
+                let cover = snap.cover.map(|old| match old {
+                    Some((data, mime)) => CoverEdit::Replace { data, mime },
+                    None => CoverEdit::Remove,
+                });
+                (
+                    snap.path,
+                    TagEdits {
+                        fields,
+                        cover,
+                        ..TagEdits::default()
+                    },
+                )
+            })
+            .collect();
+        post.post(move || {
+            if items.is_empty() {
+                done(BatchSaved::default());
+            } else {
+                save_tags_batch(items, "还原", done);
+            }
+        });
+    });
     count
 }

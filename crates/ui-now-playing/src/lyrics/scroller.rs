@@ -153,7 +153,12 @@ pub(crate) fn lyrics_scroller(blur_enabled: bool) -> View {
                         row_fades[i].set(fade);
                     }
                     if let Some(blur_sig) = row_blurs.get(i) {
-                        let b = if is_hovered { 0.0 } else { blur_at(center, vp) };
+                        // 完全淡出或视口外缓冲区行跳过离屏模糊更新，避免无意义 draw_layered 重绘。
+                        let b = if is_hovered || fade <= 0.0 {
+                            0.0
+                        } else {
+                            blur_at(center, vp)
+                        };
                         if (blur_sig.get_untracked() - b).abs() > 1e-3 {
                             blur_sig.set(b);
                         }
@@ -313,7 +318,7 @@ pub(crate) fn lyrics_scroller(blur_enabled: bool) -> View {
         let scroll_to_line = scroll_to_line.clone();
         effect(move || {
             let ready = viewport.get() > 0.0 && laid_ready.get();
-            let time = s.playback.with(|p| p.time);
+            let time = s.playback_time.get();
             let index = s.active_line.get();
             // 首次定位由上面的任务做；定位好之前不跟随。
             if !ready || !placed.get() {

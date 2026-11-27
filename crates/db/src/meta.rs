@@ -211,14 +211,23 @@ pub(crate) fn remove_meta_on(conn: &Connection, path: &str) -> rusqlite::Result<
     conn.execute("DELETE FROM lyrics_offsets WHERE path = ?1", [path])?;
     conn.execute("DELETE FROM waveforms WHERE path = ?1", [path])?;
     conn.execute("DELETE FROM added WHERE path = ?1", [path])?;
-    conn.execute("DELETE FROM tag_snapshots WHERE path = ?1", [path])?;
+    let removed_snaps = conn.execute("DELETE FROM tag_snapshots WHERE path = ?1", [path])?;
+    if removed_snaps > 0 {
+        conn.execute(
+            "DELETE FROM tag_batches WHERE id NOT IN (SELECT DISTINCT batch FROM tag_snapshots)",
+            [],
+        )?;
+    }
     Ok(())
 }
 
 pub(crate) fn remove_meta_under_on(conn: &Connection, path: &str) -> rusqlite::Result<()> {
     let sep = std::path::MAIN_SEPARATOR;
+    let next_sep = char::from_u32(sep as u32 + 1).expect("valid next separator char");
     let trimmed = path.trim_end_matches(sep);
-    let under = format!("{trimmed}{sep}");
+    let lower = format!("{trimmed}{sep}");
+    let upper = format!("{trimmed}{next_sep}");
+    let mut removed_snaps = 0;
     for table in [
         "tracks",
         "lyrics_offsets",
@@ -226,9 +235,18 @@ pub(crate) fn remove_meta_under_on(conn: &Connection, path: &str) -> rusqlite::R
         "added",
         "tag_snapshots",
     ] {
+        let n = conn.execute(
+            &format!("DELETE FROM {table} WHERE path = ?1 OR (path >= ?2 AND path < ?3)"),
+            params![trimmed, lower, upper],
+        )?;
+        if table == "tag_snapshots" {
+            removed_snaps = n;
+        }
+    }
+    if removed_snaps > 0 {
         conn.execute(
-            &format!("DELETE FROM {table} WHERE path = ?1 OR substr(path, 1, ?2) = ?3"),
-            params![trimmed, under.len() as i64, under],
+            "DELETE FROM tag_batches WHERE id NOT IN (SELECT DISTINCT batch FROM tag_snapshots)",
+            [],
         )?;
     }
     Ok(())
@@ -236,12 +254,71 @@ pub(crate) fn remove_meta_under_on(conn: &Connection, path: &str) -> rusqlite::R
 
 /// 删掉 `path` 的元数据行（界面「删除记录」）。
 pub fn remove_meta(path: &str) {
-    with("删除元数据", |conn| remove_meta_on(conn, path));
+    with("删除元数据", |conn| {
+        let tx = conn.transaction()?;
+        remove_meta_on(&tx, path)?;
+        tx.commit()
+    });
+}
+
+/// 批量删掉多条路径的元数据行（合并为单个事务）。
+pub fn remove_meta_batch(paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+    with("批量删除元数据", |conn| {
+        let tx = conn.transaction()?;
+        let mut removed_snaps = 0usize;
+        {
+            let mut del_tracks = tx.prepare_cached("DELETE FROM tracks WHERE path = ?1")?;
+            let mut del_lyrics = tx.prepare_cached("DELETE FROM lyrics_offsets WHERE path = ?1")?;
+            let mut del_wave = tx.prepare_cached("DELETE FROM waveforms WHERE path = ?1")?;
+            let mut del_added = tx.prepare_cached("DELETE FROM added WHERE path = ?1")?;
+            let mut del_snaps = tx.prepare_cached("DELETE FROM tag_snapshots WHERE path = ?1")?;
+            for path in paths {
+                del_tracks.execute([path])?;
+                del_lyrics.execute([path])?;
+                del_wave.execute([path])?;
+                del_added.execute([path])?;
+                removed_snaps += del_snaps.execute([path])?;
+            }
+        }
+        if removed_snaps > 0 {
+            tx.execute(
+                "DELETE FROM tag_batches WHERE id NOT IN (SELECT DISTINCT batch FROM tag_snapshots)",
+                [],
+            )?;
+        }
+        tx.commit()
+    });
 }
 
 /// 删掉 `path` 下（含自身）的元数据行（文件夹删除 / 根摘除）。
 pub fn remove_meta_under(path: &str) {
-    with("删除元数据", |conn| remove_meta_under_on(conn, path));
+    with("删除元数据", |conn| {
+        let tx = conn.transaction()?;
+        remove_meta_under_on(&tx, path)?;
+        tx.commit()
+    });
+}
+
+/// 仅更新封面主色调两列（避免 37 列整行 INSERT OR REPLACE）。
+pub fn update_art_hue_batch(rows: &[(String, u64, f32, f32)]) {
+    if rows.is_empty() {
+        return;
+    }
+    with("更新封面色调", |conn| {
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare_cached(
+                "UPDATE tracks SET art_hue = ?2, art_sat = ?3 WHERE path = ?1 AND stamp = ?4",
+            )?;
+            for (path, stamp, hue, sat) in rows {
+                stmt.execute(params![path, *hue as f64, *sat as f64, *stamp as i64])?;
+            }
+        }
+        tx.commit()
+    });
 }
 
 pub(crate) fn move_meta_on(

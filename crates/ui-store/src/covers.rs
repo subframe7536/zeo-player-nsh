@@ -22,7 +22,7 @@ pub fn cover_for(path: &str, pt: f32) -> Option<SharedString> {
 /// 行等封面槽位整个移除（各处用 `when(covers_on, …)` 包着），不再画
 /// 首字占位图。
 pub fn covers_on() -> bool {
-    store().library.with(|l| l.config.show_covers)
+    store().covers_on.get()
 }
 
 /// 与 [`cover_for`] 相同但不受「列表显示封面」开关影响：播放条的当前
@@ -57,14 +57,14 @@ pub fn cover_for_always(path: &str, pt: f32) -> Option<SharedString> {
                 }
                 o.unwrap().run(|| signal(None::<SharedString>))
             });
-            let mut have = side;
-            // 封面已在磁盘缓存（扫描预热 / 队尾预载 / 播过）就先填上，
-            // 免得闪一次占位符；请求照旧入队（色调补算 / 指纹变更重算）。
-            if let Some((s, file)) = zeo_metadata::covers::cached_list(Path::new(path)) {
-                cover.set(Some(file.to_string_lossy().into_owned().into()));
-                have = have.max(s);
-            }
-            COVERS.with(|c| c.borrow_mut().insert(path.to_owned(), (have, cover)));
+            COVER_RX.with(|rx| {
+                let mut rx = rx.borrow_mut();
+                if rx.is_none() {
+                    *rx = Some(zeo_metadata::covers::subscribe_done());
+                }
+            });
+            // 不在 UI 线程执行同步 `cached_list` stat，直接交给后台线程池快速回填。
+            COVERS.with(|c| c.borrow_mut().insert(path.to_owned(), (side, cover)));
             zeo_metadata::covers::request(path, side);
             cover
         }
@@ -73,17 +73,19 @@ pub fn cover_for_always(path: &str, pt: f32) -> Option<SharedString> {
 }
 
 pub(crate) fn drain_covers() {
-    for (track, side, file) in zeo_metadata::covers::take_done() {
-        if let Some((have, cover)) = COVERS.with(|c| c.borrow().get(&track).copied()) {
-            let keep = side.max(have);
-            if side >= have {
-                COVERS.with(|c| c.borrow_mut().insert(track.clone(), (keep, cover)));
-                // None（无封面 / 来源换掉了）也要写：清掉可能已过期的旧图。
-                cover.set(file.map(SharedString::from));
+    COVER_RX.with(|rx| {
+        let Some(rx) = &*rx.borrow() else {
+            return;
+        };
+        for (track, side, file) in rx.try_iter() {
+            if let Some((have, cover)) = COVERS.with(|c| c.borrow().get(&track).copied()) {
+                let keep = side.max(have);
+                if side >= have {
+                    COVERS.with(|c| c.borrow_mut().insert(track.clone(), (keep, cover)));
+                    // None（无封面 / 来源换掉了）也要写：清掉可能已过期的旧图。
+                    cover.set(file.map(SharedString::from));
+                }
             }
-            // 每个音频文件最多一份列表封面：信号已换到大文件（或升档
-            // 请求已记下），小文件删掉。
-            zeo_metadata::covers::prune_smaller(Path::new(&track), keep);
         }
-    }
+    });
 }

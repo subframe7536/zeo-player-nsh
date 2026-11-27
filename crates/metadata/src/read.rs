@@ -1,7 +1,9 @@
 use std::path::Path;
 
+use lofty::config::ParseOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::prelude::ItemKey;
+use lofty::probe::Probe;
 use lofty::tag::Tag;
 
 use crate::{MetaInfo, ReplayGain};
@@ -39,7 +41,17 @@ pub(crate) fn rg_from_tagged(tagged: &lofty::file::TaggedFile) -> ReplayGain {
 
 /// 独立按路径读一次 ReplayGain（引擎对迁移前的老行回退时用）。
 pub fn read_replaygain(path: &Path) -> ReplayGain {
-    lofty::read_from_path(path)
+    Probe::open(path)
+        .ok()
+        .and_then(|p| {
+            p.options(
+                ParseOptions::new()
+                    .read_properties(false)
+                    .read_cover_art(false),
+            )
+            .read()
+            .ok()
+        })
         .map(|tagged| rg_from_tagged(&tagged))
         .unwrap_or_default()
 }
@@ -207,7 +219,11 @@ pub fn read_meta(path: &Path) -> Result<MetaInfo, String> {
 
 /// 按需读取内嵌封面（原始字节 + MIME）。不进缓存：用完即释放。
 pub fn read_artwork(path: &Path) -> Option<(Vec<u8>, Option<String>)> {
-    let tagged = lofty::read_from_path(path).ok()?;
+    let tagged = Probe::open(path)
+        .ok()?
+        .options(ParseOptions::new().read_properties(false))
+        .read()
+        .ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
     let picture = tag
         .pictures()
@@ -223,7 +239,15 @@ pub fn read_artwork(path: &Path) -> Option<(Vec<u8>, Option<String>)> {
 /// 全局元数据缓存 / 数据库——全库常驻歌词文本太占内存，只缓存播放
 /// 位置附近的几首（`engine::Meta::lyrics`）。
 pub fn read_lyrics(path: &Path) -> Option<String> {
-    let tagged = lofty::read_from_path(path).ok()?;
+    let tagged = Probe::open(path)
+        .ok()?
+        .options(
+            ParseOptions::new()
+                .read_properties(false)
+                .read_cover_art(false),
+        )
+        .read()
+        .ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
     first(tag, ItemKey::Lyrics).or_else(|| first(tag, ItemKey::UnsyncLyrics))
 }

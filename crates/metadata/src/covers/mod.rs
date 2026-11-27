@@ -32,9 +32,23 @@ pub const BACKDROP: u32 = 64;
 /// 本地同名封面：同目录 `<曲名>.jpg/jpeg/png/webp`（大小写后缀都试）。
 const SIDE_EXTS: [&str; 8] = ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"];
 
-/// `path` 的本地同名图片文件（存在与否只按文件名，不解码）。
+/// `path` 的本地同名图片文件（存在与否只按文件名，不解码；命中首个即短路返回）。
 pub fn find_sidecar(path: &Path) -> Option<PathBuf> {
-    sidecar_files(path).into_iter().next()
+    let stem = path.file_stem()?.to_string_lossy();
+    let dir = path.parent()?;
+    // macOS / Windows 默认大小写不敏感文件系统无需重复探测大写后缀。
+    let exts: &[&str] = if cfg!(any(target_os = "macos", target_os = "windows")) {
+        &SIDE_EXTS[..4]
+    } else {
+        &SIDE_EXTS
+    };
+    for ext in exts {
+        let candidate = dir.join(format!("{stem}.{ext}"));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 /// `path` 的全部同名图片文件。`find_sidecar` 只回读取序的第一张；

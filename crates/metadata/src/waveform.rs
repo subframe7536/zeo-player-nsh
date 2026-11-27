@@ -6,8 +6,9 @@
 //! 3. 重采样到 [`BARS`] 根：每根取所覆盖块的 RMS 均值，除以参考峰值并截到
 //!    0..1，再映射到 `min..max`（默认 0.1..0.9）。
 
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use crate::codec::Source;
 
@@ -88,18 +89,53 @@ pub fn waveform(path: &Path) -> Result<Arc<Vec<f64>>, String> {
         let bars = Arc::new(f32s.into_iter().map(|v| v as f64).collect::<Vec<f64>>());
         return Ok(remember(key, stamp, bars));
     }
-    let bars = Arc::new(compute(path, WaveformOptions::default())?);
-    // f64 → f32 写库（DB 写失败 `with` 内已打日志，这里不再管）。
-    let f32s: Vec<f32> = bars.iter().map(|v| *v as f32).collect();
-    zeo_db::set_waveform_bars(&key, stamp, &f32s);
-    Ok(remember(key, stamp, bars))
+    // 单飞去重：同 (path, stamp) 并发请求共享一次全文件解码。
+    type Slot = Arc<(Mutex<Option<Result<Arc<Vec<f64>>, String>>>, Condvar)>;
+    static IN_FLIGHT: OnceLock<Mutex<HashMap<(String, u64), Slot>>> = OnceLock::new();
+    let map = IN_FLIGHT.get_or_init(|| Mutex::new(HashMap::new()));
+    let flight_key = (key.clone(), stamp);
+    let (slot, leader) = {
+        let mut guard = map.lock().unwrap();
+        if let Some(existing) = guard.get(&flight_key) {
+            (existing.clone(), false)
+        } else {
+            let s = Arc::new((Mutex::new(None), Condvar::new()));
+            guard.insert(flight_key.clone(), s.clone());
+            (s, true)
+        }
+    };
+    if !leader {
+        let (m, cv) = &*slot;
+        let mut done = m.lock().unwrap();
+        while done.is_none() {
+            done = cv.wait(done).unwrap();
+        }
+        return done.as_ref().unwrap().clone();
+    }
+    let res = compute(path, WaveformOptions::default()).map(|v| {
+        let bars = Arc::new(v);
+        let f32s: Vec<f32> = bars.iter().map(|v| *v as f32).collect();
+        zeo_db::set_waveform_bars(&key, stamp, &f32s);
+        remember(key, stamp, bars)
+    });
+    {
+        let (m, cv) = &*slot;
+        *m.lock().unwrap() = Some(res.clone());
+        cv.notify_all();
+    }
+    map.lock().unwrap().remove(&flight_key);
+    res
 }
 
 /// 解码，累加第一声道每 [`GRAIN`] 个样本的平方和，然后算 RMS 块与波形。
 fn compute(path: &Path, options: WaveformOptions) -> Result<Vec<f64>, String> {
     let mut source = Source::open(path)?;
     let channels = source.channels.max(1);
-    let mut grains: Vec<(f64, u32)> = Vec::new();
+    // 动态倍增粒度合并：长音频（如 1 小时 96kHz）内存恒定在 ~128KB 以内，
+    // 不会随曲目时长线性膨胀到数十 MB。
+    const MAX_GRAINS: usize = PRECOMPUTE_BLOCKS * 4;
+    let mut grains: Vec<(f64, u32)> = Vec::with_capacity(PRECOMPUTE_BLOCKS);
+    let mut grain_size: u32 = GRAIN as u32;
     let mut sum = 0.0_f64;
     let mut count = 0_u32;
     while let Some(block) = source.next_block()? {
@@ -108,10 +144,20 @@ fn compute(path: &Path, options: WaveformOptions) -> Result<Vec<f64>, String> {
             let s = *sample as f64;
             sum += s * s;
             count += 1;
-            if count as usize == GRAIN {
+            if count == grain_size {
                 grains.push((sum, count));
                 sum = 0.0;
                 count = 0;
+                if grains.len() >= MAX_GRAINS {
+                    let compacted = grains.len() / 2;
+                    for i in 0..compacted {
+                        let a = grains[i * 2];
+                        let b = grains[i * 2 + 1];
+                        grains[i] = (a.0 + b.0, a.1 + b.1);
+                    }
+                    grains.truncate(compacted);
+                    grain_size = grain_size.saturating_mul(2);
+                }
             }
         }
     }

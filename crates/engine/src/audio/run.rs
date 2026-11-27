@@ -50,8 +50,18 @@ pub(crate) fn run(
                 None => retry_at = Some(Instant::now() + Duration::from_secs(1)),
             }
         }
-        // 1. 命令
+        // 1. 命令（先批量取出并合并连续 Seek，避免快速拖动/连按积压）
+        let mut pending_cmds = Vec::new();
         while let Some(cmd) = waiting.take().or_else(|| rx.try_recv().ok()) {
+            if matches!(cmd, EngineCmd::Seek(_))
+                && matches!(pending_cmds.last(), Some(EngineCmd::Seek(_)))
+            {
+                *pending_cmds.last_mut().unwrap() = cmd;
+            } else {
+                pending_cmds.push(cmd);
+            }
+        }
+        for cmd in pending_cmds {
             // 会打断声音的操作：先淡出到静音，操作完再淡入（暂停 / 停止则停在静音）。
             let playing = shared.playing.load(Ordering::Relaxed);
             let interrupts = match &cmd {
@@ -173,18 +183,18 @@ pub(crate) fn run(
             // 播放统计：越过阈值的那一刻记一次（不等播完——中途退出也不丢
             // 已记的这次）。`listened` 只由输出回调推进的实际播出帧数
             // 累加，拖动进度条不算听过。
-            if !l.counted {
-                let t = shared.track.lock().unwrap().clone();
+            if playing && !l.counted {
                 let rate = shared.dev_rate.load(Ordering::Relaxed).max(1) as f64;
                 let listened = shared.listened.load(Ordering::Relaxed) as f64 / rate;
                 if counts_as_play(
                     listened,
-                    t.duration,
+                    l.duration,
                     shared.stats_min_percent.load(Ordering::Relaxed),
                     shared.stats_min_secs.load(Ordering::Relaxed),
                 ) {
                     l.counted = true;
-                    if let Some(path) = t.path.clone() {
+                    let path = shared.track.lock().unwrap().path.clone();
+                    if let Some(path) = path {
                         let at = zeo_types::config::unix_now();
                         zeo_db::later(move || zeo_db::record_play(&path, at, listened));
                         shared.plays_gen.fetch_add(1, Ordering::Relaxed);
@@ -212,6 +222,7 @@ pub(crate) fn run(
                     out.channels,
                 );
                 shared.playing.store(true, Ordering::Relaxed);
+                publish_media(&shared, &media, true);
             } else {
                 shared.playing.store(false, Ordering::Relaxed);
                 loaded = None;
@@ -233,18 +244,29 @@ pub(crate) fn run(
         let behind = playing
             && loaded.as_ref().is_some_and(|l| l.drain.is_none())
             && shared.ring.len() < target / 2;
-        let wait = if behind {
-            Duration::ZERO
-        } else if playing {
-            PLAYING_TICK
+        let cover_pending = loaded.as_ref().is_some_and(|l| l.cover_pending);
+        if !playing && retry_at.is_none() && !cover_pending {
+            // 完全空闲时直接阻塞等待命令，避免暂停期每 100ms 无效唤醒高优先级线程。
+            match rx.recv() {
+                Ok(cmd) => waiting = Some(cmd),
+                Err(_) => std::thread::sleep(IDLE_TICK),
+            }
         } else {
-            IDLE_TICK
-        };
-        match rx.recv_timeout(wait) {
-            Ok(cmd) => waiting = Some(cmd),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-            // 句柄都没了（进程退出中）：不再有命令，照常按节奏解码。
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => std::thread::sleep(wait),
+            let wait = if behind {
+                Duration::ZERO
+            } else if playing {
+                PLAYING_TICK
+            } else if let Some(at) = retry_at {
+                at.saturating_duration_since(Instant::now()).min(IDLE_TICK)
+            } else {
+                IDLE_TICK
+            };
+            match rx.recv_timeout(wait) {
+                Ok(cmd) => waiting = Some(cmd),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                // 句柄都没了（进程退出中）：不再有命令，照常按节奏解码。
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => std::thread::sleep(wait),
+            }
         }
     }
 }

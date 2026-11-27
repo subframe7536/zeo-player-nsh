@@ -620,13 +620,13 @@ fn bench_close() {
         eprintln!(
             "ZEO_PLAYER_BENCH playing={} time={:.1}",
             s.playback.with_untracked(|p| p.playing),
-            s.playback.with_untracked(|p| p.time)
+            s.playback_time.get_untracked()
         );
         wait(6000).await;
         eprintln!(
             "ZEO_PLAYER_BENCH playing={} time={:.1}",
             s.playback.with_untracked(|p| p.playing),
-            s.playback.with_untracked(|p| p.time)
+            s.playback_time.get_untracked()
         );
         zeo_shell::simulate_close();
         wait(500).await;

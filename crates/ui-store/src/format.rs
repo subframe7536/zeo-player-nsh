@@ -17,7 +17,7 @@ pub fn shown_time() -> f64 {
     let s = store();
     s.seek_preview
         .get()
-        .unwrap_or_else(|| s.playback.with(|p| p.time))
+        .unwrap_or_else(|| s.playback_time.get())
 }
 
 /// 当前进度比例。

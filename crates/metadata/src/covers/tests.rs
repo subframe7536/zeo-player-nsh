@@ -70,7 +70,7 @@ fn cover_source_respects_local_first() {
     }
     let hue_of = |src: Option<CoverSrc>| match src? {
         CoverSrc::Img(img) => palette_hue(&img).map(|(h, _)| h),
-        CoverSrc::Raw(_) => None,
+        CoverSrc::Raw(..) => None,
     };
     let local = hue_of(cover_source_for(path, true)).expect("sidecar 应有主色调");
     assert!(
@@ -119,4 +119,25 @@ fn thumbnails_are_small_jpegs() {
         img.height(),
         again.elapsed()
     );
+}
+
+/// 多个订阅者同时接收封面完成广播，互不抢占。
+#[test]
+fn subscribe_done_broadcasts_to_all_subscribers() {
+    let rx1 = subscribe_done();
+    let rx2 = subscribe_done();
+    let target = "/nonexistent/zeo-player-broadcast-test.flac";
+    request(target, TINY);
+    let wait = |rx: &std::sync::mpsc::Receiver<CoverDone>| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let item = rx.recv_timeout(left).expect("应收到封面完成广播");
+            if item.0 == target {
+                return item;
+            }
+        }
+    };
+    assert_eq!(wait(&rx1), (target.to_owned(), TINY, None));
+    assert_eq!(wait(&rx2), (target.to_owned(), TINY, None));
 }

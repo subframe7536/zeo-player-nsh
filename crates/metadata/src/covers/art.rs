@@ -61,10 +61,36 @@ pub fn clear_artwork() {
     art_cache().lock().unwrap().clear();
 }
 
+pub(crate) fn has_cached_artwork(path: &Path, key: u64) -> bool {
+    let name = path.to_string_lossy();
+    let cache = art_cache().lock().unwrap();
+    cache
+        .iter()
+        .any(|(p, k, _)| p == name.as_ref() && *k == key)
+}
+
+pub(crate) fn cache_artwork_from_src(path: &Path, key: u64, src: CoverSrc) {
+    let Some(uri) = art_data_uri_from_src(src) else {
+        return;
+    };
+    let name = path.to_string_lossy().into_owned();
+    let uri: Arc<str> = uri.into();
+    let mut cache = art_cache().lock().unwrap();
+    cache.retain(|(p, _, _)| p != &name);
+    cache.push((name, key, uri));
+    while cache.len() > ART_CAP {
+        cache.remove(0);
+    }
+}
+
 /// 读封面源 → 缩到 [`LARGE`] → JPEG data URI（解不开的格式按原始字节
 /// 直接进 URI，交给系统解码，同 `cover_file` 的 Raw 分支）。
 fn art_data_uri(path: &Path) -> Option<String> {
-    match cover_source(path)? {
+    art_data_uri_from_src(cover_source(path)?)
+}
+
+fn art_data_uri_from_src(src: CoverSrc) -> Option<String> {
+    match src {
         CoverSrc::Img(img) => {
             let img = if img.width() > LARGE || img.height() > LARGE {
                 img.resize(LARGE, LARGE, image::imageops::FilterType::Triangle)
@@ -81,10 +107,8 @@ fn art_data_uri(path: &Path) -> Option<String> {
                 base64(&bytes.into_inner())
             ))
         }
-        CoverSrc::Raw(bytes) => {
-            let mime = crate::read_artwork(path)
-                .and_then(|(_, m)| m)
-                .unwrap_or_else(|| "image/jpeg".to_owned());
+        CoverSrc::Raw(bytes, mime) => {
+            let mime = mime.unwrap_or_else(|| "image/jpeg".to_owned());
             Some(format!("data:{mime};base64,{}", base64(&bytes)))
         }
     }

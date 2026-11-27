@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use super::apply_tag_edits;
 use super::{Edit, TagEdits, TagField};
 use crate::{parse_gain, parse_peak};
-use lofty::config::WriteOptions;
+use lofty::config::{ParseOptions, WriteOptions};
 use lofty::file::AudioFile;
 use lofty::probe::Probe;
 
@@ -106,6 +106,7 @@ pub(crate) fn write_temp(target: &Path, tmp: &Path, edits: &TagEdits) -> Result<
     let mut tagged = Probe::open(tmp)
         .map_err(|e| format!("读取标签失败: {e}"))?
         .set_file_type(file_type)
+        .options(ParseOptions::new().read_properties(false))
         .read()
         .map_err(|e| format!("读取标签失败: {e}"))?;
     apply_tag_edits(&mut tagged, edits)?;

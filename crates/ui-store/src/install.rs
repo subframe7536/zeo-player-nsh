@@ -49,11 +49,11 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
     let playback = signal(Playback {
         playing: snap.is_playing,
         loading: snap.is_loading,
-        time: snap.current_time,
         duration: snap.track.duration,
         volume: snap.volume,
         loop_mode: snap.loop_mode,
     });
+    let playback_time = signal(snap.current_time);
     let track = signal(now_playing(&snap));
     let library = signal(library_state());
     let tracks = signal(Same(lib.tracks()));
@@ -61,8 +61,17 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
     let lyrics = signal(None::<Lyrics>);
     let lyrics_offset = signal(0_i64);
     let artist_seps = computed(move || library.with(|l| l.config.artist_separators.clone()));
+    let covers_on = computed(move || library.with(|l| l.config.show_covers));
+    let initial_playlists = {
+        let mut lists = zeo_playlists::load();
+        zeo_playlists::ensure_favorites(&mut lists);
+        lists
+    };
+    let liked_set = signal(Same(Arc::new(
+        favorite_paths(&initial_playlists).into_iter().collect(),
+    )));
     let active_line = computed(move || {
-        let time = playback.with(|p| p.time);
+        let time = playback_time.get();
         // 生效偏移 = 每曲手动偏移 + 全局偏移（正值 = 提前）。
         let offset = lyrics_offset.get() + library.with(|l| l.config.global_lyrics_offset_ms);
         lyrics.with(|l| match l {
@@ -72,6 +81,9 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
     });
     let s = Store {
         playback,
+        playback_time,
+        covers_on,
+        liked_set,
         intent: signal(None),
         track,
         library,
@@ -90,11 +102,7 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
         close_prompt: signal(false),
         close_remember: signal(true),
         search: signal(String::new()),
-        playlists: signal(Same(Arc::new({
-            let mut lists = zeo_playlists::load();
-            zeo_playlists::ensure_favorites(&mut lists);
-            lists
-        }))),
+        playlists: signal(Same(Arc::new(initial_playlists))),
         editor: signal(None),
         search_open: signal(false),
         settings: signal(false),
@@ -128,6 +136,8 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
     STORE.with(|cell| cell.set(Some(s)));
     let (tx, posted) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
     POSTER.with(|p| *p.borrow_mut() = Some(Post(tx)));
+    COVER_RX.with(|rx| *rx.borrow_mut() = Some(zeo_metadata::covers::subscribe_done()));
+    HUE_RX.with(|rx| *rx.borrow_mut() = Some(zeo_metadata::covers::subscribe_dominant()));
     apply_accent();
     remove_update_leftovers();
     auto_check_updates();
@@ -142,10 +152,10 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
         loop {
             timer(Duration::from_millis(100)).await;
             let snap = player().state();
+            s.playback_time.set(snap.current_time);
             s.playback.set(Playback {
                 playing: snap.is_playing,
                 loading: snap.is_loading,
-                time: snap.current_time,
                 duration: snap.track.duration,
                 volume: snap.volume,
                 loop_mode: snap.loop_mode,
@@ -280,10 +290,18 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
             if state.visible && !was {
                 zeo_shell::shown_by_system();
             }
-            if zeo_shell::remembered()
-                && library_store().window_placement() != Some(state.placement)
+            if zeo_shell::remembered() && library_store().set_window_placement_mem(state.placement)
             {
-                library_store().set_window_placement(state.placement);
+                // 400ms 防抖异步落盘，避免拖拽/缩放窗口时在 UI 线程高频同步写 library.json。
+                use std::sync::atomic::{AtomicU64, Ordering};
+                static PLACEMENT_GEN: AtomicU64 = AtomicU64::new(0);
+                let seq = PLACEMENT_GEN.fetch_add(1, Ordering::Relaxed) + 1;
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(400));
+                    if PLACEMENT_GEN.load(Ordering::Relaxed) == seq {
+                        library_store().save();
+                    }
+                });
             }
         }
     });
@@ -357,7 +375,7 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
         let Some(pending) = s.seek_preview.get() else {
             return;
         };
-        if (s.playback.with(|p| p.time) - pending).abs() < 0.35 {
+        if (s.playback_time.get() - pending).abs() < 0.35 {
             s.seek_preview.set(None);
         }
     });
@@ -457,37 +475,72 @@ pub fn install(win: nsh_core::element::desktop::WindowRef) -> Store {
         if next.is_empty() {
             return;
         }
-        std::thread::spawn(move || {
-            for p in next {
-                zeo_metadata::covers::request_warm(&p);
-                Meta::lyrics(&p);
-                let _ = zeo_metadata::waveform::waveform(Path::new(&p));
-            }
+        // 复用单一后台预载槽位，快速切歌时覆盖旧队列，避免并发派生多个解码线程。
+        type PreloadSlot = (std::sync::Mutex<Option<Vec<String>>>, std::sync::Condvar);
+        static PRELOAD: std::sync::OnceLock<PreloadSlot> = std::sync::OnceLock::new();
+        let slot = PRELOAD.get_or_init(|| {
+            let pair: PreloadSlot = (std::sync::Mutex::new(None), std::sync::Condvar::new());
+            std::thread::Builder::new()
+                .name("zeo-player-preload".into())
+                .spawn(|| {
+                    let (m, cv) = PRELOAD.get().unwrap();
+                    loop {
+                        let batch = {
+                            let mut guard = m.lock().unwrap();
+                            loop {
+                                if let Some(list) = guard.take() {
+                                    break list;
+                                }
+                                guard = cv.wait(guard).unwrap();
+                            }
+                        };
+                        for p in batch {
+                            if m.lock().unwrap().is_some() {
+                                break;
+                            }
+                            zeo_metadata::covers::request_warm(&p);
+                            Meta::lyrics(&p);
+                            let _ = zeo_metadata::waveform::waveform(Path::new(&p));
+                        }
+                    }
+                })
+                .expect("spawn preload worker");
+            pair
         });
+        *slot.0.lock().unwrap() = Some(next);
+        slot.1.notify_one();
     });
 
     // 文件内容变了（监视或手动扫描后指纹不同）：重新生成它的封面。
     effect(move || {
         let tracks = s.tracks.get();
-        let stamps: HashMap<&str, u64> =
-            tracks.iter().map(|t| (t.path.as_str(), t.stamp)).collect();
         let requested: Vec<(String, u32)> = COVERS.with(|c| {
-            c.borrow()
-                .iter()
+            let map = c.borrow();
+            if map.is_empty() {
+                return Vec::new();
+            }
+            map.iter()
                 .map(|(p, (side, _))| (p.clone(), *side))
                 .collect()
         });
+        if requested.is_empty() {
+            return;
+        }
+        let stamps: HashMap<&str, u64> =
+            tracks.iter().map(|t| (t.path.as_str(), t.stamp)).collect();
         COVER_STAMPS.with(|known| {
             let mut known = known.borrow_mut();
             for (path, side) in requested {
                 let Some(&stamp) = stamps.get(path.as_str()) else {
                     continue;
                 };
-                match known.insert(path.clone(), stamp) {
-                    Some(old) if old != stamp => {
+                if let Some(old) = known.get_mut(&path) {
+                    if *old != stamp {
+                        *old = stamp;
                         zeo_metadata::covers::request(&path, side);
                     }
-                    _ => {}
+                } else {
+                    known.insert(path, stamp);
                 }
             }
         });

@@ -27,17 +27,14 @@ pub(crate) struct Group {
     pub(crate) title: String,
     pub(crate) subtitle: String,
     pub(crate) year: Option<u32>,
+    pub(crate) album_count: usize,
     pub(crate) tracks: Rc<Vec<TrackEntry>>,
     pub(crate) cover: Option<String>,
 }
 
 impl Group {
     pub(crate) fn albums(&self) -> usize {
-        self.tracks
-            .iter()
-            .map(|t| t.display_album())
-            .collect::<HashSet<_>>()
-            .len()
+        self.album_count
     }
 }
 
@@ -54,24 +51,42 @@ pub(crate) fn group_by(
                 .push(track.clone());
         }
     }
-    let mut out: Vec<Group> = map
+    let mut keyed: Vec<(String, String, Group)> = map
         .into_iter()
         .map(|(key, (title, subtitle, mut list))| {
-            list.sort_by(|a, b| compare(&a.album, &b.album).then_with(|| by_disc_track(a, b)));
+            // 预计算小写专辑名键，避免 O(N log N) 排序比较中反复 to_lowercase() 堆分配。
+            let mut decorated: Vec<(String, TrackEntry)> = list
+                .drain(..)
+                .map(|t| (t.album.to_lowercase(), t))
+                .collect();
+            decorated.sort_by(|(ka, a), (kb, b)| ka.cmp(kb).then_with(|| by_disc_track(a, b)));
+            let list: Vec<TrackEntry> = decorated.into_iter().map(|(_, t)| t).collect();
             let cover = list.iter().find(|t| t.has_art).map(|t| t.path.clone());
             let year = list.iter().filter_map(|t| t.year).max();
-            Group {
-                key,
-                title,
-                subtitle,
-                year,
-                tracks: Rc::new(list),
-                cover,
-            }
+            let album_count = list
+                .iter()
+                .map(|t| t.display_album())
+                .collect::<HashSet<_>>()
+                .len();
+            let k_title = title.to_lowercase();
+            let k_sub = subtitle.to_lowercase();
+            (
+                k_title,
+                k_sub,
+                Group {
+                    key,
+                    title,
+                    subtitle,
+                    year,
+                    album_count,
+                    tracks: Rc::new(list),
+                    cover,
+                },
+            )
         })
         .collect();
-    out.sort_by(|a, b| compare(&a.title, &b.title).then_with(|| compare(&a.subtitle, &b.subtitle)));
-    out
+    keyed.sort_by(|(ta, sa, _), (tb, sb, _)| ta.cmp(tb).then_with(|| sa.cmp(sb)));
+    keyed.into_iter().map(|(_, _, g)| g).collect()
 }
 
 /// 圆形头像：封面或首字。`size` 为 `None` 时铺满宽度、正方形。
@@ -99,21 +114,24 @@ pub fn avatar(
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(muted_fg()),
         )
-        .child(when(
-            move || {
-                cover()
-                    .and_then(|p| cover_for(&p, size.unwrap_or(168.0)))
-                    .is_some()
-            },
-            move || {
-                image(move || {
-                    cover()
-                        .and_then(|p| cover_for(&p, size.unwrap_or(168.0)))
-                        .unwrap_or_default()
-                })
-                .absolute()
-                .inset(px(0.0))
-                .object_fit(ResizeMode::Cover)
-            },
-        ))
+        .child({
+            let resolved =
+                computed(move || cover().and_then(|p| cover_for(&p, size.unwrap_or(168.0))));
+            when(
+                move || resolved.with(Option::is_some),
+                move || {
+                    let last = stored(None::<SharedString>);
+                    let trail = computed(move || {
+                        let now = resolved.get().unwrap_or_default();
+                        let prev = last.replace(Some(now.clone()));
+                        prev.filter(|p| !p.is_empty()).unwrap_or(now)
+                    });
+                    image(move || resolved.get().unwrap_or_default())
+                        .placeholder(move || trail.get())
+                        .absolute()
+                        .inset(px(0.0))
+                        .object_fit(ResizeMode::Cover)
+                },
+            )
+        })
 }

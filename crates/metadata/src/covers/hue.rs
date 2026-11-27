@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, mpsc};
 
 use crate::MetaCache;
 
@@ -7,15 +7,19 @@ use super::decode_cover;
 
 // --- 主色调 -------------------------------------------------------------------
 
-/// 已完成的（曲目路径, 主色调），工作线程写、界面取走。
-fn hue_done() -> &'static Mutex<Vec<(String, Option<(f32, f32)>)>> {
-    static DONE: OnceLock<Mutex<Vec<(String, Option<(f32, f32)>)>>> = OnceLock::new();
-    DONE.get_or_init(|| Mutex::new(Vec::new()))
+/// 已完成的（曲目路径, 主色调），工作线程广播给订阅的界面实例。
+pub type HueDone = (String, Option<(f32, f32)>);
+
+fn hue_subs() -> &'static Mutex<Vec<mpsc::Sender<HueDone>>> {
+    static SUBS: OnceLock<Mutex<Vec<mpsc::Sender<HueDone>>>> = OnceLock::new();
+    SUBS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-/// 取走已完成的（曲目路径, 主色调）（「跟随封面」强调色的实时更新）。
-pub fn take_dominant() -> Vec<(String, Option<(f32, f32)>)> {
-    std::mem::take(&mut *hue_done().lock().unwrap())
+/// 订阅已完成的（曲目路径, 主色调）（「跟随封面」强调色的实时更新）。
+pub fn subscribe_dominant() -> mpsc::Receiver<HueDone> {
+    let (tx, rx) = mpsc::channel();
+    hue_subs().lock().unwrap().push(tx);
+    rx
 }
 
 /// `path` 封面已存的主色调（界面同步读；存在 SQLite 曲目行里，扫描时算好，
@@ -42,13 +46,14 @@ pub(crate) fn ensure_hue(path: &Path, cached: &Path) {
     store_hue(path, hue);
 }
 
-/// 主色调写进元数据缓存（随元数据行落 SQLite）并通知界面。
+/// 主色调写进元数据缓存（随元数据行落 SQLite）并广播给界面。
 pub(crate) fn store_hue(path: &Path, hue: Option<(f32, f32)>) {
     MetaCache::global().set_art_hue(path, hue);
-    hue_done()
+    let item = (path.to_string_lossy().into_owned(), hue);
+    hue_subs()
         .lock()
         .unwrap()
-        .push((path.to_string_lossy().into_owned(), hue));
+        .retain(|tx| tx.send(item.clone()).is_ok());
 }
 
 /// 封面主色调（色相 0..1 圈、饱和度 0..1）：中位切分取调色板里最饱和的

@@ -85,8 +85,10 @@ pub(crate) fn null_output_loop(
         }
         let g = shared.eq_gen.load(Ordering::Acquire);
         if g != eq_seen
-            && let Ok(cfg) = shared.eq_config.try_lock()
+            && let Ok(guard) = shared.eq_config.try_lock()
         {
+            let cfg = *guard;
+            drop(guard);
             eq.configure(&cfg, rate);
             eq_seen = g;
         }
@@ -201,8 +203,10 @@ pub(crate) fn build_stream(
             move |data: &mut [f32], _| {
                 let g = shared.eq_gen.load(Ordering::Acquire);
                 if g != eq_seen
-                    && let Ok(cfg) = shared.eq_config.try_lock()
+                    && let Ok(guard) = shared.eq_config.try_lock()
                 {
+                    let cfg = *guard;
+                    drop(guard);
                     eq.configure(&cfg, rate);
                     eq_seen = g;
                 }

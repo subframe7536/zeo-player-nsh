@@ -8,8 +8,7 @@ pub(crate) use std::rc::Rc;
 pub(crate) use nsh_core::prelude::*;
 
 pub(crate) use zeo_ui_views_base::{
-    by_disc_track, compare, hero, no_library, pinned_track_list, total_duration, track_list,
-    track_list_bare,
+    by_disc_track, hero, no_library, pinned_track_list, total_duration, track_list, track_list_bare,
 };
 
 pub(crate) use zeo_types::config::TrackEntry;

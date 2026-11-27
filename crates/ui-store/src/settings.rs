@@ -171,16 +171,21 @@ pub(crate) fn request_accent(s: &Store, path: Option<&str>) {
 
 /// 封面主色调结果：跟随封面模式下成为强调色（只对当前曲目生效）。
 pub(crate) fn drain_dominant() {
-    for (path, hue) in zeo_metadata::covers::take_dominant() {
+    HUE_RX.with(|rx| {
+        let Some(rx) = &*rx.borrow() else {
+            return;
+        };
         let s = store();
-        if s.library.with(|l| l.config.theme_color) == zeo_types::config::ThemeColor::Cover
-            && s.track.with(|t| t.path.as_deref() == Some(path.as_str()))
-        {
-            s.accent
-                .set(hue.map(|(h, sat)| crate::theme::accent_of(h, sat)));
-            s.tint.set(hue);
+        for (path, hue) in rx.try_iter() {
+            if s.library.with(|l| l.config.theme_color) == zeo_types::config::ThemeColor::Cover
+                && s.track.with(|t| t.path.as_deref() == Some(path.as_str()))
+            {
+                s.accent
+                    .set(hue.map(|(h, sat)| crate::theme::accent_of(h, sat)));
+                s.tint.set(hue);
+            }
         }
-    }
+    });
 }
 
 /// 淡入淡出时长（立即生效并保存）。

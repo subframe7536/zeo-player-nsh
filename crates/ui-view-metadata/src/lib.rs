@@ -254,35 +254,34 @@ pub fn page() -> View {
                         .child({
                             // 「全选」不放表头格：工具栏的 nsh_base 复选框
                             // 在真机 / headless 都稳。
-                            let mark = checkbox(
-                                move || {
-                                    selected.with(|s| {
-                                        if s.is_empty() {
-                                            return false;
+                            let sel_state = computed(move || {
+                                selected.with(|s| {
+                                    if s.is_empty() {
+                                        return (false, false);
+                                    }
+                                    displayed.with(|v| {
+                                        if v.is_empty() {
+                                            return (false, false);
                                         }
-                                        displayed.with(|v| {
-                                            !v.is_empty()
-                                                && s.len() >= v.len()
-                                                && v.iter().all(|t| s.contains(&t.path))
-                                        })
-                                    })
-                                },
-                                move || {
-                                    selected.with(|s| {
-                                        if s.is_empty() {
-                                            return false;
-                                        }
-                                        displayed.with(|v| {
-                                            if v.is_empty() {
-                                                return false;
+                                        let mut any = false;
+                                        let mut all = s.len() >= v.len();
+                                        for t in v.iter() {
+                                            if s.contains(&t.path) {
+                                                any = true;
+                                            } else {
+                                                all = false;
                                             }
-                                            let any = v.iter().any(|t| s.contains(&t.path));
-                                            let all = s.len() >= v.len()
-                                                && v.iter().all(|t| s.contains(&t.path));
-                                            any && !all
-                                        })
+                                            if any && !all {
+                                                break;
+                                            }
+                                        }
+                                        (all, any && !all)
                                     })
-                                },
+                                })
+                            });
+                            let mark = checkbox(
+                                move || sel_state.get().0,
+                                move || sel_state.get().1,
                                 "全选",
                                 move |next| {
                                     let paths: Vec<String> = displayed

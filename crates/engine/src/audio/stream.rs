@@ -8,12 +8,14 @@ pub(crate) fn fill_ring(
     shared: &Arc<Shared>,
     dev_channels: usize,
 ) -> Result<bool, String> {
-    if !l.backlog.is_empty() {
-        let n = shared.ring.push(&l.backlog, dev_channels);
-        l.backlog.drain(..n);
-        if !l.backlog.is_empty() {
+    if l.backlog_pos < l.backlog.len() {
+        let n = shared.ring.push(&l.backlog[l.backlog_pos..], dev_channels);
+        l.backlog_pos += n;
+        if l.backlog_pos < l.backlog.len() {
             return Ok(false);
         }
+        l.backlog.clear();
+        l.backlog_pos = 0;
     }
     let (src, src_channels, resampler) = if l.eof {
         let next = l.next.as_mut().expect("eof 时 next 必在");
@@ -27,18 +29,25 @@ pub(crate) fn fill_ring(
     if block.len() / src_channels.max(1) == 0 {
         return Ok(false);
     }
-    // 1) 声道数转换 → dev_channels
-    convert_channels(block, src_channels, dev_channels, &mut l.carry);
-    // 2) 重采样或直通
-    let samples = if let Some(r) = resampler.as_mut() {
-        l.out.clear();
-        r.push(&l.carry, &mut l.out)?;
-        &l.out
+    // 1) 声道数一致时直接借用解码块，省去一次整块拷贝
+    let aligned: &[f32] = if src_channels.max(1) == dev_channels.max(1) {
+        block
     } else {
+        convert_channels(block, src_channels, dev_channels, &mut l.carry);
         &l.carry
     };
+    // 2) 重采样或直通
+    let samples: &[f32] = if let Some(r) = resampler.as_mut() {
+        l.out.clear();
+        r.push(aligned, &mut l.out)?;
+        &l.out
+    } else {
+        aligned
+    };
     let n = shared.ring.push(samples, dev_channels);
-    l.backlog.extend_from_slice(&samples[n..]);
+    if n < samples.len() {
+        l.backlog.extend_from_slice(&samples[n..]);
+    }
     Ok(false)
 }
 
@@ -140,17 +149,34 @@ pub(crate) fn output_callback(
         // 取样 → EQ → rg × 音量 × 淡变 → 钳到 ±1。
         let take = shared.ring.pop(data.len(), |i, sample| data[i] = sample);
         eq.process(&mut data[..take], ch);
-        for slot in data[..take].iter_mut().enumerate() {
-            let (i, x) = slot;
-            // 每帧（而不是每个样本）推进一次增益，各声道一致。
-            if i % ch == 0 && gain != target {
-                gain = if gain < target {
-                    (gain + step).min(target)
-                } else {
-                    (gain - step).max(target)
-                };
+        if gain == target {
+            // 稳态快路径：提前计算总缩放系数，无取模分支，便于 LLVM 自动 SIMD 向量化。
+            let scale = rg * volume * fade_curve(gain);
+            for x in &mut data[..take] {
+                *x = (*x * scale).clamp(-1.0, 1.0);
             }
-            *x = (*x * rg * volume * fade_curve(gain)).clamp(-1.0, 1.0);
+        } else {
+            let base = rg * volume;
+            let frames_len = (take / ch) * ch;
+            for frame in data[..frames_len].chunks_exact_mut(ch) {
+                if gain != target {
+                    gain = if gain < target {
+                        (gain + step).min(target)
+                    } else {
+                        (gain - step).max(target)
+                    };
+                }
+                let scale = base * fade_curve(gain);
+                for x in frame {
+                    *x = (*x * scale).clamp(-1.0, 1.0);
+                }
+            }
+            if frames_len < take {
+                let scale = base * fade_curve(gain);
+                for x in &mut data[frames_len..take] {
+                    *x = (*x * scale).clamp(-1.0, 1.0);
+                }
+            }
         }
         // 欠载沿软化（~2ms）：缓冲没填满时给尾巴拉到 0、续播头端从 0
         // 拉回——硬零沿会咔哒。只在欠载边界动数据，正常播放无感。
