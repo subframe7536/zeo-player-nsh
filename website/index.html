@@ -3,264 +3,358 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Zeo Player — 本地音乐播放器</title>
-  <meta name="description" content="Zeo Player 是一个纯 Rust 编写的本地音乐播放器，开源免费，支持 macOS 和 Windows。">
+  <title>Zeo Player — 纯 Rust 原生本地音乐播放器</title>
+  <meta name="description" content="Zeo Player 是一款纯 Rust 编写的本地桌面音乐播放器，支持 24 字段元数据大表、多源在线自动匹配、乱码修复、无缝播放与 10 段均衡器。开源免费，支持 macOS 和 Windows。">
   <link rel="canonical" href="https://subframe7536.github.io/zeo-player-nsh/">
-  <meta name="theme-color" content="#d9e3da" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#111613" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f8fbf9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0a0e0c" media="(prefers-color-scheme: dark)">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="zh_CN">
   <meta property="og:site_name" content="Zeo Player">
-  <meta property="og:title" content="Zeo Player — 本地音乐播放器">
-  <meta property="og:description" content="纯 Rust 原生本地音乐播放器，支持 24 字段元数据大表、批量重命名、乱码修复、无缝播放与 10 段均衡器。开源免费，支持 macOS 和 Windows。">
+  <meta property="og:title" content="Zeo Player — 纯 Rust 原生本地音乐播放器">
+  <meta property="og:description" content="纯 Rust 原生本地音乐播放器，支持 24 字段元数据大表、多源在线自动匹配、批量重命名、乱码修复、无缝播放与 10 段均衡器。开源免费，支持 macOS 和 Windows。">
   <meta property="og:url" content="https://subframe7536.github.io/zeo-player-nsh/">
   <meta property="og:image" content="https://subframe7536.github.io/zeo-player-nsh/assets/img-home.webp">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Zeo Player — 本地音乐播放器">
+  <meta name="twitter:title" content="Zeo Player — 纯 Rust 原生本地音乐播放器">
   <meta name="twitter:description" content="纯 Rust 原生本地音乐播放器，开源免费，支持 macOS 和 Windows。">
   <meta name="twitter:image" content="https://subframe7536.github.io/zeo-player-nsh/assets/img-home.webp">
   <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem("zeo-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.dataset.theme = saved;
+        }
+      } catch (_) {}
+    })();
+  </script>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="tech-grid-bg" aria-hidden="true"></div>
-  <div class="glow-orb orb-primary" aria-hidden="true"></div>
-  <div class="glow-orb orb-secondary" aria-hidden="true"></div>
+  <div class="ambient-bg" aria-hidden="true">
+    <div class="ambient-grid"></div>
+    <div class="ambient-glow glow-top"></div>
+    <div class="ambient-glow glow-side"></div>
+  </div>
 
   <header class="navbar">
     <div class="nav-container">
-      <a href="#" class="brand-group">
-        <img src="assets/icon.svg" alt="Zeo Player" class="brand-logo" width="32" height="32">
+      <a href="#" class="brand">
+        <img src="assets/icon.svg" alt="Zeo Player" class="brand-logo" width="30" height="30">
         <span class="brand-name">Zeo Player</span>
       </a>
 
       <nav class="nav-links" aria-label="主导航">
-        <a href="#features" class="nav-item">功能</a>
-        <a href="#screenshots" class="nav-item">截图</a>
-        <a href="#download" class="nav-item">下载</a>
+        <a href="#features" class="nav-link">功能</a>
+        <a href="#screenshots" class="nav-link">界面</a>
+        <a href="#download" class="nav-link">下载</a>
       </nav>
 
       <div class="nav-actions">
-        <a href="https://github.com/subframe7536/zeo-player-nsh" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-icon" title="GitHub 仓库" aria-label="GitHub 仓库">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+        <button type="button" class="icon-btn" id="themeToggle" title="切换深浅色主题" aria-label="切换深浅色主题">
+          <svg class="icon-sun" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
+          </svg>
+        </button>
+
+        <a href="https://github.com/subframe7536/zeo-player-nsh" target="_blank" rel="noopener noreferrer" class="icon-btn" title="GitHub 仓库" aria-label="GitHub 仓库">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true">
             <path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/>
           </svg>
         </a>
+
         <a href="#download" class="btn btn-primary btn-sm">下载</a>
       </div>
     </div>
   </header>
 
   <main>
-    <section class="hero-section">
-      <div class="section-container hero-container">
-        <div class="hero-status-pill">
-          <span class="status-indicator" aria-hidden="true"></span>
-          <span>开源免费 · 纯 Rust 原生应用 · macOS / Windows</span>
+    <section class="hero">
+      <div class="container hero-inner">
+        <div class="hero-pill">
+          <span class="pill-dot" aria-hidden="true"></span>
+          <span>开源免费 · 纯 Rust 原生 · macOS / Windows</span>
         </div>
 
-        <h1 class="hero-title">本地<span class="gradient-text">音乐播放器</span></h1>
+        <h1 class="hero-title">
+          轻快纯粹的<span class="gradient-text">本地音乐播放器</span>
+        </h1>
 
-        <p class="hero-description">
-          纯 Rust 写的原生应用，没有内嵌浏览器，也不用登录账号。
-          曲库管理有 24 个字段的元数据大表、乱码修复和模板批量改名；播放有无缝接续、10 段均衡器和逐行歌词。
+        <p class="hero-desc">
+          没有内嵌浏览器，也不用登录账号。集 24 字段元数据大表、多源在线自动匹配与批量治理于一身，搭配无缝播放、10 段平滑均衡器与逐行歌词。
         </p>
 
         <div class="hero-actions">
           <a href="#download" class="btn btn-primary btn-lg">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            <span>下载</span>
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>立即下载</span>
           </a>
           <a href="https://github.com/subframe7536/zeo-player-nsh" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-lg">
             <span>GitHub 仓库</span>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg>
           </a>
         </div>
 
-        <div class="workbench-window-frame">
-          <button type="button" class="shot-trigger" data-lightbox-src="assets/img-home.webp" data-lightbox-caption="Zeo Player 首页：按时段问候、随机推荐、最近播放与新添加曲目" aria-label="放大查看 Zeo Player 首页截图">
-            <img src="assets/img-home.webp" alt="Zeo Player 首页" class="workbench-img" fetchpriority="high" decoding="async">
+        <div class="hero-highlights" aria-label="核心特性概览">
+          <span class="highlight-chip">AppKit / Direct2D 原生渲染</span>
+          <span class="highlight-chip">24 字段元数据大表</span>
+          <span class="highlight-chip">多源在线自动匹配</span>
+          <span class="highlight-chip">无缝播放 &amp; 10 段 EQ</span>
+        </div>
+
+        <div class="showcase-frame">
+          <button type="button" class="shot-trigger" data-lightbox-src="assets/img-home.webp" data-lightbox-caption="Zeo Player 首页：按时段问候、随机推荐、响应式卡片网格与新添加曲目" aria-label="放大查看 Zeo Player 首页截图">
+            <img src="assets/img-home.webp" alt="Zeo Player 首页界面" class="showcase-img" fetchpriority="high" decoding="async">
           </button>
         </div>
       </div>
     </section>
 
-    <section class="section-container" id="features">
-      <div class="section-header">
-        <div class="section-eyebrow">FEATURES</div>
-        <h2 class="section-title">主要功能</h2>
-      </div>
-
-      <div class="features-grid">
-        <div class="feature-group">
-          <h3 class="feature-group-title">界面和系统</h3>
-          <ul class="feature-list">
-            <li>
-              <strong>全屏播放页</strong>
-              背景跟随封面主色、波形进度条，歌词偏移可按单曲微调
-            </li>
-            <li>
-              <strong>命令面板</strong>
-              <code>⌘K</code> / <code>Ctrl+K</code> 呼出，键盘搜索曲目、跳转设置
-            </li>
-            <li>
-              <strong>自定义快捷键</strong>
-              应用内与全局快捷键全部可重绑，冲突时给出提示
-            </li>
-            <li>
-              <strong>外观与主题色</strong>
-              浅色 / 深色跟随系统，主题色支持黑白、跟随封面或自定义取色
-            </li>
-            <li>
-              <strong>系统集成与自更新</strong>
-              菜单栏 / 系统托盘常驻，Windows 支持 SMTC 媒体通知，应用内一键检查并原地更新
-            </li>
-          </ul>
+    <section class="section" id="features">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-eyebrow">FEATURES</div>
+          <h2 class="section-title">为本地曲库打磨的每一处细节</h2>
+          <p class="section-subtitle">把专业曲库治理工具与发烧级播放体验，装进轻巧流畅的原生桌面应用。</p>
         </div>
 
-        <div class="feature-group">
-          <h3 class="feature-group-title">曲库和标签</h3>
-          <ul class="feature-list">
-            <li>
-              <strong>元数据表格</strong>
-              24 个元数据字段，可批量修改，列可显隐、拖宽、排序，数万首曲目滚动流畅
-            </li>
-            <li>
-              <strong>乱码修复与标签历史</strong>
-              自动识别并修复 GBK / Big5 / Shift-JIS / EUC-KR 等编码乱码，保留最近 30 批快照随时回滚
-            </li>
-            <li>
-              <strong>批量重命名与导出</strong>
-              按模板批量改名（如 <code>{track:02d} - {artist} - {title}</code>），同名 <code>.lrc</code> 与封面图自动联动；支持批量导出歌词与转码封面
-            </li>
-            <li>
-              <strong>文件夹自动同步</strong>
-              自动监听文件夹变动，外部增删、移动文件即时同步；文件移动后仍保留播放记录与歌单
-            </li>
-            <li>
-              <strong>智能歌单</strong>
-              按标题、艺术家、专辑、标签、采样率等条件组合筛选
-            </li>
-          </ul>
-        </div>
-
-        <div class="feature-group">
-          <h3 class="feature-group-title">播放</h3>
-          <ul class="feature-list">
-            <li>
-              <strong>曲间无缝播放</strong>
-              自然播完时提前预载下一首，无停顿直接衔接
-            </li>
-            <li>
-              <strong>10 段均衡器</strong>
-              31 Hz–16 kHz，拖动平滑无爆音，带防削波
-            </li>
-            <li>
-              <strong>淡入淡出</strong>
-              播放、暂停与切歌时音量平滑渐变，时长可自定义
-            </li>
-            <li>
-              <strong>随机播放</strong>
-              按黄金比例摊开同一歌手的曲目，避免连续撞车
-            </li>
-            <li>
-              <strong>ReplayGain</strong>
-              按曲目或专辑标签统一响度
-            </li>
-            <li>
-              <strong>自动暂停</strong>
-              拔出耳机或蓝牙断开时自动暂停
-            </li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <section class="section-container" id="screenshots">
-      <div class="section-header">
-        <div class="section-eyebrow">SCREENSHOTS</div>
-        <h2 class="section-title">界面截图</h2>
-        <p class="section-subtitle">点击任意截图可查看大图。</p>
-      </div>
-
-      <div class="shots-grid">
-        <figure class="shot-card">
-          <button type="button" class="shot-trigger" data-lightbox-src="assets/img-metadata-table.webp" data-lightbox-caption="元数据页：全库标签大表，右侧检查器直接编辑标签、封面和歌词" aria-label="放大查看元数据页截图">
-            <img src="assets/img-metadata-table.webp" alt="元数据页" loading="lazy" decoding="async">
-          </button>
-          <figcaption>元数据页：全库标签大表，右侧检查器直接编辑标签、封面和歌词</figcaption>
-        </figure>
-        <figure class="shot-card">
-          <button type="button" class="shot-trigger" data-lightbox-src="assets/img-now-playing.webp" data-lightbox-caption="全屏播放：背景跟随封面主色，逐行歌词和波形进度条" aria-label="放大查看全屏播放截图">
-            <img src="assets/img-now-playing.webp" alt="全屏播放" loading="lazy" decoding="async">
-          </button>
-          <figcaption>全屏播放：背景跟随封面主色，逐行歌词和波形进度条</figcaption>
-        </figure>
-      </div>
-    </section>
-
-    <section class="section-container" id="download">
-      <div class="section-header">
-        <div class="section-eyebrow">DOWNLOAD</div>
-        <h2 class="section-title">下载</h2>
-        <p class="section-subtitle">开源免费，通过 GitHub Releases 分发，支持应用内自动更新。</p>
-      </div>
-
-      <div class="download-cards-grid">
-        <div class="download-card">
-          <div class="download-platform-header">
-            <div class="platform-icon-box" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
-                <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.36-.56.65-.96 1.7-0.84 2.72.99.08 1.96-.48 2.57-1.23z"/>
-              </svg>
+        <div class="bento-grid">
+          <article class="bento-card bento-span-2 card-accent">
+            <div class="card-head">
+              <div class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+              </div>
+              <div>
+                <div class="card-kicker">ONLINE MATCHING</div>
+                <h3 class="card-title">单曲与批量在线元数据自动匹配</h3>
+              </div>
             </div>
-            <div>
-              <h3 class="platform-name">macOS</h3>
-              <div class="platform-tag">Apple Silicon · macOS 12+</div>
+            <p class="card-desc">
+              内置多平台检索与智能打分排序，支持在「编辑元数据」弹窗内单曲搜索并一键回填标签、高清封面与歌词；也在「元数据」视图与多选右键菜单提供三步批量自动匹配（配置 → 预览微调 → 原子写盘），全程记录标签历史可随时撤销。
+            </p>
+            <div class="tag-row">
+              <span class="tag-pill tag-pill-accent">多源智能聚合</span>
+              <span class="tag-pill">QM</span>
+              <span class="tag-pill">NCM</span>
+              <span class="tag-pill">KGM</span>
+              <span class="tag-pill">KWM</span>
+              <span class="tag-pill">MusicBrainz</span>
+              <span class="tag-pill">时长校验</span>
+              <span class="tag-pill">仅补全空字段 / 覆盖</span>
+            </div>
+          </article>
+
+          <article class="bento-card">
+            <div class="card-head">
+              <div class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+              </div>
+              <div>
+                <div class="card-kicker">METADATA</div>
+                <h3 class="card-title">24 字段元数据大表</h3>
+              </div>
+            </div>
+            <p class="card-desc">
+              虚拟滚动支撑数万首曲目流畅浏览，列可显隐、拖宽与排序，右侧面板单选或批量编辑，原子写回不中断当前播放。
+            </p>
+            <ul class="mini-list">
+              <li><strong>乱码修复</strong>：自动识别 GBK / Big5 / Shift-JIS / EUC-KR 等误读文本</li>
+              <li><strong>模板批量重命名</strong>：如 <code>{track:02d} - {artist} - {title}</code>，联动同名 <code>.lrc</code> 与封面</li>
+              <li><strong>标签历史与导出</strong>：保留最近 30 批快照随时还原；支持批量导出歌词与转码封面</li>
+            </ul>
+          </article>
+
+          <article class="bento-card">
+            <div class="card-head">
+              <div class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="2" x2="6" y1="14" y2="14"/><line x1="10" x2="14" y1="8" y2="8"/><line x1="18" x2="22" y1="16" y2="16"/></svg>
+              </div>
+              <div>
+                <div class="card-kicker">AUDIO ENGINE</div>
+                <h3 class="card-title">发烧级播放引擎</h3>
+              </div>
+            </div>
+            <ul class="mini-list">
+              <li><strong>曲间无缝播放</strong>：自然播完前预载下一首，无停顿衔接</li>
+              <li><strong>10 段均衡器</strong>：31 Hz–16 kHz，拖动平滑无爆音，带防削波</li>
+              <li><strong>淡入淡出 &amp; ReplayGain</strong>：音量平滑渐变，按曲目或专辑统一响度</li>
+              <li><strong>黄金比例随机 &amp; 自动暂停</strong>：摊开同歌手曲目；拔耳机 / 断蓝牙自动暂停</li>
+            </ul>
+          </article>
+
+          <article class="bento-card">
+            <div class="card-head">
+              <div class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+              </div>
+              <div>
+                <div class="card-kicker">NOW PLAYING</div>
+                <h3 class="card-title">全屏沉浸播放与歌词</h3>
+              </div>
+            </div>
+            <ul class="mini-list">
+              <li><strong>动态背景与波形条</strong>：提取封面主色调平滑过渡，波形进度条精确拖拽跳转</li>
+              <li><strong>逐行歌词聚焦</strong>：支持同名 <code>.lrc</code> 与内嵌歌词，点击歌词行直接跳转</li>
+              <li><strong>单曲偏移微调</strong>：支持按单曲 ±30 秒独立调整歌词偏移并持久化记忆</li>
+            </ul>
+          </article>
+
+          <article class="bento-card">
+            <div class="card-head">
+              <div class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+              </div>
+              <div>
+                <div class="card-kicker">LIBRARY</div>
+                <h3 class="card-title">实时监听与智能歌单</h3>
+              </div>
+            </div>
+            <ul class="mini-list">
+              <li><strong>文件夹自动同步</strong>：监听外部增删与移动，文件移位后仍保留播放统计与歌单</li>
+              <li><strong>多维智能歌单</strong>：按标题、艺术家、专辑、流派、采样率等条件动态聚合</li>
+              <li><strong>便捷浏览</strong>：悬停序号直接播放，点专辑名直达专辑页，一键定位当前播放</li>
+            </ul>
+          </article>
+
+          <article class="bento-card bento-span-2">
+            <div class="card-head">
+              <div class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.001"/><path d="M10 8h.001"/><path d="M14 8h.001"/><path d="M18 8h.001"/><path d="M8 12h.001"/><path d="M12 12h.001"/><path d="M16 12h.001"/><path d="M7 16h10"/></svg>
+              </div>
+              <div>
+                <div class="card-kicker">DESKTOP EXPERIENCE</div>
+                <h3 class="card-title">键盘优先与深度系统集成</h3>
+              </div>
+            </div>
+            <div class="split-list">
+              <ul class="mini-list">
+                <li><strong>命令面板</strong>：<code>⌘K</code> / <code>Ctrl+K</code> 呼出，全键盘搜索曲目、切换页面与跳转设置</li>
+                <li><strong>全自定义快捷键</strong>：应用内与全局快捷键均可录制重绑，键位冲突即时提示</li>
+              </ul>
+              <ul class="mini-list">
+                <li><strong>外观与主题色</strong>：浅/深色跟随系统，主题色支持黑白、跟随封面或自定义取色，自由切换界面字体</li>
+                <li><strong>托盘、媒体键与自更新</strong>：菜单栏 / 系统托盘常驻，Windows 支持 SMTC 封面通知，应用内一键原地更新</li>
+              </ul>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="screenshots">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-eyebrow">INTERFACE</div>
+          <h2 class="section-title">界面预览</h2>
+          <p class="section-subtitle">点击任意截图可放大查看细节。</p>
+        </div>
+
+        <div class="shots-grid">
+          <figure class="shot-card">
+            <button type="button" class="shot-trigger" data-lightbox-src="assets/img-metadata-table.webp" data-lightbox-caption="元数据页：24 字段全库标签大表，支持在线自动匹配、乱码修复、模板重命名与右侧检查器编辑" aria-label="放大查看元数据页截图">
+              <img src="assets/img-metadata-table.webp" alt="元数据页" loading="lazy" decoding="async">
+            </button>
+            <figcaption>
+              <strong>元数据工作台</strong>
+              <span>24 字段标签大表与右侧检查器，支持批量修改、在线自动匹配与标签历史回滚</span>
+            </figcaption>
+          </figure>
+
+          <figure class="shot-card">
+            <button type="button" class="shot-trigger" data-lightbox-src="assets/img-now-playing.webp" data-lightbox-caption="全屏播放：背景跟随封面主色调平滑过渡，搭配逐行歌词与波形进度条" aria-label="放大查看全屏播放截图">
+              <img src="assets/img-now-playing.webp" alt="全屏播放" loading="lazy" decoding="async">
+            </button>
+            <figcaption>
+              <strong>全屏沉浸播放</strong>
+              <span>封面主色动态背景、波形进度条与可微调偏移的逐行歌词</span>
+            </figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="download">
+      <div class="container">
+        <div class="section-header">
+          <div class="section-eyebrow">DOWNLOAD</div>
+          <h2 class="section-title">下载 Zeo Player</h2>
+          <p class="section-subtitle">开源免费，通过 GitHub Releases 分发，支持应用内一键自更新。</p>
+        </div>
+
+        <div class="download-grid">
+          <div class="download-card">
+            <div class="platform-head">
+              <div class="platform-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.62-.75 1.04-1.8 0.92-2.85-.9.04-2 .6-2.65 1.36-.56.65-.96 1.7-0.84 2.72.99.08 1.96-.48 2.57-1.23z"/>
+                </svg>
+              </div>
+              <div>
+                <h3 class="platform-name">macOS</h3>
+                <div class="platform-meta">Apple Silicon · macOS 12+</div>
+              </div>
+            </div>
+            <p class="download-desc">AppKit 原生界面，集成菜单栏播放控制、Now Playing 与系统媒体键。</p>
+            <div class="download-actions">
+              <a href="https://github.com/subframe7536/zeo-player-nsh/releases/latest/download/ZeoPlayer-macOS.dmg" class="btn btn-primary btn-lg download-btn">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>下载 macOS 版 (.dmg)</span>
+              </a>
+              <a href="https://github.com/subframe7536/zeo-player-nsh/releases" target="_blank" rel="noopener noreferrer" class="download-sublink">前往 GitHub Releases 查看全部版本</a>
             </div>
           </div>
-          <p class="download-desc">AppKit 原生界面，支持菜单栏控制、Now Playing 和媒体键。</p>
-          <a href="https://github.com/subframe7536/zeo-player-nsh/releases/latest/download/ZeoPlayer-macOS.dmg" class="btn btn-primary btn-lg download-btn">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            <span>下载 macOS 版 (.dmg)</span>
-          </a>
-          <a href="https://github.com/subframe7536/zeo-player-nsh/releases" target="_blank" rel="noopener noreferrer" class="download-sublink">前往 GitHub Releases 查看全部版本</a>
-        </div>
 
-        <div class="download-card">
-          <div class="download-platform-header">
-            <div class="platform-icon-box" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
-                <path d="M3 5.45l7.55-1.03v7.33H3V5.45zm0 13.1l7.55 1.03v-7.33H3v6.3zm8.45 1.15L21 21.3V11.75H11.45v7.95zm0-15.4l9.55 1.6v7.95H11.45V4.3z"/>
-              </svg>
+          <div class="download-card">
+            <div class="platform-head">
+              <div class="platform-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                  <path d="M3 5.45l7.55-1.03v7.33H3V5.45zm0 13.1l7.55 1.03v-7.33H3v6.3zm8.45 1.15L21 21.3V11.75H11.45v7.95zm0-15.4l9.55 1.6v7.95H11.45V4.3z"/>
+                </svg>
+              </div>
+              <div>
+                <h3 class="platform-name">Windows</h3>
+                <div class="platform-meta">x64 · Windows 10 / 11</div>
+              </div>
             </div>
-            <div>
-              <h3 class="platform-name">Windows</h3>
-              <div class="platform-tag">x64 · Windows 10 / 11</div>
+            <p class="download-desc">Win32 + Direct2D 原生渲染，支持 SMTC 媒体通知封面与任务栏托盘控制。</p>
+            <div class="download-actions">
+              <a href="https://github.com/subframe7536/zeo-player-nsh/releases/latest/download/ZeoPlayer-Setup.exe" class="btn btn-primary btn-lg download-btn">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>下载 Windows 安装包 (.exe)</span>
+              </a>
+              <a href="https://github.com/subframe7536/zeo-player-nsh/releases" target="_blank" rel="noopener noreferrer" class="download-sublink">前往 GitHub Releases 获取便携压缩包</a>
             </div>
           </div>
-          <p class="download-desc">Win32 + Direct2D 原生界面，支持 SMTC 系统媒体通知和托盘控制。</p>
-          <a href="https://github.com/subframe7536/zeo-player-nsh/releases/latest/download/ZeoPlayer-Setup.exe" class="btn btn-primary btn-lg download-btn">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-            <span>下载 Windows 安装包 (.exe)</span>
-          </a>
-          <a href="https://github.com/subframe7536/zeo-player-nsh/releases" target="_blank" rel="noopener noreferrer" class="download-sublink">前往 GitHub Releases 获取便携压缩包</a>
+        </div>
+
+        <div class="formats-bar" aria-label="支持的音频格式">
+          <span class="formats-label">支持格式</span>
+          <span class="format-chip">MP3</span>
+          <span class="format-chip">FLAC</span>
+          <span class="format-chip">WAV</span>
+          <span class="format-chip">AIFF</span>
+          <span class="format-chip">M4A (AAC / ALAC)</span>
+          <span class="format-chip">AAC</span>
+          <span class="format-chip">OGG Vorbis</span>
         </div>
       </div>
-
-      <p class="download-note">
-        支持 MP3、FLAC、WAV、AIFF、M4A（AAC / ALAC）、AAC、OGG Vorbis。
-      </p>
     </section>
   </main>
 
   <footer class="footer">
-    <div class="footer-container">
-      <div class="footer-col-brand">
-        <div class="brand-group">
-          <img src="assets/icon.svg" alt="Zeo Player" width="24" height="24">
+    <div class="container footer-grid">
+      <div class="footer-brand">
+        <a href="#" class="brand">
+          <img src="assets/icon.svg" alt="Zeo Player" class="brand-logo" width="24" height="24">
           <span class="brand-name">Zeo Player</span>
-        </div>
-        <p class="footer-tagline">本地音乐播放器，开源免费。</p>
+        </a>
+        <p class="footer-tagline">纯 Rust 编写的本地音乐播放器，开源免费。</p>
       </div>
 
       <div class="footer-col">
@@ -281,7 +375,7 @@
       </div>
     </div>
 
-    <div class="footer-bottom">
+    <div class="container footer-bottom">
       <span>© 2026 Zeo Player</span>
       <span>Open Source · Local First</span>
     </div>
@@ -290,7 +384,7 @@
   <dialog class="lightbox" id="lightbox" aria-label="截图预览">
     <div class="lightbox-inner">
       <button type="button" class="lightbox-close" id="lightboxClose" aria-label="关闭预览">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
       </button>
       <img src="" alt="" id="lightboxImg" class="lightbox-img">
       <p class="lightbox-caption" id="lightboxCaption"></p>
@@ -299,6 +393,40 @@
 
   <script>
     (() => {
+      // 深浅色主题切换（默认跟随系统，手动切换后记忆）
+      const root = document.documentElement;
+      const toggleBtn = document.getElementById("themeToggle");
+      const media = window.matchMedia("(prefers-color-scheme: dark)");
+
+      const currentTheme = () => {
+        if (root.dataset.theme === "dark" || root.dataset.theme === "light") {
+          return root.dataset.theme;
+        }
+        return media.matches ? "dark" : "light";
+      };
+
+      const syncToggleLabel = () => {
+        if (!toggleBtn) return;
+        const isDark = currentTheme() === "dark";
+        const label = isDark ? "切换到浅色模式" : "切换到深色模式";
+        toggleBtn.setAttribute("title", label);
+        toggleBtn.setAttribute("aria-label", label);
+      };
+
+      if (toggleBtn) {
+        syncToggleLabel();
+        toggleBtn.addEventListener("click", () => {
+          const next = currentTheme() === "dark" ? "light" : "dark";
+          root.dataset.theme = next;
+          try {
+            localStorage.setItem("zeo-theme", next);
+          } catch (_) {}
+          syncToggleLabel();
+        });
+        media.addEventListener("change", syncToggleLabel);
+      }
+
+      // 截图大图预览
       const dialog = document.getElementById("lightbox");
       const img = document.getElementById("lightboxImg");
       const caption = document.getElementById("lightboxCaption");

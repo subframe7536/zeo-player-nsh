@@ -1,74 +1,61 @@
 # Zeo Player
 
-本地桌面音乐播放器，通过 [nsh](https://nsh.dev) 构建的原生应用，支持 macOS 和 Windows。
+纯 Rust 构建的本地桌面音乐播放器，基于 [NSH](https://nsh.dev) 原生渲染（macOS AppKit / Windows Win32 + Direct2D），无内嵌浏览器，无需登录账号。
 
-支持 MP3、FLAC、WAV、AIFF、M4A（AAC / ALAC）、AAC、OGG Vorbis。
+[官网](https://subframe7536.github.io/zeo-player-nsh/) · [下载最新版本](https://github.com/subframe7536/zeo-player-nsh/releases/latest)
 
-官网：https://subframe7536.github.io/zeo-player-nsh/
+支持格式：MP3、FLAC、WAV、AIFF、M4A（AAC / ALAC）、AAC、OGG Vorbis。
 
-## 功能
+## 主要功能
 
-**界面和系统**
+### 曲库与元数据
+- **24 字段元数据大表**：全库标签虚拟滚动浏览，支持筛选、排序、列显隐与拖宽，单选/批量编辑原子写盘
+- **在线元数据自动匹配**：内置 QM、NCM、KGM、KWM、MusicBrainz 与多源智能聚合，支持单曲搜索回填及批量自动匹配（含封面与歌词）
+- **批量治理工具**：按模板批量重命名（如 `{track:02d} - {artist} - {title}`，联动同名 `.lrc` 与封面）、自动修复编码乱码（GBK / Big5 / Shift-JIS / EUC-KR 等）、批量导出歌词/封面、外部导入 `.lrc`/`.txt` 歌词
+- **标签历史回滚**：保留最近 30 批写回快照（含封面），随时一键还原
+- **实时同步与智能歌单**：自动监听文件夹增删与移动（移动后保留播放记录与歌单）；支持多条件组合的智能歌单
 
-- 全屏播放页：背景跟随封面主色、波形进度条，歌词偏移可按单曲微调
-- `⌘K` / `Ctrl+K` 命令面板，键盘搜索曲目、跳转设置
-- 快捷键全部可重绑，冲突时给出提示；支持可配置的全局快捷键（窗口最小化到托盘也生效，默认不绑定）
-- 菜单栏 / 系统托盘常驻，macOS 图标旁显示当前曲名，Windows 支持 SMTC 媒体通知；关闭窗口（含 ⌘Q / Ctrl+Q）时选择最小化到托盘或退出，可勾选「记住选择」不再询问；窗口已在托盘时 ⌘Q / Dock「退出」直接退出
-- 根据封面自动切换主题色
-- 首次启动有全屏的欢迎页：添加音乐文件夹（可稍后再加，也可直接拖入）、选择主题色、功能一览；可在「设置 › 关于」或命令面板里重新查看
-- 启动时自动检查更新：发现新版本弹窗展示版本、更新说明与更新包大小，可一键下载安装（SHA-256 校验后原地替换）重启生效；自动检查在弹窗或「设置 › 关于」里可关
+### 播放与音质
+- **曲间无缝播放**：提前预载下一首，自然切歌零停顿
+- **10 段均衡器**：31 Hz–16 kHz，拖动平滑无爆音，带防削波保护
+- **听感细节**：自定义淡入淡出、黄金比例随机播放（避免同歌手扎堆）、ReplayGain 响度标准化、耳机拔出 / 蓝牙断开自动暂停
 
-**曲库和标签**
+### 界面与系统
+- **全屏播放页**：封面主色动态背景、波形进度条、逐行歌词聚焦与单曲偏移微调
+- **键盘优先**：`⌘K` / `Ctrl+K` 全局命令面板；应用内与全局快捷键全部可重绑并检测冲突
+- **外观定制**：浅色 / 深色跟随系统，主题色支持黑白、跟随封面或自定义取色，支持自由切换界面字体
+- **系统集成**：菜单栏 / 系统托盘常驻，macOS Now Playing / Windows SMTC 媒体控制，应用内一键检查并原地自更新
 
-- 元数据表格：24 个元数据字段，可批量修改，按文件名 / 标题 / 艺术家 / 专辑 / 标签筛选，列可显隐、拖宽、排序，右侧编辑面板宽度也可拖拽，数万首曲目滚动流畅
-- 选中一批曲目后工具栏可：按模板批量重命名，如 `{track:02d} - {artist} - {title}`（弹窗内设模板，带预设与占位符速查，改名效果即时预览；同名 `.lrc` 歌词与封面图自动联动改名，改名前整批检查冲突）；乱码修复先预览会修的字段再应用（尽力识别 GBK / Big5 / Shift-JIS 等被误读的文本，含歌词与注释，认不准的保持原样）
-- 批量面板还能：把内嵌歌词 / 封面导出成外部文件（同目录同名或另存文件夹按模板命名，歌词一律 UTF-8，可去时间戳 / 去空行，封面可转 JPEG / PNG / WebP）
-- 选中一首时，可点工具栏「显示列」旁的历史按钮打开「标签历史」，一键还原写回前的旧值（含封面）
-- 单选面板与「编辑元数据」弹窗可从 `.lrc` / `.txt` 文件导入歌词（自动识别 UTF-8 / GBK 等编码）
-- 在线元数据自动匹配：支持 QM、NCM、KGM、KWM、MusicBrainz 与多源智能聚合；「编辑元数据」弹窗内可单曲搜索并回填标签、封面与歌词；「元数据」视图工具栏与多选右键菜单支持批量自动匹配（配置 → 预览微调 → 原子写盘，可在标签历史中撤销）
-- 自动监听文件夹变动，外部增删、移动文件即时同步；文件移动后仍能识别，播放记录与歌单保留
-- 智能歌单：按标题、艺术家、专辑、标签、采样率等条件组合筛选
-- 音乐库列表：悬停序号直接点播放，点专辑名进专辑页，右下角按钮一键定位到正在播放的曲目
+## 下载
 
-**播放**
+前往 [GitHub Releases](https://github.com/subframe7536/zeo-player-nsh/releases/latest) 获取预编译安装包：
 
-- 10 段均衡器（31 Hz–16 kHz），拖动平滑无爆音，带防削波
-- 切换歌曲淡入淡出
-- 更优的播放队列随机算法
-- ReplayGain 音量标准化
-- 曲目行歌手名前的音质小标：HQ 绿、SQ 蓝、Hi-Res 黄（无损高规格），不占列宽
-- 拔出耳机或蓝牙断开时自动暂停
+- **macOS**：Apple Silicon，macOS 12+（`.dmg`）
+- **Windows**：x64，Windows 10 / 11（安装程序 `.exe` 或便携 `.zip`）
 
 ## 尚未支持
 
-- Opus 解码
-- 逐字歌词
-- Linux 版
+Opus 解码、逐字歌词、Linux 版本。
 
-## 开发
+## 本地开发
 
-GUI 基于 [NSH](https://nsh.dev)，需要最新 stable Rust，并安装跟踪 nightly 频道的 NSH CLI：
-
-macOS:
+需要最新稳定版 Rust（2024 edition）与 [NSH](https://nsh.dev) CLI（stable 频道）：
 
 ```sh
-curl -fsSL https://nsh.dev/install.sh | sh -s -- --nightly
-```
+# macOS
+curl -fsSL https://nsh.dev/install.sh | sh
 
-Windows:
-
-```sh
-$env:NSH_VERSION = 'nightly'
+# Windows (PowerShell)
 irm https://nsh.dev/install.ps1 | iex
 ```
 
-### 常用命令行
+常用命令：
 
 ```sh
-nsh run                                          # 开发运行
-nsh test                                         # 测试
-nsh package . --target macos                     # macOS .app
-nsh package . --target windows --icon resources/icon-windows.png
+nsh run                                                          # 开发运行
+nsh test                                                         # 运行测试
+nsh package . --target macos                                     # 打包 macOS .app
+nsh package . --target windows --icon resources/icon-windows.png # 打包 Windows 安装包
 ```
 
-改代码前请先读 [AGENTS.md](AGENTS.md)，包含目录结构与开发约定
+修改代码前请先阅读 [AGENTS.md](AGENTS.md) 了解架构分层与开发约定。
