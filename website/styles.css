@@ -40,7 +40,6 @@
   --shadow-primary: 0 4px 14px -2px rgba(5, 150, 105, 0.35);
 
   --bg-code: #eef5f1;
-  --bg-chip: rgba(255, 255, 255, 0.85);
   --bg-btn-sec: #ffffff;
   --bg-btn-sec-hover: #f1f5f3;
 
@@ -90,7 +89,6 @@
     --shadow-primary: 0 4px 18px -2px rgba(16, 185, 129, 0.35);
 
     --bg-code: rgba(255, 255, 255, 0.07);
-    --bg-chip: rgba(255, 255, 255, 0.04);
     --bg-btn-sec: rgba(255, 255, 255, 0.05);
     --bg-btn-sec-hover: rgba(255, 255, 255, 0.09);
   }
@@ -131,7 +129,6 @@
   --shadow-primary: 0 4px 18px -2px rgba(16, 185, 129, 0.35);
 
   --bg-code: rgba(255, 255, 255, 0.07);
-  --bg-chip: rgba(255, 255, 255, 0.04);
   --bg-btn-sec: rgba(255, 255, 255, 0.05);
   --bg-btn-sec-hover: rgba(255, 255, 255, 0.09);
 }
@@ -418,9 +415,9 @@ button:focus-visible {
 .hero-desc {
   font-size: 1.08rem;
   color: var(--text-muted);
-  max-width: 640px;
+  max-width: 620px;
   line-height: 1.75;
-  margin-bottom: 30px;
+  margin-bottom: 32px;
 }
 
 .hero-actions {
@@ -429,24 +426,7 @@ button:focus-visible {
   justify-content: center;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 28px;
-}
-
-.hero-highlights {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  margin-bottom: 44px;
-}
-
-.highlight-chip {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  background: var(--bg-chip);
-  border: 1px solid var(--border-subtle);
-  padding: 5px 12px;
-  border-radius: 9999px;
+  margin-bottom: 48px;
 }
 
 /* 截图外框 */
@@ -495,26 +475,17 @@ button:focus-visible {
   margin-bottom: 44px;
 }
 
-.section-eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: var(--accent-text);
-  margin-bottom: 10px;
-}
-
 .section-title {
   font-size: clamp(1.65rem, 3.8vw, 2.25rem);
   font-weight: 800;
   letter-spacing: -0.025em;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .section-subtitle {
   font-size: 1rem;
   color: var(--text-muted);
-  max-width: 560px;
+  max-width: 540px;
   margin: 0 auto;
 }
 
@@ -559,8 +530,8 @@ button:focus-visible {
 }
 
 .card-icon {
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--radius-md);
   background: var(--accent-soft);
   border: 1px solid var(--border-accent);
@@ -569,15 +540,6 @@ button:focus-visible {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-}
-
-.card-kicker {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--accent-text);
-  margin-bottom: 2px;
 }
 
 .card-title {
