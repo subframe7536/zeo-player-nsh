@@ -39,23 +39,15 @@ Opus 解码、逐字歌词、Linux 版本。
 
 ## 本地开发
 
-需要最新稳定版 Rust（2024 edition）与 [NSH](https://nsh.dev) CLI（stable 频道）：
-
-```sh
-# macOS
-curl -fsSL https://nsh.dev/install.sh | sh
-
-# Windows (PowerShell)
-irm https://nsh.dev/install.ps1 | iex
-```
+环境要求：最新稳定版 [Rust](https://rustup.rs)（2024 edition）与 [NSH CLI](https://nsh.dev)（stable 频道）。
 
 常用命令：
 
 ```sh
-nsh run                                                          # 开发运行
-nsh test                                                         # 运行测试
-nsh package . --target macos                                     # 打包 macOS .app
-nsh package . --target windows --icon resources/icon-windows.png # 打包 Windows 安装包
+nsh run                        # 开发运行
+nsh test                       # 运行测试
+nsh package . --target macos   # 打包 macOS .app
+nsh package . --target windows # 打包 Windows 安装包
 ```
 
 修改代码前请先阅读 [AGENTS.md](AGENTS.md) 了解架构分层与开发约定。
